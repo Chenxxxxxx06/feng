@@ -29,6 +29,12 @@ export interface SCADAPoint {
   gen_temperature_c: number | null;
   gearbox_temperature_c: number | null;
   pitch_angle_deg: number | null;
+  data_source?: string;
+  dataset_window?: 'recent' | 'historical_latest';
+  source_dataset?: string | null;
+  source_file?: string | null;
+  source_row?: number | null;
+  source_turbine_id?: string | null;
 }
 
 export interface Fault {

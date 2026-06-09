@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
 from app.database import get_db
-from app.models import BladeImage, NotificationConfig, DataSource, User, VibrationData
+from app.models import BladeImage, NotificationConfig, DataSource, SCADARecord, User, VibrationData
 from app.schemas import (
     ThresholdConfigRequest, ThresholdConfigResponse,
     DataSourceResponse, DataSourceTestRequest,
@@ -50,12 +50,13 @@ async def list_data_sources(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/data-sources/test")
-async def test_data_source(data: DataSourceTestRequest):
+async def test_data_source(data: DataSourceTestRequest, db: AsyncSession = Depends(get_db)):
     """Test connection to a data source."""
     src = data.source_type.lower()
     try:
         if src == "scada":
-            ok = scada_loader.is_real_data_available()
+            scada_count = await db.scalar(select(func.count()).select_from(SCADARecord))
+            ok = bool(scada_count) or scada_loader.is_real_data_available()
             set_source_status("scada", SourceStatus.CONNECTED if ok else SourceStatus.PARTIAL)
         elif src == "vibration":
             set_source_status("vibration", SourceStatus.DISCONNECTED)
@@ -80,18 +81,26 @@ async def test_data_source(data: DataSourceTestRequest):
 async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
     """Get current data pipeline status for all sources."""
     state = get_pipeline_state()
+    scada_count = await db.scalar(select(func.count()).select_from(SCADARecord))
     vibration_count = await db.scalar(select(func.count()).select_from(VibrationData))
     image_count = await db.scalar(select(func.count()).select_from(BladeImage))
+    scada_source_result = await db.execute(
+        select(DataSource)
+        .where(DataSource.source_type == "scada")
+        .order_by(DataSource.last_data_at.desc().nullslast())
+        .limit(1)
+    )
+    scada_source = scada_source_result.scalar_one_or_none()
 
     sources = [
         {
             "type": "scada",
             "name": "SCADA运行数据",
-            "status": state.scada.value,
-            "last_update": state.last_scada.isoformat() if state.last_scada else None,
-            "record_count": state.scada_records,
-            "real_data_available": scada_loader.is_real_data_available(),
-            "note": "CARE to Compare 数据集" if not scada_loader.is_real_data_available() else "CARE数据集已接入",
+            "status": "connected" if scada_count else "disconnected",
+            "last_update": scada_source.last_data_at.isoformat() if scada_source and scada_source.last_data_at else None,
+            "record_count": scada_count,
+            "real_data_available": bool(scada_count),
+            "note": f"主时间线数据已导入：{scada_source.name}" if scada_count and scada_source else "待导入 CARE to Compare 或现场SCADA数据",
         },
         {
             "type": "vibration",

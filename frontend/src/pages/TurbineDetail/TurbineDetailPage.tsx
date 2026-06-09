@@ -20,6 +20,8 @@ export default function TurbineDetailPage() {
   const [diagnosing, setDiagnosing] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const vibChartRef = useRef<HTMLDivElement>(null);
+  const scadaHistorical = scada.some((s) => s.dataset_window === 'historical_latest');
+  const scadaSourceDataset = scada.find((s) => s.source_dataset)?.source_dataset;
 
   useEffect(() => {
     if (!id) return;
@@ -196,9 +198,25 @@ export default function TurbineDetailPage() {
 
         {/* SCADA Chart */}
         <div className="bg-bg-card border border-border-default rounded-lg p-4">
-          <h3 className="text-sm font-medium mb-3">SCADA 实时数据曲线（近24小时）</h3>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium">
+              {scadaHistorical ? 'SCADA 历史数据集窗口' : 'SCADA 运行数据曲线（近24小时）'}
+            </h3>
+            {scada.length > 0 && (
+              <span className="text-[10px] text-text-muted">
+                {scadaSourceDataset || '真实数据集'} · {scadaHistorical ? '最新历史窗口' : '近期窗口'}
+              </span>
+            )}
+          </div>
           {scada.length > 0 ? (
-            <div ref={chartRef} style={{ height: 300 }} />
+            <>
+              {scadaHistorical && (
+                <p className="mb-2 text-[10px] text-text-muted">
+                  当前公开数据集不是实时采集流，系统展示的是导入记录中的最新历史时间片。
+                </p>
+              )}
+              <div ref={chartRef} style={{ height: 300 }} />
+            </>
           ) : (
             <div className="h-[300px] flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-4 text-xs text-text-muted">
               {scadaMissing ? '未导入真实 SCADA 数据，当前不展示模拟运行曲线。' : '加载中...'}
