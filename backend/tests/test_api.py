@@ -10,13 +10,13 @@ Tests cover:
 - AI services (summary, copilot)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
-from app.models import User, Turbine, Fault, WorkOrder, RULPrediction, BladeImage
+from app.models import User, Turbine, Fault, WorkOrder, RULPrediction, BladeImage, DataSource, SCADARecord
 from app.core.security import hash_password
 from app.api.diagnosis import _vibration_diagnosis
 
@@ -125,6 +125,42 @@ class TestTurbines:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
+
+    @pytest.mark.asyncio
+    async def test_turbine_scada_returns_historical_dataset_window(self, client: AsyncClient, auth_headers, test_turbine, db_session):
+        """Test imported historical SCADA data is returned with explicit provenance."""
+        old_ts = datetime.now(timezone.utc) - timedelta(days=30)
+        db_session.add(DataSource(
+            source_type="scada",
+            name="care_to_compare_v6",
+            status="connected",
+            last_connected_at=datetime.now(timezone.utc),
+            last_data_at=old_ts,
+            connection_params={"dataset_role": "primary_scada_timeline"},
+        ))
+        db_session.add(SCADARecord(
+            turbine_id=test_turbine.id,
+            timestamp=old_ts,
+            power_kw=1200.0,
+            wind_speed_ms=7.2,
+            rotor_rpm=11.5,
+            extra={
+                "source_dataset": "care_to_compare_v6",
+                "source_file": "C:/datasets/care/sample.csv",
+                "source_row": 2,
+                "source_turbine_id": "WT-01",
+            },
+        ))
+        await db_session.commit()
+
+        response = await client.get(f"/api/turbines/{test_turbine.id}/scada?hours=1", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["dataset_window"] == "historical_latest"
+        assert data[0]["data_source"] == "real_dataset"
+        assert data[0]["source_dataset"] == "care_to_compare_v6"
+        assert data[0]["source_row"] == 2
 
     @pytest.mark.asyncio
     async def test_turbine_health(self, client: AsyncClient, auth_headers, test_turbine):
@@ -367,6 +403,27 @@ class TestSettings:
         assert response.status_code == 200
         data = response.json()
         assert "sources" in data
+
+    @pytest.mark.asyncio
+    async def test_pipeline_status_counts_imported_scada_records(self, client: AsyncClient, auth_headers, test_turbine, db_session):
+        """Test pipeline status reads SCADA availability from imported DB records."""
+        ts = datetime.now(timezone.utc) - timedelta(days=1)
+        db_session.add(DataSource(
+            source_type="scada",
+            name="care_to_compare_v6",
+            status="connected",
+            last_connected_at=datetime.now(timezone.utc),
+            last_data_at=ts,
+        ))
+        db_session.add(SCADARecord(turbine_id=test_turbine.id, timestamp=ts, power_kw=900.0))
+        await db_session.commit()
+
+        response = await client.get("/api/settings/pipeline-status", headers=auth_headers)
+        assert response.status_code == 200
+        scada = next(item for item in response.json()["sources"] if item["type"] == "scada")
+        assert scada["record_count"] == 1
+        assert scada["real_data_available"] is True
+        assert scada["status"] == "connected"
 
 
 # ============================================================

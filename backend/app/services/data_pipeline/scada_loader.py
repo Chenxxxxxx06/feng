@@ -18,7 +18,7 @@ class RealSCADADatasetRequired(RuntimeError):
 
 class SCADALoader:
     def is_real_data_available(self) -> bool:
-        return (CARE_DIR / "wind_farm_A.csv").exists() or any(CARE_DIR.glob("*.csv"))
+        return any(SCADA_DIR.rglob("*.csv"))
 
     def generate_turbine_scada(self, *args, **kwargs) -> list[dict]:
         raise RealSCADADatasetRequired(

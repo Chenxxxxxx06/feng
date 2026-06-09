@@ -97,7 +97,9 @@ async def get_scada_data(
     if not source or source.status != "connected":
         return []
 
-    # Try DB first
+    # Try recent records first. Imported public datasets are often historical,
+    # so if no recent records exist, return the latest real dataset window and
+    # mark it explicitly in the response.
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     db_result = await db.execute(
         select(SCADARecord)
@@ -106,27 +108,48 @@ async def get_scada_data(
         .limit(hours * 6)
     )
     db_records = db_result.scalars().all()
+    dataset_window = "recent"
+
+    if not db_records:
+        latest_result = await db.execute(
+            select(SCADARecord)
+            .where(SCADARecord.turbine_id == turbine_id)
+            .order_by(SCADARecord.timestamp.desc())
+            .limit(hours * 6)
+        )
+        db_records = latest_result.scalars().all()
+        dataset_window = "historical_latest"
 
     if db_records:
         return [
-            {
-                "timestamp": r.timestamp.isoformat(),
-                "power_kw": r.power_kw,
-                "wind_speed_ms": r.wind_speed_ms,
-                "rotor_rpm": r.rotor_rpm,
-                "gen_temperature_c": r.gen_temperature_c,
-                "gearbox_temperature_c": r.gearbox_temperature_c,
-                "bearing_temperature_c": r.bearing_temperature_c,
-                "pitch_angle_deg": r.pitch_angle_deg,
-                "nacelle_direction_deg": r.nacelle_direction_deg,
-                "grid_frequency_hz": r.grid_frequency_hz,
-                "ambient_temp_c": r.ambient_temp_c,
-                "data_source": "database",
-            }
-            for r in db_records
+            _scada_response(r, dataset_window)
+            for r in reversed(db_records)
         ]
 
     return []
+
+
+def _scada_response(record, dataset_window: str) -> dict:
+    extra = dict(record.extra or {})
+    return {
+        "timestamp": record.timestamp.isoformat(),
+        "power_kw": record.power_kw,
+        "wind_speed_ms": record.wind_speed_ms,
+        "rotor_rpm": record.rotor_rpm,
+        "gen_temperature_c": record.gen_temperature_c,
+        "gearbox_temperature_c": record.gearbox_temperature_c,
+        "bearing_temperature_c": record.bearing_temperature_c,
+        "pitch_angle_deg": record.pitch_angle_deg,
+        "nacelle_direction_deg": record.nacelle_direction_deg,
+        "grid_frequency_hz": record.grid_frequency_hz,
+        "ambient_temp_c": record.ambient_temp_c,
+        "data_source": "real_dataset",
+        "dataset_window": dataset_window,
+        "source_dataset": extra.get("source_dataset"),
+        "source_file": extra.get("source_file"),
+        "source_row": extra.get("source_row"),
+        "source_turbine_id": extra.get("source_turbine_id"),
+    }
 
 
 @router.get("/{turbine_id}/health")

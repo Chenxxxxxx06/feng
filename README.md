@@ -113,10 +113,20 @@ npm run dev
 
 ### 6. 导入真实诊断数据
 
-诊断模块不生成模拟振动波形、叶片图像或业务标签。若未导入真实数据集，页面会显示缺失说明。
+系统不生成模拟 SCADA 曲线、振动波形、叶片图像或业务标签。若未导入真实数据集，页面会显示缺失说明。
+
+建议先导入 SCADA 主时间线，再导入振动和叶片图像诊断样本：
 
 ```bash
 cd backend
+
+# 导入公开或实测SCADA CSV，作为系统主时间线
+python -m scripts.import_real_datasets scada-csv ^
+  --path <真实SCADA CSV路径或目录> ^
+  --turbine-id 1 ^
+  --dataset-id care_to_compare_v6 ^
+  --source-doi 10.5281/zenodo.14857470 ^
+  --source-url https://zenodo.org/records/14857470
 
 # 导入公开或实测振动CSV/TXT
 python -m scripts.import_real_datasets vibration-csv ^
@@ -137,6 +147,8 @@ python -m scripts.import_real_datasets blade-yolo ^
 ```
 
 已整理的数据源候选见 `backend/data/real_dataset_sources.json`。下载和使用前应核对数据集页面的版本、许可证、样本质量和引用要求。
+
+数据整合原则见 `DATA_INTEGRATION_STRATEGY.md`。SCADA、振动、图像、气象和工单数据不强行伪造成同一台真实风机的完整历史；系统通过 `source_dataset`、`source_file`、`dataset_window` 等字段保留来源边界。
 
 ---
 
