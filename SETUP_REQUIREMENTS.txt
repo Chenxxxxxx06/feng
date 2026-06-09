@@ -1,0 +1,76 @@
+# 风调预顺 PHM系统 — 环境依赖与安装指南
+# ============================================================
+
+## 当前状态
+- Demo版本可通过 demo_server.py 直接运行（纯Python内置模块）
+- 前端 npm run dev 即可启动
+
+## 正式版部署需要的依赖
+
+### 1. Python 依赖 (3.10+)
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+requirements.txt 中需要的包（pip被代理拦截时需手动下载安装）:
+- fastapi, uvicorn[standard]        # Web框架
+- sqlalchemy, asyncpg, aiosqlite    # 数据库（正式用PostgreSQL，开发可用SQLite）
+- python-jose[cryptography], passlib[bcrypt]  # JWT认证
+- pydantic, pydantic-settings       # 数据校验
+- pandas, numpy, scipy              # 数据处理
+- scikit-learn, torch, ultralytics   # AI/ML模型
+- opencv-python, Pillow             # 图像处理
+- httpx, python-dotenv              # HTTP客户端/环境变量
+- aiosmtplib                        # 邮件发送
+- redis, celery                     # 缓存/任务队列(可选)
+- xarray, netCDF4                   # ERA5数据处理(可选)
+
+### 2. Node.js 依赖
+```bash
+cd frontend
+npm install
+```
+
+### 3. 数据库
+- PostgreSQL 14+  (推荐)
+- 或 SQLite (开发环境)
+
+### 4. 可选服务
+- Redis (缓存)
+- SMTP服务器 (邮件通知)
+- ERA5 CDS API Key (气象数据)
+- OpenAI/DeepSeek API Key (AI总结)
+
+### 5. 启动步骤
+```bash
+# 1. 启动数据库
+createdb fengdiao_phm
+
+# 2. 初始化数据
+cd backend
+python scripts/seed_data.py
+
+# 3. 启动后端
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 4. 启动前端 (另一个终端)
+cd frontend
+npm run dev
+
+# 5. 浏览器打开
+# http://localhost:5173
+# 登录: admin / admin123
+```
+
+### 6. 配置凭据
+参照 API_KEYS_PLACEHOLDER.txt 填入所有 chenxxxxxx 占位符
+
+### 7. Demo模式（无需数据库）
+```bash
+cd backend
+python demo_server.py   # 端口8000，纯内存数据
+
+cd frontend
+npm run dev             # 端口5173，自动proxy到8000
+```
