@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from PIL import Image, UnidentifiedImageError
 
 from app.database import get_db
 from app.models import Fault, FaultSignal, BladeImage, Turbine, VibrationData
@@ -137,6 +138,7 @@ async def get_vibration_data(
             payload["record_id"] = record.id
             payload["waveform_path"] = record.waveform_path
             payload["data_source"] = "real_dataset"
+            payload["diagnosis"] = _vibration_diagnosis(payload)
             return payload
 
     raise HTTPException(
@@ -202,13 +204,75 @@ def _image_url(image_path: str) -> str:
     return f"/data/{image_path}"
 
 
+def _dataset_id_from_path(image_path: str) -> str | None:
+    parts = image_path.replace("\\", "/").split("/")
+    if len(parts) >= 2 and parts[0] == "blade_images":
+        return parts[1]
+    if len(parts) >= 1:
+        return parts[0]
+    return None
+
+
+def _raw_bbox(image: BladeImage) -> dict:
+    return image.damage_bbox if isinstance(image.damage_bbox, dict) else {}
+
+
+def _bbox_geometry(raw_bbox: dict) -> dict | None:
+    if all(k in raw_bbox for k in ("x", "y", "w", "h")):
+        return {
+            "x": int(raw_bbox["x"]),
+            "y": int(raw_bbox["y"]),
+            "w": int(raw_bbox["w"]),
+            "h": int(raw_bbox["h"]),
+        }
+    return None
+
+
+def _image_file_info(image_path: str) -> dict:
+    path = DATA_DIR / image_path
+    if not path.exists():
+        return {"file_exists": False, "resolution": None, "width": None, "height": None}
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+        return {
+            "file_exists": True,
+            "resolution": f"{width}x{height}",
+            "width": width,
+            "height": height,
+        }
+    except (OSError, UnidentifiedImageError):
+        return {"file_exists": False, "resolution": None, "width": None, "height": None}
+
+
+def _bbox_status(raw_bbox: dict, file_info: dict) -> str:
+    geometry = _bbox_geometry(raw_bbox)
+    if not geometry:
+        return "not_available"
+    if geometry["w"] <= 0 or geometry["h"] <= 0:
+        return "invalid_geometry"
+    width = file_info.get("width") or raw_bbox.get("image_width")
+    height = file_info.get("height") or raw_bbox.get("image_height")
+    if width and height:
+        inside = (
+            0 <= geometry["x"] < width
+            and 0 <= geometry["y"] < height
+            and geometry["x"] + geometry["w"] <= width
+            and geometry["y"] + geometry["h"] <= height
+        )
+        return "valid" if inside else "out_of_bounds"
+    return "unchecked_no_resolution"
+
+
 def _damage_label(damage_type: str | None) -> str:
     return DAMAGE_LABELS.get(damage_type or "no_damage", damage_type or "未检出损伤")
 
 
-def _damage_severity(damage_type: str | None, confidence: float) -> str:
+def _damage_severity(damage_type: str | None, confidence: float | None) -> str:
     if not damage_type or damage_type == "no_damage":
         return "normal"
+    if confidence is None:
+        return "requires_review"
     if damage_type in {"lightning_damage", "crack"} and confidence >= 0.85:
         return "high"
     if confidence >= 0.8:
@@ -229,17 +293,41 @@ def _damage_recommendation(damage_type: str | None) -> str:
 
 
 def _image_quality(image: BladeImage) -> dict:
+    raw_bbox = _raw_bbox(image)
+    file_info = _image_file_info(image.image_path)
+    bbox_status = _bbox_status(raw_bbox, file_info)
+    if not file_info["file_exists"]:
+        quality_grade = "missing_file"
+        note = "数据库存在图像记录，但磁盘上的真实图片文件未找到，需重新导入数据集。"
+    elif bbox_status in {"invalid_geometry", "out_of_bounds"}:
+        quality_grade = "needs_review"
+        note = "图像文件存在，但标注框几何校验未通过，需要回到原始数据集核对。"
+    elif image.diagnosis_confidence is None:
+        quality_grade = "usable_annotation"
+        note = "图像文件和公开标注可用；该标注未提供模型置信度。"
+    else:
+        quality_grade = "usable_model_output"
+        note = "图像文件、标注框和模型置信度字段均来自导入记录。"
+
     return {
-        "quality_grade": "A" if image.diagnosis_confidence and image.diagnosis_confidence >= 0.9 else "B",
-        "resolution": "800x450",
-        "bbox_validated": image.damage_bbox is None or all(k in image.damage_bbox for k in ("x", "y", "w", "h")),
-        "label_source": "public_dataset_annotation",
-        "data_quality_note": "图像来自公开数据集导入记录，包含检测框、置信度和处置建议。",
+        "quality_grade": quality_grade,
+        "resolution": file_info["resolution"],
+        "file_exists": file_info["file_exists"],
+        "bbox_status": bbox_status,
+        "bbox_validated": bbox_status == "valid" if _bbox_geometry(raw_bbox) else None,
+        "label_source": raw_bbox.get("label_source", "not_recorded"),
+        "source_dataset": raw_bbox.get("source_dataset") or _dataset_id_from_path(image.image_path),
+        "source_file": raw_bbox.get("source_file") or image.image_path,
+        "confidence_source": "model_or_dataset_score" if image.diagnosis_confidence is not None else "not_available_in_public_annotation",
+        "data_quality_note": note,
     }
 
 
 def _blade_image_response(image: BladeImage) -> dict:
     damage_type = image.diagnosis_type or "no_damage"
+    raw_bbox = _raw_bbox(image)
+    bbox = _bbox_geometry(raw_bbox)
+    confidence = image.diagnosis_confidence
     return {
         "id": image.id,
         "turbine_id": image.turbine_id,
@@ -247,12 +335,12 @@ def _blade_image_response(image: BladeImage) -> dict:
         "image_url": _image_url(image.image_path),
         "view": "叶片巡检",
         "timestamp": image.timestamp.isoformat(),
-        "has_damage": damage_type != "no_damage",
+        "has_damage": damage_type not in {"no_damage", "unknown"},
         "damage_type": damage_type,
         "damage_label": _damage_label(damage_type),
-        "confidence": image.diagnosis_confidence or 0.0,
-        "damage_bbox": image.damage_bbox,
-        "damage_severity": _damage_severity(damage_type, image.diagnosis_confidence or 0.0),
+        "confidence": confidence,
+        "damage_bbox": bbox,
+        "damage_severity": _damage_severity(damage_type, confidence),
         "recommended_action": _damage_recommendation(damage_type),
         "quality": _image_quality(image),
         "data_source": "real_dataset",
@@ -262,15 +350,26 @@ def _blade_image_response(image: BladeImage) -> dict:
 def _blade_diagnosis_response(image: BladeImage) -> BladeDiagnosisResponse:
     item = _blade_image_response(image)
     evidence = [
-        f"图像质量等级={item['quality']['quality_grade']}",
-        f"模型置信度={item['confidence']:.1%}",
-        "检测框通过边界校验" if item["quality"]["bbox_validated"] else "检测框需人工复核",
+        f"数据集={item['quality'].get('source_dataset') or '未记录'}",
+        f"标注来源={item['quality'].get('label_source') or '未记录'}",
+        f"图像质量状态={item['quality']['quality_grade']}",
     ]
+    if item["quality"].get("resolution"):
+        evidence.append(f"真实图像分辨率={item['quality']['resolution']}")
+    if item["confidence"] is None:
+        evidence.append("公开标注未提供模型置信度")
+    else:
+        evidence.append(f"置信度字段={item['confidence']:.1%}")
     if item["damage_bbox"]:
         evidence.append(
             f"检测区域 x={item['damage_bbox']['x']}, y={item['damage_bbox']['y']}, "
             f"w={item['damage_bbox']['w']}, h={item['damage_bbox']['h']}"
         )
+        evidence.append(
+            "检测框通过边界校验" if item["quality"]["bbox_validated"] else "检测框需人工复核"
+        )
+    else:
+        evidence.append("该记录未提供检测框几何信息")
 
     return BladeDiagnosisResponse(
         turbine_id=image.turbine_id,
@@ -284,3 +383,51 @@ def _blade_diagnosis_response(image: BladeImage) -> BladeDiagnosisResponse:
         evidence=evidence,
         quality=item["quality"],
     )
+
+
+def _vibration_diagnosis(payload: dict) -> dict:
+    fault_info = payload.get("fault_info") or {}
+    quality = payload.get("quality") or {}
+    peaks = payload.get("peak_frequencies") or []
+    fault_detected = bool(payload.get("fault_detected"))
+    label = fault_info.get("type") or quality.get("source_label")
+    label_source = fault_info.get("label_source") or quality.get("label_source") or "not_recorded"
+
+    evidence = [
+        f"数据集={quality.get('source_dataset') or '未记录'}",
+        f"源文件={quality.get('source_file') or '未记录'}",
+        f"样本数={payload.get('sample_count', '未记录')}",
+        f"采样率={payload.get('sample_rate_hz', '未记录')} Hz",
+    ]
+    if quality.get("source_channel"):
+        evidence.append(f"通道={quality['source_channel']}")
+    if quality.get("completeness_pct") is not None:
+        evidence.append(f"完整率={quality['completeness_pct']}%")
+    if payload.get("rms") is not None:
+        evidence.append(f"RMS={payload['rms']}")
+    if peaks:
+        top = peaks[0]
+        evidence.append(f"主峰频率={top.get('frequency_hz')} Hz，幅值={top.get('amplitude')}")
+    if label:
+        evidence.append(f"源数据标签={label}，标签来源={label_source}")
+    else:
+        evidence.append("源数据未提供明确故障标签")
+
+    if fault_detected:
+        status = "source_labeled_fault"
+        summary = f"导入记录标记为故障样本：{label or '未命名故障'}。"
+        action = "将该样本作为演示诊断证据使用；工程决策前需结合现场工况、传感器位置和人工复核。"
+    else:
+        status = "source_labeled_normal"
+        summary = "导入记录标记为健康或正常样本。"
+        action = "可作为健康基线样本展示；不应据此推断现场风机当前无故障。"
+
+    return {
+        "status": status,
+        "summary": summary,
+        "label": label,
+        "label_source": label_source,
+        "confidence": None,
+        "evidence": evidence,
+        "recommended_action": action,
+    }

@@ -2,7 +2,8 @@
 # ============================================================
 
 ## 当前状态
-- Demo版本可通过 demo_server.py 直接运行（纯Python内置模块）
+- 旧版 demo_server.py 已停用，因为它会生成内存模拟业务数据
+- 当前演示必须运行 FastAPI 后端，并通过公开或实测数据集导入业务数据
 - 前端 npm run dev 即可启动
 
 ## 正式版部署需要的依赖
@@ -66,11 +67,11 @@ npm run dev
 ### 6. 配置凭据
 参照 API_KEYS_PLACEHOLDER.txt 填入所有 chenxxxxxx 占位符
 
-### 7. Demo模式（无需数据库）
+### 7. 真实数据导入
 ```bash
 cd backend
-python demo_server.py   # 端口8000，纯内存数据
-
-cd frontend
-npm run dev             # 端口5173，自动proxy到8000
+python -m scripts.import_real_datasets vibration-csv --path <真实振动CSV或TXT路径> --turbine-id 1 --dataset-id <数据集ID> --label <源数据标签>
+python -m scripts.import_real_datasets blade-yolo --dataset-dir <真实叶片图像YOLO目录> --turbine-id 1 --dataset-id <数据集ID> --classes crack,erosion,delamination --require-label
 ```
+
+导入脚本只读取已下载的公开或实测数据文件，不生成振动波形、叶片图片或业务标签。

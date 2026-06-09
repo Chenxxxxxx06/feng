@@ -51,19 +51,48 @@ def _parse_classes(classes: str | None, names_file: str | None) -> list[str]:
     return ["damage"]
 
 
-def _read_yolo_label(label_path: Path, width: int, height: int, class_names: list[str]) -> tuple[str, dict] | tuple[None, None]:
+def _read_yolo_label(
+    label_path: Path,
+    width: int,
+    height: int,
+    class_names: list[str],
+    dataset_id: str,
+    source_file: str,
+    source_doi: str | None,
+    source_url: str | None,
+    source_license: str | None,
+) -> tuple[str, dict] | tuple[None, dict]:
+    metadata = {
+        "label_source": "YOLO_public_dataset",
+        "source_dataset": dataset_id,
+        "source_file": source_file,
+        "source_doi": source_doi,
+        "source_url": source_url,
+        "source_license": source_license,
+        "image_width": width,
+        "image_height": height,
+    }
     if not label_path.exists():
-        return None, None
+        metadata["label_source"] = "label_file_not_found"
+        return None, metadata
     lines = [line.strip() for line in label_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not lines:
-        return "no_damage", None
+        metadata["label_source"] = "YOLO_empty_label_file"
+        return "no_damage", metadata
 
-    parts = lines[0].split()
-    if len(parts) < 5:
-        raise ValueError(f"Invalid YOLO label: {label_path}")
+    boxes = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 5:
+            raise ValueError(f"Invalid YOLO label: {label_path}")
 
-    cls_idx = int(float(parts[0]))
-    x_center, y_center, box_w, box_h = map(float, parts[1:5])
+        cls_idx = int(float(parts[0]))
+        x_center, y_center, box_w, box_h = map(float, parts[1:5])
+        if not all(0 <= v <= 1 for v in (x_center, y_center, box_w, box_h)):
+            raise ValueError(f"YOLO label coordinates out of range: {label_path}")
+        boxes.append((cls_idx, x_center, y_center, box_w, box_h))
+
+    cls_idx, x_center, y_center, box_w, box_h = max(boxes, key=lambda item: item[3] * item[4])
     x = max(0, int((x_center - box_w / 2) * width))
     y = max(0, int((y_center - box_h / 2) * height))
     w = min(width - x, int(box_w * width))
@@ -75,8 +104,18 @@ def _read_yolo_label(label_path: Path, width: int, height: int, class_names: lis
         "w": w,
         "h": h,
         "label_source": "YOLO_public_dataset",
+        "source_dataset": dataset_id,
+        "source_file": source_file,
+        "source_doi": source_doi,
+        "source_url": source_url,
+        "source_license": source_license,
         "image_width": width,
         "image_height": height,
+        "object_count": len(boxes),
+        "all_labels": [
+            class_names[idx] if idx < len(class_names) else f"class_{idx}"
+            for idx, *_ in boxes
+        ],
     }
 
 
@@ -101,12 +140,23 @@ async def import_blade_yolo(args: argparse.Namespace) -> None:
                     if width < args.min_width or height < args.min_height:
                         skipped += 1
                         continue
-                damage_type, bbox = _read_yolo_label(label_path, width, height, class_names)
+                dest = target_dir / image_path.name
+                source_file = str(image_path)
+                damage_type, bbox = _read_yolo_label(
+                    label_path,
+                    width,
+                    height,
+                    class_names,
+                    args.dataset_id,
+                    source_file,
+                    args.source_doi,
+                    args.source_url,
+                    args.source_license,
+                )
                 if damage_type is None and args.require_label:
                     skipped += 1
                     continue
 
-                dest = target_dir / image_path.name
                 shutil.copy2(image_path, dest)
                 db.add(BladeImage(
                     turbine_id=args.turbine_id,
@@ -136,18 +186,26 @@ async def import_blade_yolo(args: argparse.Namespace) -> None:
     }, ensure_ascii=False, indent=2))
 
 
-def _read_numeric_series(path: Path) -> np.ndarray:
+def _read_numeric_series(path: Path) -> tuple[np.ndarray, float, str]:
     if path.suffix.lower() in {".csv", ".txt"}:
-        df = pd.read_csv(path)
+        try:
+            df = pd.read_csv(path)
+        except UnicodeDecodeError:
+            df = pd.read_csv(path, encoding="latin1")
+        numeric = df.select_dtypes(include=["number"])
+        if numeric.empty:
+            df = pd.read_csv(path, sep=None, engine="python", header=None)
+            numeric = df.select_dtypes(include=["number"])
     else:
         raise ValueError(f"Unsupported vibration file type: {path.suffix}")
-    numeric = df.select_dtypes(include=["number"])
     if numeric.empty:
         raise ValueError("No numeric vibration columns found")
-    series = numeric.iloc[:, 0].dropna().to_numpy(dtype=float)
+    raw_series = numeric.iloc[:, 0]
+    series = raw_series.dropna().to_numpy(dtype=float)
     if series.size == 0:
         raise ValueError("Empty vibration series")
-    return series
+    completeness_pct = round(float(series.size / len(raw_series) * 100), 2) if len(raw_series) else 0.0
+    return series, completeness_pct, str(raw_series.name)
 
 
 def _spectrum(series: np.ndarray, sample_rate: int) -> list[dict]:
@@ -174,7 +232,7 @@ async def import_vibration_csv(args: argparse.Namespace) -> None:
     async with async_session() as db:
         for path in paths:
             try:
-                series = _read_numeric_series(path)
+                series, completeness_pct, channel_name = _read_numeric_series(path)
                 if series.size < args.min_samples:
                     skipped += 1
                     continue
@@ -191,12 +249,20 @@ async def import_vibration_csv(args: argparse.Namespace) -> None:
                     "waveform": [round(float(v), 6) for v in series[: args.max_display_samples]],
                     "peak_frequencies": peaks,
                     "fault_detected": args.label.lower() not in {"healthy", "normal", "no_fault"},
-                    "fault_info": {"type": args.label, "label_source": "public_dataset_label"},
+                    "fault_info": {
+                        "type": args.label,
+                        "label_source": args.label_source,
+                    },
                     "quality": {
                         "source_dataset": args.dataset_id,
                         "source_file": str(path),
-                        "label_source": "public_dataset_label",
-                        "completeness_pct": 100.0,
+                        "source_channel": channel_name,
+                        "source_doi": args.source_doi,
+                        "source_url": args.source_url,
+                        "source_license": args.source_license,
+                        "source_label": args.label,
+                        "label_source": args.label_source,
+                        "completeness_pct": completeness_pct,
                     },
                     "data_source": "real_dataset",
                 }
@@ -239,6 +305,9 @@ def build_parser() -> argparse.ArgumentParser:
     blade.add_argument("--turbine-id", type=int, required=True)
     blade.add_argument("--classes")
     blade.add_argument("--names-file")
+    blade.add_argument("--source-doi")
+    blade.add_argument("--source-url")
+    blade.add_argument("--source-license")
     blade.add_argument("--min-width", type=int, default=320)
     blade.add_argument("--min-height", type=int, default=240)
     blade.add_argument("--require-label", action="store_true")
@@ -249,6 +318,10 @@ def build_parser() -> argparse.ArgumentParser:
     vib.add_argument("--turbine-id", type=int, required=True)
     vib.add_argument("--component", default="gearbox_high_speed")
     vib.add_argument("--label", default="healthy")
+    vib.add_argument("--label-source", default="public_dataset_label")
+    vib.add_argument("--source-doi")
+    vib.add_argument("--source-url")
+    vib.add_argument("--source-license")
     vib.add_argument("--sample-rate", type=int, default=10240)
     vib.add_argument("--min-samples", type=int, default=1024)
     vib.add_argument("--max-display-samples", type=int, default=2048)

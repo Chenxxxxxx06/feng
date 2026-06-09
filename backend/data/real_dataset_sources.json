@@ -41,18 +41,17 @@
   ],
   "scada": [
     {
-      "id": "care_to_compare",
-      "name": "Wind Turbine SCADA Data For Early Fault Detection / CARE to Compare",
+      "id": "care_to_compare_v6",
+      "name": "CARE to Compare - Wind Turbine SCADA Data For Early Fault Detection",
       "publisher": "Fraunhofer IEE / Zenodo",
-      "doi": "10.5281/zenodo.14006163",
-      "landing_page": "https://zenodo.org/records/14006163",
+      "doi": "10.5281/zenodo.14857470",
+      "landing_page": "https://zenodo.org/records/14857470",
       "license": "Creative Commons Attribution 4.0 International",
       "download_urls": [
-        "https://zenodo.org/api/records/14006163/files-archive"
+        "https://zenodo.org/api/records/14857470/files-archive"
       ],
-      "download_size_bytes": {
-        "CARE_To_Compare.zip": 5500000000
-      },
+      "verified_on": "2026-06-09",
+      "quality_note": "Use version 6 or newer. The Zenodo landing page states that the second version contained erroneous values and that data were updated in February 2025.",
       "quality_rules": [
         "use original downloaded CSV files only",
         "preserve source filename and DOI",

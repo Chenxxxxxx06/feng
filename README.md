@@ -16,7 +16,7 @@
 ### 核心特性
 
 - 🗺️ **风场地图监控** - 陕西省风场可视化，实时风机状态展示
-- 🔍 **智能故障诊断** - CV叶片检测、振动分析、故障根因分析
+- 🔍 **故障诊断** - 真实数据集叶片标注展示、振动样本分析、故障根因分析
 - 📈 **预测性维护** - RUL剩余寿命预测、维护成本对比
 - 📋 **工单管理** - 全生命周期工单流转、邮件通知
 - 🤖 **AI助手** - Copilot悬浮窗、智能问答、页面感知
@@ -110,6 +110,33 @@ npm run dev
 1. 打开 http://localhost:5173
 2. 注册新账号或使用默认账号登录
 3. 开始使用系统
+
+### 6. 导入真实诊断数据
+
+诊断模块不生成模拟振动波形、叶片图像或业务标签。若未导入真实数据集，页面会显示缺失说明。
+
+```bash
+cd backend
+
+# 导入公开或实测振动CSV/TXT
+python -m scripts.import_real_datasets vibration-csv ^
+  --path <真实振动CSV或TXT路径> ^
+  --turbine-id 1 ^
+  --dataset-id <数据集ID> ^
+  --label <源数据标签> ^
+  --source-doi <DOI或留空> ^
+  --source-url <数据集页面或留空>
+
+# 导入真实叶片图像和YOLO标注
+python -m scripts.import_real_datasets blade-yolo ^
+  --dataset-dir <真实叶片图像YOLO目录> ^
+  --turbine-id 1 ^
+  --dataset-id <数据集ID> ^
+  --classes crack,erosion,delamination ^
+  --require-label
+```
+
+已整理的数据源候选见 `backend/data/real_dataset_sources.json`。下载和使用前应核对数据集页面的版本、许可证、样本质量和引用要求。
 
 ---
 
