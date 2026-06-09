@@ -36,9 +36,11 @@
 3. 振动、图像数据若与 SCADA 来源不同，只能作为诊断样本库，不直接证明某台风机在某时刻发生同一故障。
 4. 缺失字段保持为空；不得用常数、随机数或模型想象结果补齐。
 5. 工单和维修成本应由系统操作沉淀；没有真实记录时，只能显示“暂无数据”或“待积累”。
+6. 表格数据正式入库前先运行 `--dry-run`，检查字段映射、有效时间戳比例、缺失传感器列和预计导入行数。
 
 ## 当前落地
 
+- `scripts.import_real_datasets scada-csv --dry-run`：预检真实 SCADA CSV，输出字段映射、时间范围、有效时间戳比例和质量门禁结果，不写数据库。
 - `scripts.import_real_datasets scada-csv`：导入真实 SCADA CSV，记录字段映射和来源信息。
 - `scripts.import_real_datasets vibration-csv`：导入真实振动 CSV/TXT，记录源标签和质量信息。
 - `scripts.import_real_datasets blade-yolo`：导入真实叶片图片和 YOLO 标注，保留图片尺寸、标注来源和数据集信息。

@@ -70,9 +70,10 @@ npm run dev
 ### 7. 真实数据导入
 ```bash
 cd backend
+python -m scripts.import_real_datasets scada-csv --path <真实SCADA CSV路径或目录> --turbine-id 1 --dataset-id care_to_compare_v6 --source-doi 10.5281/zenodo.14857470 --source-url https://zenodo.org/records/14857470 --dry-run
 python -m scripts.import_real_datasets scada-csv --path <真实SCADA CSV路径或目录> --turbine-id 1 --dataset-id care_to_compare_v6 --source-doi 10.5281/zenodo.14857470 --source-url https://zenodo.org/records/14857470
 python -m scripts.import_real_datasets vibration-csv --path <真实振动CSV或TXT路径> --turbine-id 1 --dataset-id <数据集ID> --label <源数据标签>
 python -m scripts.import_real_datasets blade-yolo --dataset-dir <真实叶片图像YOLO目录> --turbine-id 1 --dataset-id <数据集ID> --classes crack,erosion,delamination --require-label
 ```
 
-导入脚本只读取已下载的公开或实测数据文件，不生成 SCADA 曲线、振动波形、叶片图片或业务标签。数据整合原则见 DATA_INTEGRATION_STRATEGY.md。
+导入脚本只读取已下载的公开或实测数据文件，不生成 SCADA 曲线、振动波形、叶片图片或业务标签。`--dry-run` 只预检、不写库。数据整合原则见 DATA_INTEGRATION_STRATEGY.md。
