@@ -9,6 +9,7 @@ export default function TurbineDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [turbine, setTurbine] = useState<TurbineDetail | null>(null);
   const [scada, setScada] = useState<SCADAPoint[]>([]);
+  const [scadaMissing, setScadaMissing] = useState(false);
   const [wind, setWind] = useState<Record<string, any> | null>(null);
   const [windMissing, setWindMissing] = useState(false);
   const [faults, setFaults] = useState<Fault[]>([]);
@@ -23,7 +24,9 @@ export default function TurbineDetailPage() {
   useEffect(() => {
     if (!id) return;
     api.get(`/turbines/${id}`).then(({ data }) => setTurbine(data));
-    api.get(`/turbines/${id}/scada?hours=24`).then(({ data }) => setScada(data));
+    api.get(`/turbines/${id}/scada?hours=24`)
+      .then(({ data }) => { setScada(data); setScadaMissing(data.length === 0); })
+      .catch(() => { setScada([]); setScadaMissing(true); });
     api.get(`/turbines/${id}/wind`)
       .then(({ data }) => { setWind(data); setWindMissing(false); })
       .catch(() => { setWind(null); setWindMissing(true); });
@@ -102,7 +105,7 @@ export default function TurbineDetailPage() {
 
         {/* Blade Image Diagnosis Section */}
         <div className="bg-bg-card border border-border-default rounded-lg p-4">
-          <h3 className="text-sm font-medium mb-3">🔍 叶片图像诊断</h3>
+          <h3 className="text-sm font-medium mb-3">叶片图像诊断</h3>
           <div className="flex gap-4">
             {/* Left: Image grid */}
             <div className="flex-1">
@@ -125,6 +128,7 @@ export default function TurbineDetailPage() {
                       <p className="text-[10px] text-text-secondary">{img.view || '叶片图像'}</p>
                       <p className="text-[10px] text-text-muted">#{i + 1} · {new Date(img.timestamp).toLocaleDateString('zh-CN')}</p>
                       {img.has_damage && <p className="text-[10px] text-accent-red mt-1">检测到损伤</p>}
+                      {img.confidence == null && <p className="text-[10px] text-text-muted mt-1">公开标注无置信度</p>}
                     </div>
                   </button>
                 ))}
@@ -139,19 +143,31 @@ export default function TurbineDetailPage() {
 
             {/* Right: Diagnosis Result */}
             <div className="w-64 border border-border-default rounded-lg p-3 bg-bg-secondary">
-              <h4 className="text-xs font-medium mb-2">AI诊断结果</h4>
+              <h4 className="text-xs font-medium mb-2">数据集标注诊断</h4>
               {diagnosing ? (
                 <p className="text-xs text-text-muted animate-pulse">分析中...</p>
               ) : diagnosisResult ? (
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-text-muted">损伤类型</span>
-                    <span className="text-accent-yellow font-medium">{diagnosisResult.damage_type === 'crack' ? '裂纹' : diagnosisResult.damage_type}</span>
+                    <span className="text-accent-yellow font-medium">{diagnosisResult.damage_type}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-muted">置信度</span>
                     <span className="font-mono text-accent-green">{diagnosisResult.confidence == null ? '标注数据无模型置信度' : `${(diagnosisResult.confidence * 100).toFixed(1)}%`}</span>
                   </div>
+                  {diagnosisResult.quality && (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-text-muted">数据集</span>
+                        <span className="font-mono text-text-secondary truncate max-w-[120px]">{diagnosisResult.quality.source_dataset || '未记录'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-text-muted">分辨率</span>
+                        <span className="font-mono text-text-secondary">{diagnosisResult.quality.resolution || '未读取'}</span>
+                      </div>
+                    </>
+                  )}
                   {diagnosisResult.damage_bbox && (
                     <div className="flex justify-between">
                       <span className="text-text-muted">损伤位置</span>
@@ -162,6 +178,14 @@ export default function TurbineDetailPage() {
                     <p className="text-accent-yellow mb-1">建议:</p>
                     <p className="text-text-secondary">{diagnosisResult.recommended_action || '根据公开数据集标注结果安排人工复核。'}</p>
                   </div>
+                  {diagnosisResult.evidence?.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <p className="text-[10px] text-text-muted">诊断依据</p>
+                      {diagnosisResult.evidence.slice(0, 4).map((item: string) => (
+                        <p key={item} className="text-[10px] text-text-secondary leading-relaxed">· {item}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-[10px] text-text-muted">点击左侧图像开始诊断</p>
@@ -173,7 +197,13 @@ export default function TurbineDetailPage() {
         {/* SCADA Chart */}
         <div className="bg-bg-card border border-border-default rounded-lg p-4">
           <h3 className="text-sm font-medium mb-3">SCADA 实时数据曲线（近24小时）</h3>
-          <div ref={chartRef} style={{ height: 300 }} />
+          {scada.length > 0 ? (
+            <div ref={chartRef} style={{ height: 300 }} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-4 text-xs text-text-muted">
+              {scadaMissing ? '未导入真实 SCADA 数据，当前不展示模拟运行曲线。' : '加载中...'}
+            </div>
+          )}
         </div>
 
         {/* Wind + Vibration Row */}
@@ -204,6 +234,15 @@ export default function TurbineDetailPage() {
               <p className="text-xs text-text-muted">
                 {vibrationMissing ? '未导入真实振动数据集，当前不展示模拟波形。' : '加载中...'}
               </p>
+            )}
+            {vibration?.diagnosis && (
+              <div className="mt-3 rounded bg-bg-hover p-2 text-[10px] text-text-secondary space-y-1">
+                <p className="text-text-primary">{vibration.diagnosis.summary}</p>
+                {vibration.diagnosis.evidence?.slice(0, 3).map((item: string) => (
+                  <p key={item}>· {item}</p>
+                ))}
+                <p className="text-text-muted">{vibration.diagnosis.recommended_action}</p>
+              </div>
             )}
           </div>
         </div>

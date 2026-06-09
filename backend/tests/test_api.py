@@ -16,8 +16,9 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
-from app.models import User, Turbine, Fault, WorkOrder, RULPrediction
+from app.models import User, Turbine, Fault, WorkOrder, RULPrediction, BladeImage
 from app.core.security import hash_password
+from app.api.diagnosis import _vibration_diagnosis
 
 
 # ============================================================
@@ -172,6 +173,63 @@ class TestDiagnosis:
         )
         assert response.status_code == 200
         assert response.json() == []
+
+    @pytest.mark.asyncio
+    async def test_blade_diagnosis_explains_imported_annotation(self, client: AsyncClient, auth_headers, test_turbine, db_session):
+        """Test blade diagnosis keeps missing confidence and file status explicit."""
+        image = BladeImage(
+            turbine_id=test_turbine.id,
+            timestamp=datetime.now(timezone.utc),
+            image_path="blade_images/public_blade_dataset/sample.jpg",
+            diagnosis_type="crack",
+            diagnosis_confidence=None,
+            damage_bbox={
+                "x": 10,
+                "y": 20,
+                "w": 30,
+                "h": 40,
+                "label_source": "YOLO_public_dataset",
+                "source_dataset": "public_blade_dataset",
+                "source_file": "C:/datasets/sample.jpg",
+                "image_width": 640,
+                "image_height": 480,
+            },
+        )
+        db_session.add(image)
+        await db_session.commit()
+
+        response = await client.post(
+            "/api/diagnosis/blade-diagnosis",
+            headers=auth_headers,
+            json={"turbine_id": test_turbine.id, "image_path": image.image_path},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["confidence"] is None
+        assert data["damage_bbox"] == {"x": 10, "y": 20, "w": 30, "h": 40}
+        assert data["quality"]["source_dataset"] == "public_blade_dataset"
+        assert data["quality"]["file_exists"] is False
+        assert "公开标注未提供模型置信度" in data["evidence"]
+
+    def test_vibration_diagnosis_explains_source_label(self):
+        """Test vibration explanation is derived from imported payload metadata."""
+        diagnosis = _vibration_diagnosis({
+            "sample_count": 4096,
+            "sample_rate_hz": 10240,
+            "rms": 1.25,
+            "fault_detected": True,
+            "fault_info": {"type": "damaged", "label_source": "public_dataset_label"},
+            "quality": {
+                "source_dataset": "nrel_grc_gearbox_cm",
+                "source_file": "Healthy.zip/example.csv",
+                "label_source": "public_dataset_label",
+            },
+            "peak_frequencies": [{"frequency_hz": 25.0, "amplitude": 0.3}],
+        })
+        assert diagnosis["status"] == "source_labeled_fault"
+        assert diagnosis["confidence"] is None
+        assert any("nrel_grc_gearbox_cm" in item for item in diagnosis["evidence"])
+        assert any("源数据标签=damaged" in item for item in diagnosis["evidence"])
 
 
 # ============================================================
