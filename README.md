@@ -126,6 +126,14 @@ python -m scripts.import_real_datasets scada-csv ^
   --turbine-id 1 ^
   --dataset-id care_to_compare_v6 ^
   --source-doi 10.5281/zenodo.14857470 ^
+  --source-url https://zenodo.org/records/14857470 ^
+  --dry-run
+
+python -m scripts.import_real_datasets scada-csv ^
+  --path <真实SCADA CSV路径或目录> ^
+  --turbine-id 1 ^
+  --dataset-id care_to_compare_v6 ^
+  --source-doi 10.5281/zenodo.14857470 ^
   --source-url https://zenodo.org/records/14857470
 
 # 导入公开或实测振动CSV/TXT
@@ -147,6 +155,7 @@ python -m scripts.import_real_datasets blade-yolo ^
 ```
 
 已整理的数据源候选见 `backend/data/real_dataset_sources.json`。下载和使用前应核对数据集页面的版本、许可证、样本质量和引用要求。
+`--dry-run` 只输出字段映射和质量预检报告，不写入数据库；确认 `ready_for_import=true` 后再去掉该参数正式导入。
 
 数据整合原则见 `DATA_INTEGRATION_STRATEGY.md`。SCADA、振动、图像、气象和工单数据不强行伪造成同一台真实风机的完整历史；系统通过 `source_dataset`、`source_file`、`dataset_window` 等字段保留来源边界。
 

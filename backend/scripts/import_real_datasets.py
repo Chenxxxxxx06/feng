@@ -52,6 +52,18 @@ SCADA_COLUMN_ALIASES = {
     "grid_frequency_hz": ["grid_frequency_hz", "grid_frequency", "frequency", "grid frequency"],
     "ambient_temp_c": ["ambient_temp_c", "ambient_temperature", "outdoor_temperature", "temperature", "air_temperature"],
 }
+SCADA_SIGNAL_FIELDS = [
+    "power_kw",
+    "wind_speed_ms",
+    "rotor_rpm",
+    "gen_temperature_c",
+    "gearbox_temperature_c",
+    "bearing_temperature_c",
+    "pitch_angle_deg",
+    "nacelle_direction_deg",
+    "grid_frequency_hz",
+    "ambient_temp_c",
+]
 
 
 def _relative_to_data(path: Path) -> str:
@@ -348,6 +360,15 @@ def _read_csv_frame(path: Path, max_rows: int | None = None) -> pd.DataFrame:
         return pd.read_csv(path, nrows=max_rows, encoding="latin1")
 
 
+def _collect_scada_paths(path_value: str) -> list[Path]:
+    paths = [Path(path_value)]
+    if paths[0].is_dir():
+        paths = sorted([p for p in paths[0].rglob("*.csv")])
+    if not paths:
+        raise FileNotFoundError(path_value)
+    return paths
+
+
 def _scada_column_map(df: pd.DataFrame, args: argparse.Namespace) -> dict[str, str | None]:
     return {
         "timestamp": _resolve_column(df, args.timestamp_column, SCADA_COLUMN_ALIASES["timestamp"], required=True),
@@ -365,12 +386,80 @@ def _scada_column_map(df: pd.DataFrame, args: argparse.Namespace) -> dict[str, s
     }
 
 
+def _scada_quality_report(path: Path, df: pd.DataFrame, col_map: dict[str, str | None]) -> dict:
+    timestamps = pd.to_datetime(df[col_map["timestamp"]], errors="coerce", utc=True)
+    valid_timestamp_mask = timestamps.notna()
+    valid_timestamps = timestamps[valid_timestamp_mask]
+    mapped_signal_fields = [field for field in SCADA_SIGNAL_FIELDS if col_map.get(field)]
+    missing_signal_fields = [field for field in SCADA_SIGNAL_FIELDS if not col_map.get(field)]
+    completeness = {}
+    for field in mapped_signal_fields:
+        column = col_map[field]
+        numeric = pd.to_numeric(df[column], errors="coerce")
+        completeness[field] = round(float(numeric.notna().sum() / len(df) * 100), 2) if len(df) else 0.0
+
+    return {
+        "source_file": str(path),
+        "rows_scanned": int(len(df)),
+        "valid_timestamp_rows": int(valid_timestamp_mask.sum()),
+        "invalid_timestamp_rows": int((~valid_timestamp_mask).sum()),
+        "valid_timestamp_pct": round(float(valid_timestamp_mask.sum() / len(df) * 100), 2) if len(df) else 0.0,
+        "time_range": {
+            "start": valid_timestamps.min().isoformat() if not valid_timestamps.empty else None,
+            "end": valid_timestamps.max().isoformat() if not valid_timestamps.empty else None,
+        },
+        "field_mapping": {k: v for k, v in col_map.items() if v},
+        "mapped_signal_fields": mapped_signal_fields,
+        "missing_signal_fields": missing_signal_fields,
+        "numeric_completeness_pct": completeness,
+        "ready_for_import": bool(valid_timestamp_mask.sum() > 0 and mapped_signal_fields),
+    }
+
+
+def preview_scada_csv(args: argparse.Namespace) -> None:
+    paths = _collect_scada_paths(args.path)
+    reports = []
+    skipped_files = []
+    for path in paths:
+        try:
+            df = _read_csv_frame(path, args.max_rows)
+            if df.empty:
+                skipped_files.append({"source_file": str(path), "reason": "empty_csv"})
+                continue
+            col_map = _scada_column_map(df, args)
+            reports.append(_scada_quality_report(path, df, col_map))
+        except Exception as exc:
+            skipped_files.append({"source_file": str(path), "reason": str(exc)})
+
+    total_rows = sum(item["rows_scanned"] for item in reports)
+    valid_rows = sum(item["valid_timestamp_rows"] for item in reports)
+    ready_files = sum(1 for item in reports if item["ready_for_import"])
+    print(json.dumps({
+        "dataset_type": "scada_csv",
+        "dataset_id": args.dataset_id,
+        "dry_run": True,
+        "files_scanned": len(paths),
+        "files_ready": ready_files,
+        "skipped_files": skipped_files,
+        "rows_scanned": total_rows,
+        "estimated_importable_rows": valid_rows,
+        "valid_timestamp_pct": round(float(valid_rows / total_rows * 100), 2) if total_rows else 0.0,
+        "ready_for_import": bool(ready_files > 0),
+        "reports": reports,
+        "quality_gate": {
+            "timestamp_column_required": True,
+            "at_least_one_signal_column_required": True,
+            "invalid_timestamps_are_skipped_on_import": True,
+            "missing_optional_columns_remain_null": True,
+        },
+    }, ensure_ascii=False, indent=2))
+
+
 async def import_scada_csv(args: argparse.Namespace) -> None:
-    paths = [Path(args.path)]
-    if paths[0].is_dir():
-        paths = sorted([p for p in paths[0].rglob("*.csv")])
-    if not paths:
-        raise FileNotFoundError(args.path)
+    paths = _collect_scada_paths(args.path)
+    if args.dry_run:
+        preview_scada_csv(args)
+        return
 
     SCADA_DIR.joinpath(args.dataset_id).mkdir(parents=True, exist_ok=True)
     imported = 0
@@ -388,6 +477,10 @@ async def import_scada_csv(args: argparse.Namespace) -> None:
                     skipped_files += 1
                     continue
                 col_map = _scada_column_map(df, args)
+                if not any(col_map.get(field) for field in SCADA_SIGNAL_FIELDS):
+                    skipped_files += 1
+                    print(f"skip {path}: no recognized SCADA signal columns")
+                    continue
                 column_maps[str(path)] = col_map
             except Exception as exc:
                 skipped_files += 1
@@ -527,6 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
     scada.add_argument("--source-turbine-column")
     scada.add_argument("--max-rows", type=int)
     scada.add_argument("--batch-size", type=int, default=1000)
+    scada.add_argument("--dry-run", action="store_true")
     return parser
 
 
