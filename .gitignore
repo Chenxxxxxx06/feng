@@ -75,6 +75,7 @@ backend/data/vibration/
 backend/data/blade_images/
 backend/data/scada/
 backend/data/era5/
+backend/data/curated_datasets/
 !backend/data/real_dataset_sources.json
 !backend/data/geojson/
 !backend/data/geojson/**
