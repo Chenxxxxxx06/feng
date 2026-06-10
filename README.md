@@ -158,6 +158,7 @@ python -m scripts.import_real_datasets blade-yolo ^
 `--dry-run` 只输出字段映射和质量预检报告，不写入数据库；确认 `ready_for_import=true` 后再去掉该参数正式导入。
 
 数据整合原则见 `DATA_INTEGRATION_STRATEGY.md`。SCADA、振动、图像、气象和工单数据不强行伪造成同一台真实风机的完整历史；系统通过 `source_dataset`、`source_file`、`dataset_window` 等字段保留来源边界。
+机器可读执行方案见 `backend/data/data_integration_plan.json`，系统设置页会通过 `/api/settings/data-integration-plan` 展示各层当前接入状态。
 
 ---
 

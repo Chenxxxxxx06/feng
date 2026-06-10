@@ -1,22 +1,38 @@
 # 风调预顺 PHM 数据整合策略
 
-## 目标
+## 对原方案的修正
 
-本项目采用“主时间线 + 诊断样本库”的数据组织方式，避免把来源不同的公开数据强行拼成同一台风机的完整历史。
+原方案“CARE SCADA 做主数据集，NREL/Mendeley/DTU 做诊断样本库，ERA5 做环境数据，业务数据由系统积累”的方向是对的，但需要修正以下不合理点：
 
-## 数据分层
+| 原表述 | 不合理之处 | 修正 |
+|---|---|---|
+| CARE SCADA 负责统一故障窗口 | CARE 可以统一 SCADA 时间线和部分故障/事件窗口，但不能覆盖振动、图像、维修成本、人员调度 | CARE 只作为运行主线和故障事件主线 |
+| NREL/Mendeley 振动负责演示诊断算法 | NREL/Mendeley 振动样本与 CARE 风机不是同一设备、同一时间、同一传感器体系 | 只能作为诊断算法样本库，不能反证 CARE 中某台风机的真实故障 |
+| DTU 叶片图像负责图像诊断 | DTU 图像与 CARE 无设备关系；原始图像不一定有统一损伤标签，派生标注还有许可证限制 | 作为图像样本库，必须保留来源、标注来源和许可证 |
+| ERA5 按经纬度和时间匹配 | 第一阶段 CARE/公开数据不一定提供足够精确的风机坐标；ERA5 时空分辨率也不等于现场传感器 | ERA5 改为可选环境补充，不作为 MVP 必需数据 |
+| 业务数据由系统积累 | 方向正确，但 demo 初期没有历史工单、成本、人员负载数据 | 初期只允许用户操作生成，不预置伪造历史闭环 |
 
-| 数据层 | 推荐数据来源 | 支撑功能 | 约束 |
-|---|---|---|---|
-| 主时间线 | CARE to Compare v6 或现场 SCADA | 风机运行曲线、健康指数、故障窗口、预测维护入口 | 作为系统主线，必须保留源文件、源行号和字段映射 |
-| 振动样本库 | NREL/DOE 齿轮箱振动数据、Mendeley 叶片振动数据 | 振动诊断演示、频谱/RMS解释 | 作为公开诊断样本，不冒充主时间线同一风机的现场采样 |
-| 图像样本库 | DTU 无人机叶片图像、带标注的公开派生数据集 | 叶片图像诊断展示、标注框解释 | 无标注不生成标签，无置信度不填 0% |
-| 气象数据 | ERA5 或现场气象站 | 风资源和环境解释 | 必须按时间和经纬度匹配，缺失时不展示模拟气象 |
-| 业务数据 | 系统真实工单和维护记录 | 工单流转、成本统计、人员调度 | 初期由用户操作沉淀，不伪造历史维修闭环 |
+## 新数据方案
 
-## 统一字段
+新方案采用“四层事实边界”：
 
-每条导入记录应尽量保留以下来源字段：
+| 层级 | 数据源 | 系统角色 | 可支撑功能 | 禁止用途 |
+|---|---|---|---|---|
+| L1 运行主线 | CARE to Compare v6 或现场 SCADA | `primary_scada_timeline` | 风机运行曲线、健康指数、异常窗口、预测维护入口 | 不支撑叶片图像、振动波形、维修成本 |
+| L2 诊断样本库 | NREL/DOE 齿轮箱振动、Mendeley 叶片振动、DTU/YOLO 叶片图像 | `diagnostic_sample_library` | 诊断算法展示、频谱/RMS解释、图像标注解释 | 不冒充 L1 同一风机的现场证据 |
+| L3 环境补充 | ERA5 或现场气象站 | `optional_weather_context` | 风资源、温度、气压等背景解释 | 不替代 SCADA 风速和现场测量 |
+| L4 业务沉淀 | 系统真实工单、成本、人员、检修记录 | `operational_business_records` | 工单流转、成本复盘、人员负载 | 不导入伪造历史记录 |
+
+## 执行顺序
+
+1. 清理旧 demo 数据库或新建空库。
+2. 导入 L1：先对 CARE/现场 SCADA 执行 `--dry-run`，确认字段映射、有效时间戳比例和传感器列完整率。
+3. 正式导入 L1 后，用 SCADA 驱动地图、风机详情、健康指数和预测维护入口。
+4. 导入 L2：振动和图像只挂为“诊断样本库”，页面显示来源边界。
+5. L3 仅在有可匹配经纬度和时间范围时导入。
+6. L4 由系统操作自然产生；没有真实记录时显示“待积累”。
+
+## 统一来源字段
 
 | 字段 | 含义 |
 |---|---|
@@ -26,22 +42,15 @@
 | `source_doi` | 数据集 DOI |
 | `source_url` | 数据集页面 |
 | `source_license` | 数据许可证 |
-| `dataset_role` | 数据在系统中的角色，例如 `primary_scada_timeline` |
+| `dataset_role` | 数据在系统中的角色 |
 | `field_mapping` | 原始列名到系统字段的映射 |
-
-## 使用规则
-
-1. SCADA 是系统业务闭环的主线；其他数据集只在来源边界清晰时接入。
-2. 历史公开数据可以用于演示，但页面必须标注为“历史数据集窗口”，不能写成实时数据。
-3. 振动、图像数据若与 SCADA 来源不同，只能作为诊断样本库，不直接证明某台风机在某时刻发生同一故障。
-4. 缺失字段保持为空；不得用常数、随机数或模型想象结果补齐。
-5. 工单和维修成本应由系统操作沉淀；没有真实记录时，只能显示“暂无数据”或“待积累”。
-6. 表格数据正式入库前先运行 `--dry-run`，检查字段映射、有效时间戳比例、缺失传感器列和预计导入行数。
 
 ## 当前落地
 
-- `scripts.import_real_datasets scada-csv --dry-run`：预检真实 SCADA CSV，输出字段映射、时间范围、有效时间戳比例和质量门禁结果，不写数据库。
-- `scripts.import_real_datasets scada-csv`：导入真实 SCADA CSV，记录字段映射和来源信息。
-- `scripts.import_real_datasets vibration-csv`：导入真实振动 CSV/TXT，记录源标签和质量信息。
-- `scripts.import_real_datasets blade-yolo`：导入真实叶片图片和 YOLO 标注，保留图片尺寸、标注来源和数据集信息。
-- 风机详情页在无近期 SCADA 时可展示最新真实历史窗口，并通过 `dataset_window=historical_latest` 标识。
+- `backend/data/data_integration_plan.json`：机器可读的数据方案。
+- `GET /api/settings/data-integration-plan`：返回数据方案、当前接入状态和不合理点。
+- `scripts.import_real_datasets scada-csv --dry-run`：预检真实 SCADA CSV，不写数据库。
+- `scripts.import_real_datasets scada-csv`：导入 L1 运行主线。
+- `scripts.import_real_datasets vibration-csv`：导入 L2 振动样本。
+- `scripts.import_real_datasets blade-yolo`：导入 L2 图像样本。
+- 风机详情页通过 `dataset_window=historical_latest` 标识历史公开数据窗口。

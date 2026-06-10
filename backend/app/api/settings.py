@@ -1,9 +1,12 @@
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
 from app.database import get_db
-from app.models import BladeImage, NotificationConfig, DataSource, SCADARecord, User, VibrationData
+from app.models import BladeImage, NotificationConfig, DataSource, SCADARecord, User, VibrationData, WorkOrder
 from app.schemas import (
     ThresholdConfigRequest, ThresholdConfigResponse,
     DataSourceResponse, DataSourceTestRequest,
@@ -15,6 +18,8 @@ from app.services.data_pipeline.scada_loader import scada_loader
 from app.api.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_INTEGRATION_PLAN = DATA_DIR / "data_integration_plan.json"
 
 
 @router.get("/thresholds", response_model=list[ThresholdConfigResponse])
@@ -82,6 +87,9 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
     """Get current data pipeline status for all sources."""
     state = get_pipeline_state()
     scada_count = await db.scalar(select(func.count()).select_from(SCADARecord))
+    scada_with_extra = await db.scalar(
+        select(func.count()).select_from(SCADARecord).where(SCADARecord.extra.is_not(None))
+    )
     vibration_count = await db.scalar(select(func.count()).select_from(VibrationData))
     image_count = await db.scalar(select(func.count()).select_from(BladeImage))
     scada_source_result = await db.execute(
@@ -91,16 +99,23 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
         .limit(1)
     )
     scada_source = scada_source_result.scalar_one_or_none()
+    scada_ready = bool(scada_count and scada_with_extra == scada_count)
 
     sources = [
         {
             "type": "scada",
             "name": "SCADA运行数据",
-            "status": "connected" if scada_count else "disconnected",
+            "status": "connected" if scada_ready else ("partial" if scada_count else "disconnected"),
             "last_update": scada_source.last_data_at.isoformat() if scada_source and scada_source.last_data_at else None,
             "record_count": scada_count,
-            "real_data_available": bool(scada_count),
-            "note": f"主时间线数据已导入：{scada_source.name}" if scada_count and scada_source else "待导入 CARE to Compare 或现场SCADA数据",
+            "real_data_available": scada_ready,
+            "note": (
+                f"主时间线数据已导入：{scada_source.name}"
+                if scada_ready and scada_source
+                else "存在SCADA记录但缺少来源字段，建议清理旧demo数据后重新导入"
+                if scada_count
+                else "待导入 CARE to Compare 或现场SCADA数据"
+            ),
         },
         {
             "type": "vibration",
@@ -135,6 +150,71 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
         "sources": sources,
         "overall_status": "healthy" if len(state.errors) == 0 else "degraded",
         "errors": state.errors[-10:],
+    }
+
+
+@router.get("/data-integration-plan")
+async def get_data_integration_plan(db: AsyncSession = Depends(get_db)):
+    """Return the project data integration plan and current layer readiness."""
+    if not DATA_INTEGRATION_PLAN.exists():
+        raise HTTPException(status_code=404, detail="Data integration plan not found")
+
+    plan = json.loads(DATA_INTEGRATION_PLAN.read_text(encoding="utf-8"))
+    scada_count = await db.scalar(select(func.count()).select_from(SCADARecord))
+    scada_with_extra = await db.scalar(
+        select(func.count()).select_from(SCADARecord).where(SCADARecord.extra.is_not(None))
+    )
+    vibration_count = await db.scalar(select(func.count()).select_from(VibrationData))
+    image_count = await db.scalar(select(func.count()).select_from(BladeImage))
+    work_order_count = await db.scalar(select(func.count()).select_from(WorkOrder))
+    weather_available = era5_loader.is_real_data_available()
+
+    current_counts = {
+        "scada_records": scada_count,
+        "scada_records_with_source_metadata": scada_with_extra,
+        "vibration_samples": vibration_count,
+        "blade_images": image_count,
+        "weather_available": weather_available,
+        "work_orders": work_order_count,
+    }
+
+    layer_status = [
+        {
+            "id": "operational_core",
+            "status": "ready" if scada_count and scada_with_extra == scada_count else ("needs_review" if scada_count else "missing"),
+            "record_count": scada_count,
+            "note": (
+                "SCADA主线已导入且来源字段完整"
+                if scada_count and scada_with_extra == scada_count
+                else "存在SCADA记录但部分缺少来源字段，建议清理旧demo数据后重新导入"
+                if scada_count
+                else "待导入CARE或现场SCADA主时间线"
+            ),
+        },
+        {
+            "id": "diagnostic_sample_library",
+            "status": "ready" if vibration_count and image_count else ("partial" if vibration_count or image_count else "missing"),
+            "record_count": vibration_count + image_count,
+            "note": "振动和图像样本库均已导入" if vibration_count and image_count else "诊断样本库尚未完整导入",
+        },
+        {
+            "id": "weather_context",
+            "status": "ready" if weather_available else "optional",
+            "record_count": 1 if weather_available else 0,
+            "note": "ERA5或现场气象已可用" if weather_available else "气象层为可选补充，当前未接入",
+        },
+        {
+            "id": "business_records",
+            "status": "needs_review" if work_order_count else "empty",
+            "record_count": work_order_count,
+            "note": "存在工单记录，但当前模型缺少来源审计字段，旧demo库需复核" if work_order_count else "业务数据应由真实系统操作沉淀",
+        },
+    ]
+
+    return {
+        "plan": plan,
+        "current_counts": current_counts,
+        "layer_status": layer_status,
     }
 
 

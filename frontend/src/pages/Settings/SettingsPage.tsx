@@ -6,6 +6,14 @@ import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 interface ThresholdConfig { id: number; hi_threshold: number; email_enabled: boolean; email_address: string | null; wechat_enabled: boolean }
 interface PipelineSource { type: string; name: string; status: string; last_update: string | null; record_count: number; real_data_available: boolean; note: string }
 interface PipelineStatus { sources: PipelineSource[]; overall_status: string; errors: string[] }
+interface DataPlanIssue { original: string; issue: string; correction: string }
+interface DataPlanLayer { id: string; level: string; name: string; dataset_role: string; supports: string[]; cannot_support: string[] }
+interface DataLayerStatus { id: string; status: string; record_count: number; note: string }
+interface DataIntegrationPlan {
+  plan: { unreasonable_points: DataPlanIssue[]; layers: DataPlanLayer[] };
+  current_counts: Record<string, number | boolean>;
+  layer_status: DataLayerStatus[];
+}
 
 export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
@@ -14,6 +22,7 @@ export default function SettingsPage() {
   const [model, setModel] = useState('gpt-4');
   const [saved, setSaved] = useState(false);
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
+  const [dataPlan, setDataPlan] = useState<DataIntegrationPlan | null>(null);
   const [testResults, setTestResults] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -24,8 +33,12 @@ export default function SettingsPage() {
   }, []);
 
   const refreshPipeline = async () => {
-    const { data } = await api.get('/settings/pipeline-status');
-    setPipeline(data);
+    const [pipelineResp, planResp] = await Promise.all([
+      api.get('/settings/pipeline-status'),
+      api.get('/settings/data-integration-plan'),
+    ]);
+    setPipeline(pipelineResp.data);
+    setDataPlan(planResp.data);
   };
 
   const saveThreshold = async () => {
@@ -70,6 +83,7 @@ export default function SettingsPage() {
   };
 
   const sourceIcons: Record<string, string> = { scada: '📊', vibration: '〰', image: '🖼', weather: '🌤' };
+  const layerStatus = (id: string) => dataPlan?.layer_status.find((item) => item.id === id);
 
   return (
     <div className="h-full overflow-auto p-6 space-y-6">
@@ -107,6 +121,51 @@ export default function SettingsPage() {
           保存配置
         </button>
         {saved && <span className="ml-3 text-xs text-accent-green">已保存</span>}
+      </div>
+
+      {/* Data Integration Plan */}
+      <div className="bg-bg-card border border-border-default rounded-lg p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">数据方案与接入边界</h3>
+          <span className="text-[10px] text-text-muted">按真实来源分层，不强行拼接</span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+          {dataPlan?.plan.layers.map((layer) => {
+            const status = layerStatus(layer.id);
+            return (
+              <div key={layer.id} className="bg-bg-hover rounded-lg p-3 text-xs space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-text-primary">{layer.level} {layer.name}</p>
+                    <p className="text-[10px] text-text-muted font-mono">{layer.dataset_role}</p>
+                  </div>
+                  {status && (
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${statusColor(status.status === 'ready' ? 'connected' : status.status === 'missing' ? 'disconnected' : 'partial')}`}>
+                      {status.status}
+                    </span>
+                  )}
+                </div>
+                <p className="text-text-secondary leading-relaxed">{status?.note || '等待状态检查'}</p>
+                <p className="text-[10px] text-text-muted">记录数: {status?.record_count ?? 0}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        {dataPlan && (
+          <div className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs">
+            <p className="mb-2 text-text-primary font-medium">当前方案修正点</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {dataPlan.plan.unreasonable_points.slice(0, 4).map((item) => (
+                <div key={item.original} className="text-text-secondary leading-relaxed">
+                  <p className="text-text-muted">{item.original}</p>
+                  <p>{item.correction}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Data Pipeline Status */}
