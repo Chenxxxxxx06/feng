@@ -8,6 +8,8 @@
       "landing_page": "https://data.openei.org/submissions/738",
       "catalog_page": "https://catalog.data.gov/dataset/wind-turbine-gearbox-condition-monitoring-vibration-analysis-benchmarking-datasets",
       "license": "CC BY 4.0",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "method_demo_only_not_same_asset_as_care",
       "download_urls": [
         "https://data.openei.org/files/738/Healthy.zip",
         "https://data.openei.org/files/738/Damaged.zip"
@@ -31,6 +33,8 @@
       "doi": "10.17632/5d7vbdp8f7.2",
       "landing_page": "https://data.mendeley.com/datasets/5d7vbdp8f7",
       "license": "CC BY 4.0",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "method_demo_only_not_same_asset_as_care",
       "quality_rules": [
         "use original downloaded files only",
         "record source condition label",
@@ -47,6 +51,8 @@
       "doi": "10.5281/zenodo.14857470",
       "landing_page": "https://zenodo.org/records/14857470",
       "license": "Creative Commons Attribution 4.0 International",
+      "dataset_role": "primary_scada_timeline",
+      "alignment_scope": "operational_core_for_scada_and_event_windows",
       "download_urls": [
         "https://zenodo.org/api/records/14857470/files-archive"
       ],
@@ -69,6 +75,8 @@
       "doi": "10.17632/hd96prn3nc.2",
       "landing_page": "https://data.mendeley.com/datasets/hd96prn3nc/2",
       "license": "CC BY-NC 3.0",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "image_method_demo_only_not_same_asset_as_care",
       "quality_rules": [
         "use original downloaded images only",
         "preserve image filename and dataset DOI",
@@ -83,11 +91,30 @@
       "landing_page": "https://www.kaggle.com/datasets/ajifoster3/yolo-annotated-wind-turbines-586x371",
       "license": "CC BY-NC 4.0",
       "source_doi": "10.17632/hd96prn3nc.2",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "annotated_image_method_demo_only_not_same_asset_as_care",
       "quality_rules": [
         "use image and YOLO label pairs only",
         "store bounding boxes converted from source YOLO labels",
         "do not create model confidence for manual labels",
         "skip samples with invalid label geometry"
+      ]
+    }
+  ],
+  "weather": [
+    {
+      "id": "era5_single_levels",
+      "name": "ERA5 hourly data on single levels from 1940 to present",
+      "publisher": "Copernicus Climate Data Store / ECMWF",
+      "landing_page": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels",
+      "license": "Copernicus licence",
+      "dataset_role": "optional_weather_context",
+      "alignment_scope": "optional_context_only_requires_time_and_location_match",
+      "quality_rules": [
+        "use only when turbine or farm coordinates and timestamp range are available",
+        "record request bounding box, variables, time range and CDS dataset id",
+        "do not replace SCADA wind speed or site measurements with ERA5 values",
+        "mark weather values as contextual reanalysis data"
       ]
     }
   ]

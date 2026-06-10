@@ -1,0 +1,81 @@
+{
+  "version": "2026-06-10",
+  "principle": "只用 CARE 或现场 SCADA 作为运行主时间线。振动、图像、气象、业务记录分别保留事实边界，除非存在真实的同设备、同时间关联键，否则不强行合并。",
+  "unreasonable_points": [
+    {
+      "original": "CARE SCADA负责统一风机、时间线、运行状态、故障窗口",
+      "issue": "CARE 可以支撑 SCADA 时间序列和部分事件窗口，但不能覆盖振动波形、叶片图像、维修成本、人员和完整检修历史。",
+      "correction": "CARE 只作为运行 SCADA 和事件窗口主线。"
+    },
+    {
+      "original": "NREL/Mendeley振动负责演示诊断算法和解释逻辑",
+      "issue": "这些振动数据与 CARE 不是同一风机、同一时间、同一传感器位置和同一工况体系。",
+      "correction": "振动数据只作为诊断样本库，不能作为 CARE 风机故障的直接证据。"
+    },
+    {
+      "original": "DTU叶片图像负责演示诊断算法和解释逻辑",
+      "issue": "DTU 图像是独立巡检图像，和 CARE 没有设备关联；原始图像与派生 YOLO 标注的标签和许可证也需要分别核对。",
+      "correction": "图像数据只在记录来源、许可证和标注来源后作为样本库使用。"
+    },
+    {
+      "original": "ERA5或现场气象按经纬度和时间匹配",
+      "issue": "ERA5 是再分析数据，时空分辨率和现场传感器不同；公开 SCADA 也不一定提供足够精确的风机坐标。",
+      "correction": "气象层作为可选环境补充，不作为第一阶段必需数据。"
+    },
+    {
+      "original": "业务数据由系统使用过程中积累",
+      "issue": "方向合理，但 demo 初期不能预置伪造的成本、工单、人员负载或检修历史。",
+      "correction": "业务数据从空状态开始，由真实系统操作或带来源的导入产生。"
+    }
+  ],
+  "layers": [
+    {
+      "level": "L1",
+      "id": "operational_core",
+      "name": "运行主线",
+      "dataset_role": "primary_scada_timeline",
+      "recommended_sources": ["care_to_compare_v6", "field_scada"],
+      "supports": ["风场监控", "风机SCADA曲线", "健康指数", "事件窗口", "预测维护入口"],
+      "cannot_support": ["叶片图像诊断", "振动波形诊断", "维修成本历史", "人员负载"],
+      "quality_gate": ["必须先dry-run", "必须有时间戳", "至少一个传感器字段", "必须保留源文件和源行号"]
+    },
+    {
+      "level": "L2",
+      "id": "diagnostic_sample_library",
+      "name": "诊断样本库",
+      "dataset_role": "diagnostic_sample_library",
+      "recommended_sources": ["nrel_grc_gearbox_cm", "mendeley_blade_vibration_faults", "dtu_drone_inspection", "yolo_annotated_wind_turbine_surface_damage"],
+      "supports": ["振动诊断演示", "叶片图像诊断演示", "可解释诊断样例"],
+      "cannot_support": ["声明与CARE同一风机同一时间", "验证CARE事件真实根因"],
+      "quality_gate": ["必须记录数据集来源", "必须记录标签来源", "必须核对许可证", "不得生成标签"]
+    },
+    {
+      "level": "L3",
+      "id": "weather_context",
+      "name": "环境补充",
+      "dataset_role": "optional_weather_context",
+      "recommended_sources": ["era5", "field_weather_station"],
+      "supports": ["气象背景", "风资源背景", "温度背景"],
+      "cannot_support": ["替代SCADA传感器值", "单独证明故障"],
+      "quality_gate": ["时间范围可匹配", "坐标范围可匹配", "声明数据分辨率"]
+    },
+    {
+      "level": "L4",
+      "id": "business_records",
+      "name": "业务沉淀",
+      "dataset_role": "operational_business_records",
+      "recommended_sources": ["系统生成工单", "真实用户操作", "带来源的维护记录导入"],
+      "supports": ["工单流转", "成本复盘", "人员分派"],
+      "cannot_support": ["预置伪造历史", "编造成本站维修成本基线"],
+      "quality_gate": ["由系统创建或带来源导入", "不得伪造历史", "必须有审计字段"]
+    }
+  ],
+  "execution_order": [
+    "清理旧demo数据库或使用空库",
+    "先dry-run预检L1 SCADA",
+    "正式导入L1后驱动地图、详情、健康指数和预测入口",
+    "导入L2样本库并显式标注样本来源边界",
+    "仅在时间和坐标可匹配时接入L3气象",
+    "通过真实操作沉淀L4业务记录"
+  ]
+}

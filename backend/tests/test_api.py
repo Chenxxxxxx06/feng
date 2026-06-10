@@ -415,7 +415,12 @@ class TestSettings:
             last_connected_at=datetime.now(timezone.utc),
             last_data_at=ts,
         ))
-        db_session.add(SCADARecord(turbine_id=test_turbine.id, timestamp=ts, power_kw=900.0))
+        db_session.add(SCADARecord(
+            turbine_id=test_turbine.id,
+            timestamp=ts,
+            power_kw=900.0,
+            extra={"source_dataset": "care_to_compare_v6", "source_file": "sample.csv", "source_row": 2},
+        ))
         await db_session.commit()
 
         response = await client.get("/api/settings/pipeline-status", headers=auth_headers)
@@ -424,6 +429,20 @@ class TestSettings:
         assert scada["record_count"] == 1
         assert scada["real_data_available"] is True
         assert scada["status"] == "connected"
+
+    @pytest.mark.asyncio
+    async def test_data_integration_plan(self, client: AsyncClient, auth_headers):
+        """Test data integration plan exposes corrected dataset scheme."""
+        response = await client.get("/api/settings/data-integration-plan", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "plan" in data
+        assert "current_counts" in data
+        assert "layer_status" in data
+        assert data["plan"]["version"] == "2026-06-10"
+        assert len(data["plan"]["unreasonable_points"]) >= 4
+        layer_ids = {item["id"] for item in data["plan"]["layers"]}
+        assert {"operational_core", "diagnostic_sample_library", "weather_context", "business_records"} <= layer_ids
 
 
 # ============================================================
