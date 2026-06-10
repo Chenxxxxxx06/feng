@@ -53,6 +53,8 @@ class TestGeoLoader:
              "lat": 37.3, "lng": 107.6, "region": "陕北", "status": "normal", "hi_value": 92},
             {"id": 2, "name": "T2", "model": "V112", "power_mw": 3.3,
              "lat": 34.7, "lng": 110.0, "region": "关中", "status": "fault", "hi_value": 45},
+            {"id": 3, "name": "CARE-Wind-Farm-A-0", "model": None, "power_mw": None,
+             "lat": None, "lng": None, "region": "Wind Farm A", "status": "normal", "hi_value": 100},
         ]
         gj = geo_loader.build_turbines_geojson(turbines)
         assert gj["type"] == "FeatureCollection"

@@ -212,6 +212,11 @@ async def get_turbine_wind(
     turbine = result.scalar_one_or_none()
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
+    if turbine.lat is None or turbine.lng is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This asset has no real geographic coordinates; weather lookup is unavailable.",
+        )
 
     try:
         return era5_loader.get_wind_at(turbine.lat, turbine.lng)

@@ -35,14 +35,18 @@ class TokenResponse(BaseModel):
 class TurbineResponse(BaseModel):
     id: int
     name: str
-    model: str
-    power_mw: float
-    lat: float
-    lng: float
-    region: str
+    model: Optional[str] = None
+    power_mw: Optional[float] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    region: Optional[str] = None
     status: str
     hi_value: float
     last_maintenance: Optional[datetime] = None
+    source_dataset: Optional[str] = None
+    source_asset_id: Optional[str] = None
+    asset_scope: str = "field_asset"
+    geo_scope: str = "known"
 
     model_config = {"from_attributes": True}
 

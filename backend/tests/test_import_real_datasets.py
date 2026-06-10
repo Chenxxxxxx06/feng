@@ -3,7 +3,13 @@
 import argparse
 import json
 
-from scripts.import_real_datasets import preview_scada_csv
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+from app.database import Base
+from app.models import DataSource, SCADARecord, Turbine
+from scripts.import_real_datasets import import_scada_csv, preview_scada_csv
 
 
 def _scada_args(path: str, **overrides) -> argparse.Namespace:
@@ -25,6 +31,11 @@ def _scada_args(path: str, **overrides) -> argparse.Namespace:
         "grid_frequency_column": None,
         "ambient_temperature_column": None,
         "source_turbine_column": None,
+        "source_wind_farm_column": None,
+        "allow_anonymous_assets": False,
+        "anonymous_region": "anonymous_public_dataset",
+        "asset_name_prefix": "CARE",
+        "field_mapping_version": None,
         "max_rows": None,
         "batch_size": 1000,
         "dry_run": True,
@@ -71,3 +82,61 @@ def test_scada_dry_run_rejects_timestamp_only_file(tmp_path, capsys):
     assert report["ready_for_import"] is False
     assert report["reports"][0]["ready_for_import"] is False
     assert report["reports"][0]["mapped_signal_fields"] == []
+
+
+@pytest.mark.asyncio
+async def test_scada_import_creates_anonymous_care_assets(tmp_path, monkeypatch, capsys):
+    csv_path = tmp_path / "care_event.csv"
+    csv_path.write_text(
+        "timestamp,source_turbine_id,wind_farm,power_kw,wind_speed_ms\n"
+        "2023-01-01T00:00:00,0,Wind Farm A,1200,7.2\n"
+        "2023-01-01T00:10:00,0,Wind Farm A,1180,7.0\n",
+        encoding="utf-8",
+    )
+    engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    monkeypatch.setattr("scripts.import_real_datasets.async_session", session_factory)
+    monkeypatch.setattr("scripts.import_real_datasets.set_source_status", lambda *args, **kwargs: None)
+
+    args = _scada_args(
+        str(csv_path),
+        dry_run=False,
+        turbine_id=None,
+        source_turbine_column="source_turbine_id",
+        source_wind_farm_column="wind_farm",
+        allow_anonymous_assets=True,
+        field_mapping_version="care_standard_field_mapping.csv",
+        batch_size=1,
+    )
+    await import_scada_csv(args)
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["imported"] == 2
+    assert result["anonymous_asset_count"] == 1
+
+    async with session_factory() as db:
+        turbine = (await db.execute(select(Turbine))).scalar_one()
+        assert turbine.name == "CARE-Wind Farm A-0"
+        assert turbine.source_dataset == "care_to_compare_v6"
+        assert turbine.source_asset_id == "Wind Farm A:0"
+        assert turbine.asset_scope == "anonymous_public_dataset"
+        assert turbine.geo_scope == "anonymous_unlocated"
+        assert turbine.lat is None
+        assert turbine.lng is None
+        assert turbine.model is None
+        assert turbine.power_mw is None
+
+        records = (await db.execute(select(SCADARecord).order_by(SCADARecord.timestamp))).scalars().all()
+        assert len(records) == 2
+        assert {record.turbine_id for record in records} == {turbine.id}
+        assert records[0].extra["source_asset_key"] == "Wind Farm A:0"
+        assert records[0].extra["field_mapping_version"] == "care_standard_field_mapping.csv"
+
+        source = (await db.execute(select(DataSource).where(DataSource.source_type == "scada"))).scalar_one()
+        assert source.status == "connected"
+        assert source.connection_params["allow_anonymous_assets"] is True
+        assert source.connection_params["anonymous_asset_count"] == 1
+
+    await engine.dispose()

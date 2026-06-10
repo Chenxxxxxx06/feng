@@ -232,8 +232,8 @@ def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, An
                 f"{normalized_note}"
             ),
             "serves": "SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模",
-            "limitations": "匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；数据库仍需支持匿名公开数据资产；不能与振动/图像样本伪造成同一台风机证据",
-            "coverage_level": "核心技术数据已标准化，待匿名资产入库支持",
+            "limitations": "匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；导入时必须使用匿名资产模式；不能与振动/图像样本伪造成同一台风机证据",
+            "coverage_level": "核心技术数据已标准化，支持匿名资产入库",
         },
         {
             "dataset_id": "nrel_grc_gearbox_cm",
@@ -307,7 +307,7 @@ def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
             "coverage_level": "部分覆盖",
             "covered_by": f"CARE feature_description categories {facts['care_feature_category_counts']}",
             "can_compute_now": "运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算",
-            "missing_or_pending": "数据库匿名资产入库支持、真实额定功率、真实机型、真实地理位置和正常基线标定",
+            "missing_or_pending": "全量入库批次执行、真实额定功率、真实机型、真实地理位置和正常基线标定",
         },
         {
             "indicator_group": "振动诊断指标",
@@ -371,9 +371,9 @@ def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
 def build_user_story_coverage() -> list[dict[str, Any]]:
     stories = pd.read_excel(USER_STORY_MATRIX, sheet_name=0)
     coverage_by_story = {
-        "US01": ("部分覆盖", "CARE 已规范化匿名 asset_id、timestamp、status_type_id，可做匿名风场状态；缺真实坐标、真实台账、数据库匿名资产支持和已标定 HI。"),
+        "US01": ("部分覆盖", "CARE 已规范化匿名 asset_id、timestamp、status_type_id，并支持匿名资产入库；缺真实坐标、真实台账和已标定 HI。"),
         "US02": ("部分覆盖", "CARE 可支持状态和后续 HI；缺机型、额定功率、区域标签、投运信息等真实台账字段。"),
-        "US03": ("部分覆盖", "CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段；ERA5/现场气象未接入，数据库尚未支持匿名资产入库。"),
+        "US03": ("部分覆盖", "CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段，并支持匿名资产入库；ERA5/现场气象未接入。"),
         "US04": ("部分覆盖", "CARE 事件窗口已规范化；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。"),
         "US05": ("已覆盖", "YOLO 有真实图像、真实 bbox、类别 dirt/damage；DTU 有真实巡检图像但无标注。"),
         "US06": ("已覆盖", "NREL/Mendeley 原始振动数据已整理，并已计算 55 行首批时域/频域特征。"),

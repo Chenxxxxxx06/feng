@@ -32,7 +32,8 @@
         "nacelle_direction_deg": "nacelle_direction_deg",
         "grid_frequency_hz": "grid_frequency_hz",
         "ambient_temp_c": "ambient_temp_c",
-        "source_turbine_id": "source_turbine_id"
+        "source_turbine_id": "source_turbine_id",
+        "source_wind_farm": "wind_farm"
       },
       "mapped_signal_fields": [
         "power_kw",
