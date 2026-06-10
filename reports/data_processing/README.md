@@ -16,7 +16,7 @@
 
 | 数据集 | 本轮用途 | 处理状态 | 说明 |
 |---|---|---|---|
-| CARE to Compare v6 SCADA | 主时间线、运行状态、状态标签、SCADA 指标建模 | 已归档并解压 | 识别到 101 个 CSV 文件，SCADA 文件为分号分隔，单文件表头识别为 86 列 |
+| CARE to Compare v6 SCADA | 主时间线、运行状态、状态标签、SCADA 指标建模 | 已归档并解压 | 识别到 95 个事件时间序列 CSV 和 6 个元数据 CSV；事件数据为分号分隔，Wind Farm A 单文件表头识别为 86 列 |
 | Mendeley Blade Fault Vibration | 叶片振动诊断样本 | 已镜像到统一目录并计算特征 | 计算均值、标准差、RMS、峰值、峭度、偏度、峰值因子、主频等首批指标 |
 | NREL GRC Gearbox Vibration | 齿轮箱振动诊断样本 | 已镜像到统一目录并计算特征 | 基于真实 MAT 文件读取通道并计算首批振动特征 |
 | YOLO Annotated Wind Turbine Surface Damage | 叶片表面损伤识别样本 | 已归档并解压 | 使用项目中已验证可解压的压缩包；`maindata` 中同名压缩包尾部为零填充，不作为处理来源 |
@@ -30,13 +30,20 @@
 | `vibration_features.csv` | 振动诊断首批数学特征 | 55 行 |
 | `image_dataset_quality.csv` | 图像数据质量与标注完整性统计 | 2 行 |
 | `care_scada_files.csv` | CARE SCADA 文件级摘要 | 101 行 |
+| `care_event_summary.csv` | CARE 事件标签、异常/正常数量、部件类别摘要 | 3 行 |
+| `care_feature_catalog.csv` | CARE 各风场传感器字段说明和粗分类 | 355 行 |
+| `dataset_capability_profile.csv` | 当前真实数据集能力画像 | 7 行 |
+| `modeling_indicator_dataset_coverage.csv` | 建模指标与数据集覆盖关系 | 10 行 |
+| `user_story_dataset_coverage.csv` | 14 个用户故事的数据覆盖判断 | 14 行 |
+| `DATASET_COVERAGE_ASSESSMENT.md` | 数据集覆盖评估结论和开发优先级 | Markdown 报告 |
 
 ## 当前限制
 
-1. CARE SCADA 目前只完成文件级摘要，尚未完成字段语义映射、时间线合并、状态窗口展开和数据库导入。
+1. CARE SCADA 目前已完成文件级摘要、事件摘要和字段目录，尚未完成字段语义映射、时间线合并、状态窗口展开和数据库导入。
 2. 振动数据已计算首批统计与频域特征，但 NREL 与 Mendeley 不是同一设备来源，不能强行绑定到 CARE 风机资产。
-3. DTU 图像没有检测标注，只适合作为巡检图像展示与人工质检样本；YOLO 数据集可用于表面损伤检测演示。
+3. DTU 图像没有检测标注，只适合作为巡检图像展示与人工质检样本；YOLO 数据集可用于表面损伤检测演示，类别来自真实 `labels.txt`。
 4. 当前输出是离线处理报告，尚未接入后端诊断 API、前端诊断页面和模型训练流水线。
+5. 真实工单、成本、库存、人员排班和维护历史仍缺失，需要系统真实积累或用户提供带来源数据。
 
 ## 下一步
 

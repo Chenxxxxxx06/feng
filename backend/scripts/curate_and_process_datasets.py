@@ -289,7 +289,16 @@ def process_vibration() -> list[dict[str, Any]]:
 
 def image_summary_for_yolo(root: Path) -> dict[str, Any]:
     images = sorted(p for p in root.rglob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp"})
-    labels = sorted(p for p in root.rglob("*.txt"))
+    class_name_files = sorted(p for p in root.rglob("labels.txt"))
+    class_names: dict[str, str] = {}
+    if class_name_files:
+        names = [
+            line.strip()
+            for line in class_name_files[0].read_text(encoding="utf-8", errors="ignore").splitlines()
+            if line.strip()
+        ]
+        class_names = {str(index): name for index, name in enumerate(names)}
+    labels = sorted(p for p in root.rglob("*.txt") if p.name.lower() != "labels.txt")
     image_stems = {p.stem for p in images}
     label_stems = {p.stem for p in labels}
     paired = image_stems & label_stems
@@ -326,7 +335,12 @@ def image_summary_for_yolo(root: Path) -> dict[str, Any]:
         "paired_image_label_count": len(paired),
         "unpaired_images": len(image_stems - label_stems),
         "unpaired_labels": len(label_stems - image_stems),
+        "class_names": class_names,
         "class_id_counts": dict(sorted(class_counts.items())),
+        "class_name_counts": {
+            class_names.get(class_id, class_id): count
+            for class_id, count in sorted(class_counts.items())
+        },
         "bbox_count": len(bbox_areas),
         "bbox_area_ratio_mean": round(float(np.mean(bbox_areas)), 8) if bbox_areas else None,
         "bbox_area_ratio_min": round(float(np.min(bbox_areas)), 8) if bbox_areas else None,
@@ -374,6 +388,14 @@ def process_care_scada(root: Path) -> list[dict[str, Any]]:
     for path in sorted(root.rglob("*.csv")):
         rel_parts = path.relative_to(root).parts
         wind_farm = rel_parts[0] if rel_parts else ""
+        if path.name == "event_info.csv":
+            file_type = "event_info"
+        elif path.name == "feature_description.csv":
+            file_type = "feature_description"
+        elif "datasets" in rel_parts:
+            file_type = "event_dataset"
+        else:
+            file_type = "csv_metadata"
         try:
             delimiter = detect_csv_delimiter(path)
             if delimiter:
@@ -389,6 +411,7 @@ def process_care_scada(root: Path) -> list[dict[str, Any]]:
                 "wind_farm": wind_farm,
                 "source_file": str(path),
                 "file_size_bytes": path.stat().st_size,
+                "file_type": file_type,
                 "row_count_excluding_header": max(0, line_count - 1),
                 "delimiter": delimiter,
                 "column_count": len(header),
@@ -401,6 +424,7 @@ def process_care_scada(root: Path) -> list[dict[str, Any]]:
                 "wind_farm": wind_farm,
                 "source_file": str(path),
                 "file_size_bytes": path.stat().st_size,
+                "file_type": file_type,
                 "error": repr(exc),
             })
     return rows
@@ -491,6 +515,8 @@ def main() -> None:
             "vibration_feature_rows": len(vibration_rows),
             "image_quality_rows": len(image_rows),
             "care_csv_rows": len(care_rows),
+            "care_event_dataset_files": sum(1 for row in care_rows if row.get("file_type") == "event_dataset"),
+            "care_metadata_files": sum(1 for row in care_rows if row.get("file_type") != "event_dataset"),
         },
         "notes": [
             "Reports are first-pass processing artifacts based on MATHEMATICAL_MODELING_DESIGN.md.",
