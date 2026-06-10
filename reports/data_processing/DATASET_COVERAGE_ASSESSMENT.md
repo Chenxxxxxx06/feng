@@ -9,6 +9,7 @@
 ## 关键数据事实
 
 - CARE：95 个事件时间序列文件，6 个元数据文件，事件表共 95 条，其中 anomaly 45 条、normal 50 条。
+- CARE 规范化：`{"generated_at": "2026-06-10T17:06:24.964676+00:00", "dataset_id": "care_to_compare_v6", "normalized_root": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\modeling\\care_to_compare_v6\\normalized_events", "event_window_rows": 95, "normalized_event_files": 95, "total_normalized_rows": 5242948, "ready_for_scada_indicator_files": 95, "ready_for_hi_input_files": 95, "ready_for_rul_window_files": 95, "outputs": {"care_standard_field_mapping": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_standard_field_mapping.csv", "care_event_windows_normalized": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_event_windows_normalized.csv", "care_normalized_event_manifest": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_normalized_event_manifest.csv", "care_status_type_distribution": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_status_type_distribution.csv", "care_modeling_import_plan": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\CARE_MODELING_IMPORT_PLAN.md"}, "notes": ["Normalized event CSV files are generated from real CARE SCADA only.", "No coordinates, turbine models, business costs, work orders, or cross-dataset asset links were generated.", "Large normalized CSV files are under backend/data/modeling and are ignored by Git."]}`。
 - CARE 字段类别：`{"active_power": 31, "bearing": 1, "direction_yaw": 16, "electrical": 57, "gearbox": 11, "generator": 10, "hydraulic": 12, "other_sensor": 63, "pitch": 4, "rotational_speed": 14, "temperature": 127, "wind_speed": 9}`。
 - 振动样本：`{"mendeley_blade_vibration_faults": 35, "nrel_grc_gearbox_cm": 20}`。
 - 图像样本：`{"yolo_annotated_wind_turbine_surface_damage": {"image_files": 13470, "label_files": 2995, "paired_image_label_count": 2995, "class_name_counts": {"dirt": 581, "damage": 8770}}, "dtu_drone_inspection": {"image_files": 701, "label_files": 0, "paired_image_label_count": null, "class_name_counts": {}}}`。
@@ -17,7 +18,7 @@
 
 | dataset_id | coverage_level | serves | available_evidence | limitations |
 | --- | --- | --- | --- | --- |
-| care_to_compare_v6 | 核心技术数据已覆盖，业务与地理台账部分缺失 | SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控 | 95 event datasets; 95 event_info rows; 45 anomaly and 50 normal events; 36 farm-scoped anonymous asset references | 匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；不能与振动/图像样本伪造成同一台风机证据 |
+| care_to_compare_v6 | 核心技术数据已标准化，待匿名资产入库支持 | SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模 | 95 event datasets; 95 event_info rows; 45 anomaly and 50 normal events; 36 farm-scoped anonymous asset references; normalized 95 event files with 5242948 rows | 匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；数据库仍需支持匿名公开数据资产；不能与振动/图像样本伪造成同一台风机证据 |
 | nrel_grc_gearbox_cm | 样本级覆盖 | 齿轮箱振动波形、时域/频域指标、样本级故障诊断解释 | 20 processed MAT samples; labels {'damaged': 10, 'healthy': 10} | 不是 CARE 同一风机；当前未确认所有通道采样率；只能作为诊断样本库和算法演示来源 |
 | mendeley_blade_vibration_faults | 样本级覆盖 | 叶片振动波形、时域/频域指标、样本级故障诊断解释 | 35 processed CSV/XLSX samples; labels {'crack': 7, 'erosion': 7, 'healthy': 7, 'twist': 7, 'unbalance': 7} | 不是 CARE 同一风机；标签来自真实文件名/数据集结构，后续要保留来源说明 |
 | yolo_annotated_wind_turbine_surface_damage | 样本级覆盖 | 叶片图像损伤定位、bbox面积占比、图像诊断证据 | 13470 images; 2995 YOLO label files; 2995 paired image-label samples; class counts {'dirt': 581, 'damage': 8770} | 类别以数据集 labels.txt 为准；不生成模型置信度；不代表 CARE 风机现场巡检历史 |
@@ -29,13 +30,13 @@
 
 | indicator_group | coverage_level | can_compute_now | missing_or_pending |
 | --- | --- | --- | --- |
-| 数据质量评分 | 部分覆盖 | 文件级完整性、分隔符、列数、时间戳候选、图像标注配对率、振动特征行数 | SCADA 行级缺失率、时间戳有效率、传感器异常值分布尚未批量计算 |
-| SCADA运行指标 | 部分覆盖 | 运行状态、事件窗口、风速/功率/温度/桨距/方向等候选字段映射后的运行指标 | 真实额定功率、真实机型、真实地理位置、字段映射确认和正常基线标定 |
+| 数据质量评分 | 部分覆盖 | 文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；CARE 已规范化 95 个事件文件、5242948 行 | 导入批次级质量日志、数据库记录数校验、传感器异常值分布和页面级质量聚合 |
+| SCADA运行指标 | 部分覆盖 | 运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算 | 数据库匿名资产入库支持、真实额定功率、真实机型、真实地理位置和正常基线标定 |
 | 振动诊断指标 | 已覆盖 | RMS、峰值、峰峰值、标准差、偏度、峭度、波峰因子、脉冲因子、形状因子、裕度因子、主频/主频bin | NREL 采样率和更多通道选择策略；阈值标定；诊断 API 接入 |
 | 叶片图像损伤指标 | 已覆盖 | 真实图像展示、YOLO bbox、类别 dirt/damage、bbox面积占比、标注配对率 | 模型训练/推理置信度；DTU 无标注；严重度阈值需标定 |
-| 健康指数 HI | 部分覆盖 | 分项指标框架和样本级分项分数 | 权重、阈值、跨源资产关联边界、CARE 主时间线入库后的统一计算 |
+| 健康指数 HI | 部分覆盖 | CARE 标准化 SCADA 可支持功率、温度、运行状态分项；振动和图像可支持样本级分项 | 权重、阈值、跨源资产关联边界、数据库入库后的统一计算 |
 | 故障贡献排序 | 部分覆盖 | 基于来源明确的规则型证据排序 | 训练后的特征贡献、SHAP/模型解释、历史阈值验证 |
-| RUL预测 | 部分覆盖 | 风险趋势、事件前窗口、HI 趋势入口 | 真实维修记录、失效阈值、寿命终点定义、工业级验证 |
+| RUL预测 | 部分覆盖 | 风险趋势、事件前窗口、HI 趋势入口；CARE 事件窗口已规范化 | 真实维修记录、失效阈值、寿命终点定义、工业级验证 |
 | 维护成本决策 | 缺失 | 公式框架和用户输入参数计算 | 人工、备件、停机、电价、外包、库存、历史工单等真实业务数据 |
 | 工单优先级 | 部分覆盖 | 规则框架 | 真实工单、人员、库存、备件、SLA 和业务权重 |
 | 数据源监控与页面总结 | 部分覆盖 | 下载/解压/处理状态、缺失项说明、页面数据来源说明 | 导入批次日志、数据库记录数、字段映射版本、页面级数据质量聚合 |
@@ -44,20 +45,20 @@
 
 | story_id | user_story | coverage_level | evidence | gap_action |
 | --- | --- | --- | --- | --- |
-| US01 | 地图查看所有风机状态 | 部分覆盖 | CARE 有匿名 asset_id、time_stamp、status_type_id，可做匿名风场状态；缺真实坐标、真实台账和已标定 HI。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US01 | 地图查看所有风机状态 | 部分覆盖 | CARE 已规范化匿名 asset_id、timestamp、status_type_id，可做匿名风场状态；缺真实坐标、真实台账、数据库匿名资产支持和已标定 HI。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US02 | 按机型、HI、区域筛选风机 | 部分覆盖 | CARE 可支持状态和后续 HI；缺机型、额定功率、区域标签、投运信息等真实台账字段。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
-| US03 | 查询单台风机详细指标 | 部分覆盖 | CARE feature_description 支持风速、功率、温度、桨距、方向等字段映射；ERA5/现场气象未接入，字段尚未入库。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
-| US04 | 自动识别故障类型并给出置信度 | 部分覆盖 | CARE 有事件窗口；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US03 | 查询单台风机详细指标 | 部分覆盖 | CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段；ERA5/现场气象未接入，数据库尚未支持匿名资产入库。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US04 | 自动识别故障类型并给出置信度 | 部分覆盖 | CARE 事件窗口已规范化；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US05 | 基于叶片图像定位损伤 | 已覆盖 | YOLO 有真实图像、真实 bbox、类别 dirt/damage；DTU 有真实巡检图像但无标注。 | 接入后端 API 和前端展示，保留来源字段 |
 | US06 | 查看振动波形数据 | 已覆盖 | NREL/Mendeley 原始振动数据已整理，并已计算 55 行首批时域/频域特征。 | 接入后端 API 和前端展示，保留来源字段 |
 | US07 | 故障相关指数按重要程度排序 | 部分覆盖 | 有可解释指标输入，但贡献排序算法、权重、SHAP 或历史阈值仍待建立。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
-| US08 | 查看风机和核心部件RUL预测 | 部分覆盖 | CARE 提供长期 SCADA 和事件窗口，可做风险趋势入口；缺维修记录、寿命终点和工业级 RUL 验证。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US08 | 查看风机和核心部件RUL预测 | 部分覆盖 | CARE 长期 SCADA 和事件窗口已标准化，可做风险趋势入口；缺维修记录、寿命终点和工业级 RUL 验证。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US09 | 对比不同维护决策成本 | 缺失 | 公开数据集不提供真实成本、备件、人工、停机损失；只能等待用户录入或真实业务导入。 | 从空状态开始，由系统真实积累或用户提供带来源数据 |
 | US10 | 自动生成维护日历和备件采购提示 | 部分覆盖 | 诊断/RUL 风险输入可逐步形成；备件、库存、采购周期、人员排班和天气窗口缺失。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US11 | 管理维修工单完整流程 | 缺失 | 真实工单流程数据应由系统操作积累或用户导入；不能沿用 demo 工单。 | 从空状态开始，由系统真实积累或用户提供带来源数据 |
 | US12 | 配置HI阈值和通知渠道 | 部分覆盖 | 阈值配置可先做系统配置；HI 输出、阈值版本和误报漏报统计要等真实指标运行后沉淀。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US13 | 自动总结当前页面关键信息 | 部分覆盖 | 可以总结真实数据状态和缺失项；完整页面摘要依赖各模块 API 入库和质量标记。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
-| US14 | 配置和监控各类数据源连接 | 部分覆盖 | 已有真实数据源、处理摘要和质量报告；还缺数据库导入批次、字段映射版本和运行日志接入。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US14 | 配置和监控各类数据源连接 | 部分覆盖 | 已有真实数据源、处理摘要、字段映射、规范化清单和质量报告；还缺数据库导入批次、字段映射版本和运行日志接入。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 
 ## 开发优先级
 

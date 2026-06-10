@@ -32,6 +32,13 @@
 | `care_scada_files.csv` | CARE SCADA 文件级摘要 | 101 行 |
 | `care_event_summary.csv` | CARE 事件标签、异常/正常数量、部件类别摘要 | 3 行 |
 | `care_feature_catalog.csv` | CARE 各风场传感器字段说明和粗分类 | 355 行 |
+| `care_standard_field_mapping.csv` | CARE 传感器字段到项目标准 SCADA 字段的映射 | 30 行 |
+| `care_event_windows_normalized.csv` | CARE 事件窗口规范表 | 95 行 |
+| `care_normalized_event_manifest.csv` | 规范化事件 CSV 的可用性、完整性和状态分布摘要 | 95 行 |
+| `care_status_type_distribution.csv` | 各事件文件的 `status_type_id` 分布 | 按事件和状态展开 |
+| `care_modeling_dataset_summary.json` | CARE 建模预处理汇总 | 1 份 |
+| `care_normalized_import_dry_run.json` | 规范化 CARE 文件通过现有 SCADA 导入器 dry-run 的验证结果 | 1 份 |
+| `CARE_MODELING_IMPORT_PLAN.md` | CARE 主时间线入库计划和约束 | Markdown 报告 |
 | `dataset_capability_profile.csv` | 当前真实数据集能力画像 | 7 行 |
 | `modeling_indicator_dataset_coverage.csv` | 建模指标与数据集覆盖关系 | 10 行 |
 | `user_story_dataset_coverage.csv` | 14 个用户故事的数据覆盖判断 | 14 行 |
@@ -39,15 +46,16 @@
 
 ## 当前限制
 
-1. CARE SCADA 目前已完成文件级摘要、事件摘要和字段目录，尚未完成字段语义映射、时间线合并、状态窗口展开和数据库导入。
+1. CARE SCADA 目前已完成文件级摘要、事件摘要、字段目录、标准字段映射、事件窗口规范化和 95 个事件文件的标准 SCADA 字段输出，规范化大文件位于 `backend/data/modeling/care_to_compare_v6/normalized_events`。
 2. 振动数据已计算首批统计与频域特征，但 NREL 与 Mendeley 不是同一设备来源，不能强行绑定到 CARE 风机资产。
 3. DTU 图像没有检测标注，只适合作为巡检图像展示与人工质检样本；YOLO 数据集可用于表面损伤检测演示，类别来自真实 `labels.txt`。
-4. 当前输出是离线处理报告，尚未接入后端诊断 API、前端诊断页面和模型训练流水线。
+4. CARE 规范化文件已经能被现有 `scada-csv` 导入器 dry-run 识别，但正式入库前需要数据库支持匿名 CARE 资产，不能把匿名资产硬绑定到真实风机或伪造坐标。
 5. 真实工单、成本、库存、人员排班和维护历史仍缺失，需要系统真实积累或用户提供带来源数据。
 
 ## 下一步
 
-1. 解析 CARE README 与字段说明，建立 `asset_id`、`time_stamp`、`status_type_id`、功率、风速、温度、控制量等字段映射。
-2. 生成 CARE 主时间线表和状态窗口表，作为系统统一运行数据底座。
-3. 将 `vibration_features.csv` 接入诊断样本库，前端展示真实振动特征与可解释诊断依据。
-4. 将 YOLO 标注样本接入图像诊断演示，明确类别映射、标注完整性与样本限制。
+1. 扩展数据库资产模型，支持 CARE 匿名资产、匿名地理范围、来源数据集和字段映射版本。
+2. 基于 `care_normalized_event_manifest.csv` 建立 SCADA 入库批次和质量日志。
+3. 用正常事件窗口拟合功率曲线与温度基线，再计算 HI 分项。
+4. 将 `vibration_features.csv` 接入诊断样本库，前端展示真实振动特征与可解释诊断依据。
+5. 将 YOLO 标注样本接入图像诊断演示，明确类别映射、标注完整性与样本限制。

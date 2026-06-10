@@ -161,6 +161,10 @@ def collect_facts() -> dict[str, Any]:
     care_files = pd.read_csv(REPORTS / "care_scada_files.csv")
     vibration = pd.read_csv(REPORTS / "vibration_features.csv")
     images = pd.read_csv(REPORTS / "image_dataset_quality.csv")
+    modeling_summary_path = REPORTS / "care_modeling_dataset_summary.json"
+    modeling_summary: dict[str, Any] = {}
+    if modeling_summary_path.exists():
+        modeling_summary = json.loads(modeling_summary_path.read_text(encoding="utf-8"))
 
     care_event_files = int((care_files["file_type"] == "event_dataset").sum()) if "file_type" in care_files.columns else 95
     care_metadata_files = int((care_files["file_type"] != "event_dataset").sum()) if "file_type" in care_files.columns else 6
@@ -202,12 +206,20 @@ def collect_facts() -> dict[str, Any]:
         "vibration_counts": {str(key): int(value) for key, value in vibration_counts.items()},
         "vibration_labels": vibration_labels,
         "image_profiles": image_profiles,
+        "care_modeling_summary": modeling_summary,
     }
 
 
 def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, Any]]:
     yolo = facts["image_profiles"].get("yolo_annotated_wind_turbine_surface_damage", {})
     dtu = facts["image_profiles"].get("dtu_drone_inspection", {})
+    care_modeling = facts.get("care_modeling_summary", {})
+    normalized_note = (
+        f"; normalized {care_modeling.get('normalized_event_files')} event files with "
+        f"{care_modeling.get('total_normalized_rows')} rows"
+        if care_modeling
+        else ""
+    )
     return [
         {
             "dataset_id": "care_to_compare_v6",
@@ -217,10 +229,11 @@ def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, An
                 f"{facts['care_event_count']} event_info rows; "
                 f"{facts['care_anomaly_count']} anomaly and {facts['care_normal_count']} normal events; "
                 f"{facts['care_asset_count']} farm-scoped anonymous asset references"
+                f"{normalized_note}"
             ),
-            "serves": "SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控",
-            "limitations": "匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；不能与振动/图像样本伪造成同一台风机证据",
-            "coverage_level": "核心技术数据已覆盖，业务与地理台账部分缺失",
+            "serves": "SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模",
+            "limitations": "匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；数据库仍需支持匿名公开数据资产；不能与振动/图像样本伪造成同一台风机证据",
+            "coverage_level": "核心技术数据已标准化，待匿名资产入库支持",
         },
         {
             "dataset_id": "nrel_grc_gearbox_cm",
@@ -274,20 +287,27 @@ def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, An
 
 
 def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
+    care_modeling = facts.get("care_modeling_summary", {})
+    normalized_summary = (
+        f"CARE 已规范化 {care_modeling.get('normalized_event_files')} 个事件文件、"
+        f"{care_modeling.get('total_normalized_rows')} 行"
+        if care_modeling
+        else "CARE 文件级摘要"
+    )
     return [
         {
             "indicator_group": "数据质量评分",
             "coverage_level": "部分覆盖",
             "covered_by": "CARE 文件结构、时间戳字段、行数；YOLO 图像/标签配对；振动样本可读性",
-            "can_compute_now": "文件级完整性、分隔符、列数、时间戳候选、图像标注配对率、振动特征行数",
-            "missing_or_pending": "SCADA 行级缺失率、时间戳有效率、传感器异常值分布尚未批量计算",
+            "can_compute_now": f"文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；{normalized_summary}",
+            "missing_or_pending": "导入批次级质量日志、数据库记录数校验、传感器异常值分布和页面级质量聚合",
         },
         {
             "indicator_group": "SCADA运行指标",
             "coverage_level": "部分覆盖",
             "covered_by": f"CARE feature_description categories {facts['care_feature_category_counts']}",
-            "can_compute_now": "运行状态、事件窗口、风速/功率/温度/桨距/方向等候选字段映射后的运行指标",
-            "missing_or_pending": "真实额定功率、真实机型、真实地理位置、字段映射确认和正常基线标定",
+            "can_compute_now": "运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算",
+            "missing_or_pending": "数据库匿名资产入库支持、真实额定功率、真实机型、真实地理位置和正常基线标定",
         },
         {
             "indicator_group": "振动诊断指标",
@@ -307,8 +327,8 @@ def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
             "indicator_group": "健康指数 HI",
             "coverage_level": "部分覆盖",
             "covered_by": "CARE SCADA、振动特征、图像 bbox 指标",
-            "can_compute_now": "分项指标框架和样本级分项分数",
-            "missing_or_pending": "权重、阈值、跨源资产关联边界、CARE 主时间线入库后的统一计算",
+            "can_compute_now": "CARE 标准化 SCADA 可支持功率、温度、运行状态分项；振动和图像可支持样本级分项",
+            "missing_or_pending": "权重、阈值、跨源资产关联边界、数据库入库后的统一计算",
         },
         {
             "indicator_group": "故障贡献排序",
@@ -321,7 +341,7 @@ def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
             "indicator_group": "RUL预测",
             "coverage_level": "部分覆盖",
             "covered_by": "CARE 长期 SCADA 时间序列和事件窗口",
-            "can_compute_now": "风险趋势、事件前窗口、HI 趋势入口",
+            "can_compute_now": "风险趋势、事件前窗口、HI 趋势入口；CARE 事件窗口已规范化",
             "missing_or_pending": "真实维修记录、失效阈值、寿命终点定义、工业级验证",
         },
         {
@@ -351,20 +371,20 @@ def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
 def build_user_story_coverage() -> list[dict[str, Any]]:
     stories = pd.read_excel(USER_STORY_MATRIX, sheet_name=0)
     coverage_by_story = {
-        "US01": ("部分覆盖", "CARE 有匿名 asset_id、time_stamp、status_type_id，可做匿名风场状态；缺真实坐标、真实台账和已标定 HI。"),
+        "US01": ("部分覆盖", "CARE 已规范化匿名 asset_id、timestamp、status_type_id，可做匿名风场状态；缺真实坐标、真实台账、数据库匿名资产支持和已标定 HI。"),
         "US02": ("部分覆盖", "CARE 可支持状态和后续 HI；缺机型、额定功率、区域标签、投运信息等真实台账字段。"),
-        "US03": ("部分覆盖", "CARE feature_description 支持风速、功率、温度、桨距、方向等字段映射；ERA5/现场气象未接入，字段尚未入库。"),
-        "US04": ("部分覆盖", "CARE 有事件窗口；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。"),
+        "US03": ("部分覆盖", "CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段；ERA5/现场气象未接入，数据库尚未支持匿名资产入库。"),
+        "US04": ("部分覆盖", "CARE 事件窗口已规范化；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。"),
         "US05": ("已覆盖", "YOLO 有真实图像、真实 bbox、类别 dirt/damage；DTU 有真实巡检图像但无标注。"),
         "US06": ("已覆盖", "NREL/Mendeley 原始振动数据已整理，并已计算 55 行首批时域/频域特征。"),
         "US07": ("部分覆盖", "有可解释指标输入，但贡献排序算法、权重、SHAP 或历史阈值仍待建立。"),
-        "US08": ("部分覆盖", "CARE 提供长期 SCADA 和事件窗口，可做风险趋势入口；缺维修记录、寿命终点和工业级 RUL 验证。"),
+        "US08": ("部分覆盖", "CARE 长期 SCADA 和事件窗口已标准化，可做风险趋势入口；缺维修记录、寿命终点和工业级 RUL 验证。"),
         "US09": ("缺失", "公开数据集不提供真实成本、备件、人工、停机损失；只能等待用户录入或真实业务导入。"),
         "US10": ("部分覆盖", "诊断/RUL 风险输入可逐步形成；备件、库存、采购周期、人员排班和天气窗口缺失。"),
         "US11": ("缺失", "真实工单流程数据应由系统操作积累或用户导入；不能沿用 demo 工单。"),
         "US12": ("部分覆盖", "阈值配置可先做系统配置；HI 输出、阈值版本和误报漏报统计要等真实指标运行后沉淀。"),
         "US13": ("部分覆盖", "可以总结真实数据状态和缺失项；完整页面摘要依赖各模块 API 入库和质量标记。"),
-        "US14": ("部分覆盖", "已有真实数据源、处理摘要和质量报告；还缺数据库导入批次、字段映射版本和运行日志接入。"),
+        "US14": ("部分覆盖", "已有真实数据源、处理摘要、字段映射、规范化清单和质量报告；还缺数据库导入批次、字段映射版本和运行日志接入。"),
     }
     rows: list[dict[str, Any]] = []
     for _, story in stories.iterrows():
@@ -416,6 +436,7 @@ def write_markdown_report(
 ## 关键数据事实
 
 - CARE：{facts['care_event_dataset_files']} 个事件时间序列文件，{facts['care_metadata_files']} 个元数据文件，事件表共 {facts['care_event_count']} 条，其中 anomaly {facts['care_anomaly_count']} 条、normal {facts['care_normal_count']} 条。
+- CARE 规范化：`{json.dumps(facts.get('care_modeling_summary', {}), ensure_ascii=False)}`。
 - CARE 字段类别：`{json.dumps(facts['care_feature_category_counts'], ensure_ascii=False)}`。
 - 振动样本：`{json.dumps(facts['vibration_counts'], ensure_ascii=False)}`。
 - 图像样本：`{json.dumps(facts['image_profiles'], ensure_ascii=False)}`。
