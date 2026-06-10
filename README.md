@@ -16,7 +16,7 @@
 ### 核心特性
 
 - 🗺️ **风场地图监控** - 陕西省风场可视化，实时风机状态展示
-- 🔍 **智能故障诊断** - CV叶片检测、振动分析、故障根因分析
+- 🔍 **故障诊断** - 真实数据集叶片标注展示、振动样本分析、故障根因分析
 - 📈 **预测性维护** - RUL剩余寿命预测、维护成本对比
 - 📋 **工单管理** - 全生命周期工单流转、邮件通知
 - 🤖 **AI助手** - Copilot悬浮窗、智能问答、页面感知
@@ -110,6 +110,56 @@ npm run dev
 1. 打开 http://localhost:5173
 2. 注册新账号或使用默认账号登录
 3. 开始使用系统
+
+### 6. 导入真实诊断数据
+
+系统不生成模拟 SCADA 曲线、振动波形、叶片图像或业务标签。若未导入真实数据集，页面会显示缺失说明。
+
+建议先导入 SCADA 主时间线，再导入振动和叶片图像诊断样本：
+
+```bash
+cd backend
+
+# 导入公开或实测SCADA CSV，作为系统主时间线
+python -m scripts.import_real_datasets scada-csv ^
+  --path <真实SCADA CSV路径或目录> ^
+  --turbine-id 1 ^
+  --dataset-id care_to_compare_v6 ^
+  --source-doi 10.5281/zenodo.15846963 ^
+  --source-url https://zenodo.org/records/15846963 ^
+  --dry-run
+
+python -m scripts.import_real_datasets scada-csv ^
+  --path <真实SCADA CSV路径或目录> ^
+  --turbine-id 1 ^
+  --dataset-id care_to_compare_v6 ^
+  --source-doi 10.5281/zenodo.15846963 ^
+  --source-url https://zenodo.org/records/15846963
+
+# 导入公开或实测振动CSV/TXT
+python -m scripts.import_real_datasets vibration-csv ^
+  --path <真实振动CSV或TXT路径> ^
+  --turbine-id 1 ^
+  --dataset-id <数据集ID> ^
+  --label <源数据标签> ^
+  --source-doi <DOI或留空> ^
+  --source-url <数据集页面或留空>
+
+# 导入真实叶片图像和YOLO标注
+python -m scripts.import_real_datasets blade-yolo ^
+  --dataset-dir <真实叶片图像YOLO目录> ^
+  --turbine-id 1 ^
+  --dataset-id <数据集ID> ^
+  --classes crack,erosion,delamination ^
+  --require-label
+```
+
+已整理的数据源候选见 `backend/data/real_dataset_sources.json`。下载和使用前应核对数据集页面的版本、许可证、样本质量和引用要求。
+`--dry-run` 只输出字段映射和质量预检报告，不写入数据库；确认 `ready_for_import=true` 后再去掉该参数正式导入。
+
+数据整合原则见 `DATA_INTEGRATION_STRATEGY.md`。SCADA、振动、图像、气象和工单数据不强行伪造成同一台真实风机的完整历史；系统通过 `source_dataset`、`source_file`、`dataset_window` 等字段保留来源边界。
+机器可读执行方案见 `backend/data/data_integration_plan.json`，系统设置页会通过 `/api/settings/data-integration-plan` 展示各层当前接入状态。
+本地真实数据包解压状态见 `backend/data/local_dataset_inventory.json`。大型原始数据文件位于 `backend/data/scada/`、`backend/data/vibration/` 等忽略目录，不提交到 Git 仓库。
 
 ---
 
@@ -289,96 +339,8 @@ docker run -d -p 8000:8000 --env-file .env fengdiao-phm
 
 如有问题，请通过以下方式联系：
 
+- 项目Issues: [GitHub Issues](链接)
 - 邮箱: your-email@example.com
-
----
-
-# 快速启动指南
-
-> 以下命令在项目根目录 `G:\code\code_vscode\软件开发能力\fengdiao-pHM` 下执行
-
-## 前置条件
-
-- 已安装 Anaconda/Miniconda
-- 已有 `phm` conda 环境（Python 3.11）
-- 已安装 Node.js（npm）
-
-## 第一次使用（初始化环境）
-
-```bash
-# 1. 创建 conda 环境（仅首次）
-conda create -n phm python=3.11 -y
-
-# 2. 安装 Python 依赖
-conda activate phm
-cd backend
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 3. 安装前端依赖
-cd ../frontend
-npm install
-
-# 4. 初始化数据库（种子数据）
-cd ../backend
-python -m scripts.seed_data
-```
-
-## 日常启动
-
-打开 **两个终端窗口**：
-
-**终端1 — 启动后端（端口8000）**
-```bash
-conda activate phm
-cd G:\code\code_vscode\软件开发能力\fengdiao-pHM\backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**终端2 — 启动前端（端口5173）**
-```bash
-cd G:\code\code_vscode\软件开发能力\fengdiao-pHM\frontend
-npx vite --host 0.0.0.0 --port 5173
-```
-
-## 访问系统
-
-| 服务 | 地址 |
-|------|------|
-| **系统界面** | http://localhost:5173 |
-| **API文档** | http://localhost:8000/api/docs |
-
-## 登录账号
-
-| 角色 | 用户名 | 密码 |
-|------|--------|------|
-| 管理员 | `admin` | `admin123` |
-| 技术员 | `张工` | `tech123` |
-| 技术员 | `李工` | `tech123` |
-| 技术员 | `王工` | `tech123` |
-| 技术员 | `赵工` | `tech123` |
-
-## 停止服务
-
-在两个终端窗口分别按 `Ctrl+C` 即可。
-
-## 运行测试
-
-```bash
-conda activate phm
-cd G:\code\code_vscode\软件开发能力\fengdiao-pHM\backend
-python -m pytest tests/ -v
-```
-
-## 重新初始化数据库
-
-```bash
-conda activate phm
-cd G:\code\code_vscode\软件开发能力\fengdiao-pHM\backend
-# 删除旧数据库
-del fengdiao_phm.db
-# 重新种子
-python -m scripts.seed_data
-```
 
 ---
 
