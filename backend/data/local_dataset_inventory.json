@@ -63,6 +63,46 @@
         "samples_per_channel_from_source_page": 500
       },
       "import_gap": "Current vibration importer needs semicolon-delimited CSV detection and XLSX support before all 35 files can be imported."
+    },
+    {
+      "id": "yolo_annotated_wind_turbine_surface_damage",
+      "role": "diagnostic_sample_library",
+      "source": "Mendeley Data dataset t6fwpc735s version 1",
+      "doi": "10.17632/t6fwpc735s.1",
+      "source_archive": "backend/data/blade_images/yolo_annotated_wind_turbine_surface_damage/t6fwpc735s-1.zip",
+      "expected_size_bytes": 2756431451,
+      "local_directory": "backend/data/blade_images/yolo_annotated_wind_turbine_surface_damage",
+      "status": "downloading_via_mendeley_public_api",
+      "download_command": "curl.exe -L --fail --retry 8 --retry-delay 5 --connect-timeout 30 -C - -o backend/data/blade_images/yolo_annotated_wind_turbine_surface_damage/t6fwpc735s-1.zip https://data.mendeley.com/public-api/zip/t6fwpc735s/download/1",
+      "verification_required_before_import": [
+        "file size equals expected_size_bytes",
+        "archive opens without errors",
+        "image files and YOLO label files are both present"
+      ],
+      "notes": [
+        "The source page states this dataset is derived from the DTU drone inspection image dataset and uses YOLO labels for dirt and damage.",
+        "Do not import until the archive is complete and extracted."
+      ]
+    },
+    {
+      "id": "dtu_drone_inspection",
+      "role": "diagnostic_sample_library",
+      "source": "Mendeley Data dataset hd96prn3nc version 2",
+      "doi": "10.17632/hd96prn3nc.2",
+      "source_archive": "backend/data/blade_images/dtu_drone_inspection/hd96prn3nc-2.zip",
+      "expected_size_bytes": 3029715385,
+      "local_directory": "backend/data/blade_images/dtu_drone_inspection",
+      "status": "downloading_via_mendeley_public_api",
+      "download_command": "curl.exe -L --fail --retry 8 --retry-delay 5 --connect-timeout 30 -C - -o backend/data/blade_images/dtu_drone_inspection/hd96prn3nc-2.zip https://data.mendeley.com/public-api/zip/hd96prn3nc/download/2",
+      "verification_required_before_import": [
+        "file size equals expected_size_bytes",
+        "archive opens without errors",
+        "images are original downloaded files"
+      ],
+      "notes": [
+        "Use this dataset for raw blade inspection imagery and source traceability.",
+        "Do not invent labels for raw images that have no annotation."
+      ]
     }
   ]
 }
