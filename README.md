@@ -125,16 +125,16 @@ python -m scripts.import_real_datasets scada-csv ^
   --path <真实SCADA CSV路径或目录> ^
   --turbine-id 1 ^
   --dataset-id care_to_compare_v6 ^
-  --source-doi 10.5281/zenodo.14857470 ^
-  --source-url https://zenodo.org/records/14857470 ^
+  --source-doi 10.5281/zenodo.15846963 ^
+  --source-url https://zenodo.org/records/15846963 ^
   --dry-run
 
 python -m scripts.import_real_datasets scada-csv ^
   --path <真实SCADA CSV路径或目录> ^
   --turbine-id 1 ^
   --dataset-id care_to_compare_v6 ^
-  --source-doi 10.5281/zenodo.14857470 ^
-  --source-url https://zenodo.org/records/14857470
+  --source-doi 10.5281/zenodo.15846963 ^
+  --source-url https://zenodo.org/records/15846963
 
 # 导入公开或实测振动CSV/TXT
 python -m scripts.import_real_datasets vibration-csv ^
@@ -159,6 +159,7 @@ python -m scripts.import_real_datasets blade-yolo ^
 
 数据整合原则见 `DATA_INTEGRATION_STRATEGY.md`。SCADA、振动、图像、气象和工单数据不强行伪造成同一台真实风机的完整历史；系统通过 `source_dataset`、`source_file`、`dataset_window` 等字段保留来源边界。
 机器可读执行方案见 `backend/data/data_integration_plan.json`，系统设置页会通过 `/api/settings/data-integration-plan` 展示各层当前接入状态。
+本地真实数据包解压状态见 `backend/data/local_dataset_inventory.json`。大型原始数据文件位于 `backend/data/scada/`、`backend/data/vibration/` 等忽略目录，不提交到 Git 仓库。
 
 ---
 
