@@ -2,7 +2,7 @@
 
 ## 处理目标
 
-本轮任务将已下载的真实数据统一整理到项目内的受控目录，并依据 `MATHEMATICAL_MODELING_DESIGN.md` 生成首批可复核的数据处理结果。处理过程不生成伪造数据，不创建合成图像，不向业务数据库写入记录。
+本轮任务将已下载的真实数据统一整理到项目内的受控目录，并依据 `MATHEMATICAL_MODELING_DESIGN.md` 生成首批可复核的数据处理结果。处理过程不生成伪造数据，不创建合成图像；数据库入库只写入可追溯来源的 SCADA 记录和匿名公开数据资产，不写入伪造工单、成本、库存或人员记录。
 
 ## 统一数据目录
 
@@ -38,6 +38,9 @@
 | `care_status_type_distribution.csv` | 各事件文件的 `status_type_id` 分布 | 按事件和状态展开 |
 | `care_modeling_dataset_summary.json` | CARE 建模预处理汇总 | 1 份 |
 | `care_normalized_import_dry_run.json` | 规范化 CARE 文件通过现有 SCADA 导入器 dry-run 的验证结果 | 1 份 |
+| `sqlite_schema_upgrade_anonymous_assets.json` | 本地 SQLite 支持匿名公开数据资产的升级记录 | 1 份 |
+| `care_scada_import_batch_summary.json` | CARE 规范化 SCADA 全量入库批次摘要 | 5,242,948 行、36 个匿名资产 |
+| `care_scada_import_file_results.csv` | CARE 规范化事件文件逐文件入库结果 | 95 行 |
 | `CARE_MODELING_IMPORT_PLAN.md` | CARE 主时间线入库计划和约束 | Markdown 报告 |
 | `dataset_capability_profile.csv` | 当前真实数据集能力画像 | 7 行 |
 | `modeling_indicator_dataset_coverage.csv` | 建模指标与数据集覆盖关系 | 10 行 |
@@ -46,15 +49,15 @@
 
 ## 当前限制
 
-1. CARE SCADA 目前已完成文件级摘要、事件摘要、字段目录、标准字段映射、事件窗口规范化和 95 个事件文件的标准 SCADA 字段输出，规范化大文件位于 `backend/data/modeling/care_to_compare_v6/normalized_events`。
+1. CARE SCADA 目前已完成文件级摘要、事件摘要、字段目录、标准字段映射、事件窗口规范化、95 个事件文件的标准 SCADA 字段输出和本地 SQLite 全量入库。规范化大文件位于 `backend/data/modeling/care_to_compare_v6/normalized_events`，数据库内为 36 个匿名 CARE 资产和 5,242,948 条 SCADA 记录。
 2. 振动数据已计算首批统计与频域特征，但 NREL 与 Mendeley 不是同一设备来源，不能强行绑定到 CARE 风机资产。
 3. DTU 图像没有检测标注，只适合作为巡检图像展示与人工质检样本；YOLO 数据集可用于表面损伤检测演示，类别来自真实 `labels.txt`。
-4. CARE 规范化文件已经能被 `scada-csv --allow-anonymous-assets` 导入器 dry-run 识别；导入时会创建无真实坐标、无机型、无额定功率的匿名 CARE 资产，不能把匿名资产硬绑定到真实风机或伪造坐标。
+4. CARE 入库采用匿名资产模式，创建无真实坐标、无机型、无额定功率的 CARE 资产；不能把匿名资产硬绑定到真实风机或伪造坐标。
 5. 真实工单、成本、库存、人员排班和维护历史仍缺失，需要系统真实积累或用户提供带来源数据。
 
 ## 下一步
 
-1. 基于 `care_normalized_event_manifest.csv` 建立 SCADA 入库批次和质量日志。
+1. 基于已入库 CARE SCADA 计算功率、温度、运行状态和数据质量分项指标。
 2. 用正常事件窗口拟合功率曲线与温度基线，再计算 HI 分项。
 3. 将 `vibration_features.csv` 接入诊断样本库，前端展示真实振动特征与可解释诊断依据。
 4. 将 YOLO 标注样本接入图像诊断演示，明确类别映射、标注完整性与样本限制。
