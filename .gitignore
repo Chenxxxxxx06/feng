@@ -6,24 +6,34 @@
 .env
 .env.local
 .env.*.local
+*.env
+!.env.example
+backend/.env
 
 # --- Python ---
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 venv/
 .venv/
+backend/venv/
 *.egg-info/
 dist/
 build/
 *.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # --- Database ---
 *.db
 *.sqlite
 *.sqlite3
+backend/*.db
+backend/*.sqlite*
 
 # --- IDE ---
 .vscode/
@@ -36,25 +46,41 @@ Thumbs.db
 
 # --- Node.js ---
 node_modules/
+frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnp
 .pnp.js
+frontend/.vite/
 
 # --- Build Output ---
 frontend/dist/
 frontend/build/
+*.tsbuildinfo
 
 # --- Logs ---
 logs/
 *.log
+backend/*.log
+frontend/*.log
+~$*.xlsx
 
 # --- Data (large files) ---
 data/era5/*.nc
 data/scada/care_to_compare/*.csv
 data/blade_images/*.png
 data/blade_images/*.jpg
+backend/data/vibration/
+backend/data/blade_images/
+backend/data/scada/
+backend/data/era5/
+!backend/data/real_dataset_sources.json
+!backend/data/geojson/
+!backend/data/geojson/**
+
+# --- Local verification artifacts ---
+frontend/prediction-cost-verified.png
 
 # --- Secrets ---
 API_KEYS_PLACEHOLDER.txt
