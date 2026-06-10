@@ -1,0 +1,163 @@
+{
+  "started_at": "2026-06-10T16:34:14.723399+00:00",
+  "file_links": [
+    {
+      "source": "C:\\Users\\ASUS\\Desktop\\maindata\\CARE_To_Compare.zip",
+      "target": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\scada\\care_to_compare_v6\\CARE_To_Compare.zip",
+      "source_exists": true,
+      "status": "already_present",
+      "source_size": 5503439673,
+      "target_size": 5503439673,
+      "dataset_id": "care_to_compare_v6",
+      "expected_size": 5503439673,
+      "size_matches_expected": true
+    },
+    {
+      "source": "C:\\Users\\ASUS\\Desktop\\maindata\\backend\\data\\blade_images\\dtu_drone_inspection\\hd96prn3nc-2.zip",
+      "target": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\blade_images\\dtu_drone_inspection\\hd96prn3nc-2.zip",
+      "source_exists": true,
+      "status": "already_present",
+      "source_size": 3029715385,
+      "target_size": 3029715385,
+      "dataset_id": "dtu_drone_inspection",
+      "expected_size": 3029715385,
+      "size_matches_expected": true
+    },
+    {
+      "source": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\t6fwpc735s-1.zip",
+      "target": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\t6fwpc735s-1.zip",
+      "source_exists": true,
+      "status": "already_present",
+      "source_size": 2756431451,
+      "target_size": 2756431451,
+      "dataset_id": "yolo_annotated_wind_turbine_surface_damage",
+      "expected_size": 2756431451,
+      "size_matches_expected": true
+    }
+  ],
+  "mirrors": [
+    {
+      "source_dir": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\vibration\\nrel_grc_gearbox_cm\\raw",
+      "target_dir": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\vibration\\nrel_grc_gearbox_cm",
+      "files": 24,
+      "bytes": 5891542696,
+      "status": "ok",
+      "dataset_id": "nrel_grc_gearbox_cm"
+    },
+    {
+      "source_dir": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\vibration\\mendeley_blade_vibration_faults\\raw",
+      "target_dir": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\vibration\\mendeley_blade_vibration_faults",
+      "files": 35,
+      "bytes": 363639,
+      "status": "ok",
+      "dataset_id": "mendeley_blade_vibration_faults"
+    }
+  ],
+  "extractions": [
+    {
+      "dataset_id": "care_to_compare_v6",
+      "zip_path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\scada\\care_to_compare_v6\\CARE_To_Compare.zip",
+      "dest": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\scada\\care_to_compare_v6",
+      "status": "already_extracted"
+    },
+    {
+      "dataset_id": "dtu_drone_inspection",
+      "zip_path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\blade_images\\dtu_drone_inspection\\hd96prn3nc-2.zip",
+      "dest": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\blade_images\\dtu_drone_inspection",
+      "status": "already_extracted"
+    },
+    {
+      "dataset_id": "yolo_annotated_wind_turbine_surface_damage_outer",
+      "zip_path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\t6fwpc735s-1.zip",
+      "dest": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\outer",
+      "status": "already_extracted"
+    },
+    {
+      "dataset_id": "yolo_annotated_wind_turbine_surface_damage_inner",
+      "zip_path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\outer\\NordTank586x371.zip",
+      "dest": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\raw\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\extracted",
+      "status": "already_extracted"
+    }
+  ],
+  "zip_summaries": [
+    {
+      "dataset_id": "care_to_compare_v6",
+      "path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\scada\\care_to_compare_v6\\CARE_To_Compare.zip",
+      "exists": true,
+      "zip_ok": true,
+      "size": 5503439673,
+      "entries": 110,
+      "extensions": {
+        ".csv": 101,
+        ".md": 1,
+        ".txt": 1,
+        "<dir>": 7
+      },
+      "first_entries": [
+        "CARE_To_Compare/",
+        "CARE_To_Compare/README.md",
+        "CARE_To_Compare/README.txt",
+        "CARE_To_Compare/Wind Farm A/",
+        "CARE_To_Compare/Wind Farm A/datasets/",
+        "CARE_To_Compare/Wind Farm A/datasets/0.csv",
+        "CARE_To_Compare/Wind Farm A/datasets/10.csv",
+        "CARE_To_Compare/Wind Farm A/datasets/13.csv",
+        "CARE_To_Compare/Wind Farm A/datasets/14.csv",
+        "CARE_To_Compare/Wind Farm A/datasets/17.csv"
+      ]
+    },
+    {
+      "dataset_id": "dtu_drone_inspection",
+      "path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\blade_images\\dtu_drone_inspection\\hd96prn3nc-2.zip",
+      "exists": true,
+      "zip_ok": true,
+      "size": 3029715385,
+      "entries": 701,
+      "extensions": {
+        ".jpg": 701
+      },
+      "first_entries": [
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0579.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0578.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0580.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0581.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0582.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0583.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0584.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0585.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0587.JPG",
+        "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017/DJI_0586.JPG"
+      ]
+    },
+    {
+      "dataset_id": "yolo_annotated_wind_turbine_surface_damage",
+      "path": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\curated_datasets\\archives\\blade_images\\yolo_annotated_wind_turbine_surface_damage\\t6fwpc735s-1.zip",
+      "exists": true,
+      "zip_ok": true,
+      "size": 2756431451,
+      "entries": 1,
+      "extensions": {
+        ".zip": 1
+      },
+      "first_entries": [
+        "NordTank586x371.zip"
+      ]
+    }
+  ],
+  "completed_at": "2026-06-10T16:34:42.428563+00:00",
+  "outputs": {
+    "vibration_features": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\vibration_features.csv",
+    "image_dataset_quality": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\image_dataset_quality.csv",
+    "care_scada_files": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_scada_files.csv"
+  },
+  "counts": {
+    "vibration_feature_rows": 55,
+    "image_quality_rows": 2,
+    "care_csv_rows": 101
+  },
+  "notes": [
+    "Reports are first-pass processing artifacts based on MATHEMATICAL_MODELING_DESIGN.md.",
+    "No database rows were inserted by this script.",
+    "Large curated data files are under backend/data/curated_datasets and are ignored by Git."
+  ]
+}

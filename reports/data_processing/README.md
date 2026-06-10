@@ -1,0 +1,46 @@
+# 真实数据整理与首批处理结果
+
+## 处理目标
+
+本轮任务将已下载的真实数据统一整理到项目内的受控目录，并依据 `MATHEMATICAL_MODELING_DESIGN.md` 生成首批可复核的数据处理结果。处理过程不生成伪造数据，不创建合成图像，不向业务数据库写入记录。
+
+## 统一数据目录
+
+大体量数据统一放置在：
+
+`C:\Users\ASUS\Desktop\fengdiao-pHM\backend\data\curated_datasets`
+
+该目录已加入 `.gitignore`，只保留本机数据，不纳入 Git 仓库。
+
+## 已整理数据
+
+| 数据集 | 本轮用途 | 处理状态 | 说明 |
+|---|---|---|---|
+| CARE to Compare v6 SCADA | 主时间线、运行状态、状态标签、SCADA 指标建模 | 已归档并解压 | 识别到 101 个 CSV 文件，SCADA 文件为分号分隔，单文件表头识别为 86 列 |
+| Mendeley Blade Fault Vibration | 叶片振动诊断样本 | 已镜像到统一目录并计算特征 | 计算均值、标准差、RMS、峰值、峭度、偏度、峰值因子、主频等首批指标 |
+| NREL GRC Gearbox Vibration | 齿轮箱振动诊断样本 | 已镜像到统一目录并计算特征 | 基于真实 MAT 文件读取通道并计算首批振动特征 |
+| YOLO Annotated Wind Turbine Surface Damage | 叶片表面损伤识别样本 | 已归档并解压 | 使用项目中已验证可解压的压缩包；`maindata` 中同名压缩包尾部为零填充，不作为处理来源 |
+| DTU Drone Inspection Images | 叶片巡检图像演示与质量检查 | 已归档并解压 | 统计图像数量与样本分辨率；该数据集没有标注文件 |
+
+## 输出文件
+
+| 文件 | 内容 | 当前规模 |
+|---|---|---|
+| `dataset_processing_summary.json` | 数据来源、归档、解压、镜像、输出文件与处理计数 | 记录 3 个归档数据集、2 个振动镜像目录 |
+| `vibration_features.csv` | 振动诊断首批数学特征 | 55 行 |
+| `image_dataset_quality.csv` | 图像数据质量与标注完整性统计 | 2 行 |
+| `care_scada_files.csv` | CARE SCADA 文件级摘要 | 101 行 |
+
+## 当前限制
+
+1. CARE SCADA 目前只完成文件级摘要，尚未完成字段语义映射、时间线合并、状态窗口展开和数据库导入。
+2. 振动数据已计算首批统计与频域特征，但 NREL 与 Mendeley 不是同一设备来源，不能强行绑定到 CARE 风机资产。
+3. DTU 图像没有检测标注，只适合作为巡检图像展示与人工质检样本；YOLO 数据集可用于表面损伤检测演示。
+4. 当前输出是离线处理报告，尚未接入后端诊断 API、前端诊断页面和模型训练流水线。
+
+## 下一步
+
+1. 解析 CARE README 与字段说明，建立 `asset_id`、`time_stamp`、`status_type_id`、功率、风速、温度、控制量等字段映射。
+2. 生成 CARE 主时间线表和状态窗口表，作为系统统一运行数据底座。
+3. 将 `vibration_features.csv` 接入诊断样本库，前端展示真实振动特征与可解释诊断依据。
+4. 将 YOLO 标注样本接入图像诊断演示，明确类别映射、标注完整性与样本限制。
