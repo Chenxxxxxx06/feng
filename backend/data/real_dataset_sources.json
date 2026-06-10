@@ -89,6 +89,12 @@
       "license": "CC BY-NC 3.0",
       "dataset_role": "diagnostic_sample_library",
       "alignment_scope": "image_method_demo_only_not_same_asset_as_care",
+      "download_urls": [
+        "https://data.mendeley.com/public-api/zip/hd96prn3nc/download/2"
+      ],
+      "download_size_bytes": {
+        "hd96prn3nc-2.zip": 3029715385
+      },
       "quality_rules": [
         "use original downloaded images only",
         "preserve image filename and dataset DOI",
@@ -99,12 +105,19 @@
     {
       "id": "yolo_annotated_wind_turbine_surface_damage",
       "name": "YOLO Annotated Wind Turbine Surface Damage",
-      "publisher": "Kaggle dataset derived from DTU drone inspection images",
-      "landing_page": "https://www.kaggle.com/datasets/ajifoster3/yolo-annotated-wind-turbines-586x371",
-      "license": "CC BY-NC 4.0",
+      "publisher": "Mendeley Data",
+      "doi": "10.17632/t6fwpc735s.1",
+      "landing_page": "https://data.mendeley.com/datasets/t6fwpc735s/1",
+      "license": "CC BY-NC 3.0",
       "source_doi": "10.17632/hd96prn3nc.2",
       "dataset_role": "diagnostic_sample_library",
       "alignment_scope": "annotated_image_method_demo_only_not_same_asset_as_care",
+      "download_urls": [
+        "https://data.mendeley.com/public-api/zip/t6fwpc735s/download/1"
+      ],
+      "download_size_bytes": {
+        "t6fwpc735s-1.zip": 2756431451
+      },
       "quality_rules": [
         "use image and YOLO label pairs only",
         "store bounding boxes converted from source YOLO labels",
