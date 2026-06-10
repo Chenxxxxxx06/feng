@@ -14,20 +14,18 @@ CARE 风机 ID、时间戳和传感器均为匿名数据。当前不能把 CARE 
 
 ## 入库约束
 
-现有 `SCADARecord` 表要求绑定项目内 `turbine_id`。直接把 36 个 CARE 匿名资产写入现有真实风机表会造成事实混淆。因此入库前需要二选一：
+现有 `SCADARecord` 表仍需要绑定项目内 `turbine_id`。为避免把 CARE 匿名资产伪造成真实风机，导入器已支持 `--allow-anonymous-assets`：导入时会为 CARE 的 `wind_farm + source_turbine_id` 创建匿名资产，保留 `source_dataset`、`source_asset_id`、`asset_scope=anonymous_public_dataset`、`geo_scope=anonymous_unlocated`，并保持 `model`、`power_mw`、`lat`、`lng` 为空。
 
-1. 增加匿名 CARE 资产台账表或扩展 Turbine 模型，允许 `source_dataset`、`source_asset_id`、`geo_scope=anonymous` 且经纬度为空。
-2. 由用户提供真实风机台账，并明确 CARE 是否允许映射到该台账。没有明确来源时不能映射。
+没有真实台账来源时，不得把 CARE 匿名资产映射成真实风机坐标、机型或额定功率。
 
 ## 可执行导入前提
 
-当数据库支持匿名资产后，规范化 CSV 可用现有 SCADA 导入器读取，因为字段名已经对齐：
+数据库已支持匿名公开数据资产后，规范化 CSV 可用 SCADA 导入器读取，因为字段名已经对齐：
 
 ```powershell
 python -m scripts.import_real_datasets scada-csv `
   --path <normalized_event_csv> `
   --dataset-id care_to_compare_v6 `
-  --turbine-id <匿名资产对应的内部ID> `
   --timestamp-column timestamp `
   --power-column power_kw `
   --wind-speed-column wind_speed_ms `
@@ -39,12 +37,16 @@ python -m scripts.import_real_datasets scada-csv `
   --nacelle-direction-column nacelle_direction_deg `
   --grid-frequency-column grid_frequency_hz `
   --ambient-temperature-column ambient_temp_c `
-  --source-turbine-column source_turbine_id
+  --source-turbine-column source_turbine_id `
+  --source-wind-farm-column wind_farm `
+  --allow-anonymous-assets `
+  --field-mapping-version care_standard_field_mapping.csv
 ```
+
+如果本地已有旧版 SQLite 数据库，旧 `turbines` 表可能仍强制 `model`、`power_mw`、`lat`、`lng`、`region` 非空，且缺少来源字段。导入器在 `--allow-anonymous-assets` 下会执行兼容性预检；不兼容时会停止并提示创建新数据库或执行经审查的迁移，不能用假坐标或假机型绕过。
 
 ## 下一步开发
 
-1. 将数据库资产模型改为支持匿名公开数据资产，避免伪造经纬度和机型。
-2. 基于 `care_normalized_event_manifest.csv` 建立入库批次日志和字段映射版本。
-3. 用正常事件窗口拟合功率曲线与温度基线，再计算 HI 分项。
-4. 用 anomaly 事件窗口做 RUL 风险趋势验证，不声称工业级寿命预测已经完成。
+1. 基于 `care_normalized_event_manifest.csv` 建立入库批次日志和字段映射版本。
+2. 用正常事件窗口拟合功率曲线与温度基线，再计算 HI 分项。
+3. 用 anomaly 事件窗口做 RUL 风险趋势验证，不声称工业级寿命预测已经完成。

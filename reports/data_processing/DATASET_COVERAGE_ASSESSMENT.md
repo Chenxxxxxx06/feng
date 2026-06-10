@@ -18,7 +18,7 @@
 
 | dataset_id | coverage_level | serves | available_evidence | limitations |
 | --- | --- | --- | --- | --- |
-| care_to_compare_v6 | 核心技术数据已标准化，待匿名资产入库支持 | SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模 | 95 event datasets; 95 event_info rows; 45 anomaly and 50 normal events; 36 farm-scoped anonymous asset references; normalized 95 event files with 5242948 rows | 匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；数据库仍需支持匿名公开数据资产；不能与振动/图像样本伪造成同一台风机证据 |
+| care_to_compare_v6 | 核心技术数据已标准化，支持匿名资产入库 | SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模 | 95 event datasets; 95 event_info rows; 45 anomaly and 50 normal events; 36 farm-scoped anonymous asset references; normalized 95 event files with 5242948 rows | 匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；导入时必须使用匿名资产模式；不能与振动/图像样本伪造成同一台风机证据 |
 | nrel_grc_gearbox_cm | 样本级覆盖 | 齿轮箱振动波形、时域/频域指标、样本级故障诊断解释 | 20 processed MAT samples; labels {'damaged': 10, 'healthy': 10} | 不是 CARE 同一风机；当前未确认所有通道采样率；只能作为诊断样本库和算法演示来源 |
 | mendeley_blade_vibration_faults | 样本级覆盖 | 叶片振动波形、时域/频域指标、样本级故障诊断解释 | 35 processed CSV/XLSX samples; labels {'crack': 7, 'erosion': 7, 'healthy': 7, 'twist': 7, 'unbalance': 7} | 不是 CARE 同一风机；标签来自真实文件名/数据集结构，后续要保留来源说明 |
 | yolo_annotated_wind_turbine_surface_damage | 样本级覆盖 | 叶片图像损伤定位、bbox面积占比、图像诊断证据 | 13470 images; 2995 YOLO label files; 2995 paired image-label samples; class counts {'dirt': 581, 'damage': 8770} | 类别以数据集 labels.txt 为准；不生成模型置信度；不代表 CARE 风机现场巡检历史 |
@@ -31,7 +31,7 @@
 | indicator_group | coverage_level | can_compute_now | missing_or_pending |
 | --- | --- | --- | --- |
 | 数据质量评分 | 部分覆盖 | 文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；CARE 已规范化 95 个事件文件、5242948 行 | 导入批次级质量日志、数据库记录数校验、传感器异常值分布和页面级质量聚合 |
-| SCADA运行指标 | 部分覆盖 | 运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算 | 数据库匿名资产入库支持、真实额定功率、真实机型、真实地理位置和正常基线标定 |
+| SCADA运行指标 | 部分覆盖 | 运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算 | 全量入库批次执行、真实额定功率、真实机型、真实地理位置和正常基线标定 |
 | 振动诊断指标 | 已覆盖 | RMS、峰值、峰峰值、标准差、偏度、峭度、波峰因子、脉冲因子、形状因子、裕度因子、主频/主频bin | NREL 采样率和更多通道选择策略；阈值标定；诊断 API 接入 |
 | 叶片图像损伤指标 | 已覆盖 | 真实图像展示、YOLO bbox、类别 dirt/damage、bbox面积占比、标注配对率 | 模型训练/推理置信度；DTU 无标注；严重度阈值需标定 |
 | 健康指数 HI | 部分覆盖 | CARE 标准化 SCADA 可支持功率、温度、运行状态分项；振动和图像可支持样本级分项 | 权重、阈值、跨源资产关联边界、数据库入库后的统一计算 |
@@ -45,9 +45,9 @@
 
 | story_id | user_story | coverage_level | evidence | gap_action |
 | --- | --- | --- | --- | --- |
-| US01 | 地图查看所有风机状态 | 部分覆盖 | CARE 已规范化匿名 asset_id、timestamp、status_type_id，可做匿名风场状态；缺真实坐标、真实台账、数据库匿名资产支持和已标定 HI。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US01 | 地图查看所有风机状态 | 部分覆盖 | CARE 已规范化匿名 asset_id、timestamp、status_type_id，并支持匿名资产入库；缺真实坐标、真实台账和已标定 HI。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US02 | 按机型、HI、区域筛选风机 | 部分覆盖 | CARE 可支持状态和后续 HI；缺机型、额定功率、区域标签、投运信息等真实台账字段。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
-| US03 | 查询单台风机详细指标 | 部分覆盖 | CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段；ERA5/现场气象未接入，数据库尚未支持匿名资产入库。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
+| US03 | 查询单台风机详细指标 | 部分覆盖 | CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段，并支持匿名资产入库；ERA5/现场气象未接入。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US04 | 自动识别故障类型并给出置信度 | 部分覆盖 | CARE 事件窗口已规范化；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。 | 先完成字段映射、入库和指标标定，再开放完整功能 |
 | US05 | 基于叶片图像定位损伤 | 已覆盖 | YOLO 有真实图像、真实 bbox、类别 dirt/damage；DTU 有真实巡检图像但无标注。 | 接入后端 API 和前端展示，保留来源字段 |
 | US06 | 查看振动波形数据 | 已覆盖 | NREL/Mendeley 原始振动数据已整理，并已计算 55 行首批时域/频域特征。 | 接入后端 API 和前端展示，保留来源字段 |

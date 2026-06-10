@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from PIL import Image
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 import sys
 import os
@@ -29,7 +29,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.database import async_session
-from app.models import BladeImage, DataSource, SCADARecord, VibrationData
+from app.models import BladeImage, DataSource, SCADARecord, Turbine, VibrationData
 from app.services.data_pipeline import SourceStatus, set_source_status
 
 
@@ -98,6 +98,85 @@ def _optional_float(value) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _asset_part(value) -> str:
+    if pd.isna(value):
+        return "unknown"
+    text = str(value).strip()
+    return text if text else "unknown"
+
+
+def _anonymous_asset_name(prefix: str, wind_farm: str | None, source_asset_id: str) -> str:
+    parts = [prefix, wind_farm, source_asset_id]
+    text = "-".join(part for part in parts if part)
+    return text[:64]
+
+
+async def _get_or_create_anonymous_turbine(
+    db,
+    dataset_id: str,
+    source_asset_key: str,
+    source_asset_id: str,
+    wind_farm: str | None,
+    name_prefix: str,
+    region: str,
+) -> Turbine:
+    result = await db.execute(
+        select(Turbine).where(
+            Turbine.source_dataset == dataset_id,
+            Turbine.source_asset_id == source_asset_key,
+        )
+    )
+    turbine = result.scalar_one_or_none()
+    if turbine:
+        return turbine
+
+    turbine = Turbine(
+        name=_anonymous_asset_name(name_prefix, wind_farm, source_asset_id),
+        model=None,
+        power_mw=None,
+        lat=None,
+        lng=None,
+        region=wind_farm or region,
+        status="normal",
+        hi_value=100.0,
+        source_dataset=dataset_id,
+        source_asset_id=source_asset_key,
+        asset_scope="anonymous_public_dataset",
+        geo_scope="anonymous_unlocated",
+    )
+    db.add(turbine)
+    await db.flush()
+    return turbine
+
+
+async def _assert_anonymous_turbine_schema(db) -> None:
+    bind = db.get_bind()
+    if not bind or bind.dialect.name != "sqlite":
+        return
+    result = await db.execute(text("PRAGMA table_info(turbines)"))
+    rows = result.mappings().all()
+    if not rows:
+        return
+    columns = {row["name"]: row for row in rows}
+    missing = [
+        column
+        for column in ["source_dataset", "source_asset_id", "asset_scope", "geo_scope"]
+        if column not in columns
+    ]
+    not_nullable = [
+        column
+        for column in ["model", "power_mw", "lat", "lng", "region"]
+        if column in columns and int(columns[column]["notnull"]) == 1
+    ]
+    if missing or not_nullable:
+        raise RuntimeError(
+            "The existing SQLite turbines table cannot safely store anonymous CARE assets. "
+            f"Missing columns: {missing or 'none'}; non-null columns: {not_nullable or 'none'}. "
+            "Create a fresh database or run a reviewed schema migration before using "
+            "--allow-anonymous-assets. Do not fill anonymous assets with fake coordinates."
+        )
 
 
 def _parse_classes(classes: str | None, names_file: str | None) -> list[str]:
@@ -371,18 +450,19 @@ def _collect_scada_paths(path_value: str) -> list[Path]:
 
 def _scada_column_map(df: pd.DataFrame, args: argparse.Namespace) -> dict[str, str | None]:
     return {
-        "timestamp": _resolve_column(df, args.timestamp_column, SCADA_COLUMN_ALIASES["timestamp"], required=True),
-        "power_kw": _resolve_column(df, args.power_column, SCADA_COLUMN_ALIASES["power_kw"]),
-        "wind_speed_ms": _resolve_column(df, args.wind_speed_column, SCADA_COLUMN_ALIASES["wind_speed_ms"]),
-        "rotor_rpm": _resolve_column(df, args.rotor_rpm_column, SCADA_COLUMN_ALIASES["rotor_rpm"]),
-        "gen_temperature_c": _resolve_column(df, args.gen_temperature_column, SCADA_COLUMN_ALIASES["gen_temperature_c"]),
-        "gearbox_temperature_c": _resolve_column(df, args.gearbox_temperature_column, SCADA_COLUMN_ALIASES["gearbox_temperature_c"]),
-        "bearing_temperature_c": _resolve_column(df, args.bearing_temperature_column, SCADA_COLUMN_ALIASES["bearing_temperature_c"]),
-        "pitch_angle_deg": _resolve_column(df, args.pitch_angle_column, SCADA_COLUMN_ALIASES["pitch_angle_deg"]),
-        "nacelle_direction_deg": _resolve_column(df, args.nacelle_direction_column, SCADA_COLUMN_ALIASES["nacelle_direction_deg"]),
-        "grid_frequency_hz": _resolve_column(df, args.grid_frequency_column, SCADA_COLUMN_ALIASES["grid_frequency_hz"]),
-        "ambient_temp_c": _resolve_column(df, args.ambient_temperature_column, SCADA_COLUMN_ALIASES["ambient_temp_c"]),
-        "source_turbine_id": _resolve_column(df, args.source_turbine_column, []) if args.source_turbine_column else None,
+        "timestamp": _resolve_column(df, getattr(args, "timestamp_column", None), SCADA_COLUMN_ALIASES["timestamp"], required=True),
+        "power_kw": _resolve_column(df, getattr(args, "power_column", None), SCADA_COLUMN_ALIASES["power_kw"]),
+        "wind_speed_ms": _resolve_column(df, getattr(args, "wind_speed_column", None), SCADA_COLUMN_ALIASES["wind_speed_ms"]),
+        "rotor_rpm": _resolve_column(df, getattr(args, "rotor_rpm_column", None), SCADA_COLUMN_ALIASES["rotor_rpm"]),
+        "gen_temperature_c": _resolve_column(df, getattr(args, "gen_temperature_column", None), SCADA_COLUMN_ALIASES["gen_temperature_c"]),
+        "gearbox_temperature_c": _resolve_column(df, getattr(args, "gearbox_temperature_column", None), SCADA_COLUMN_ALIASES["gearbox_temperature_c"]),
+        "bearing_temperature_c": _resolve_column(df, getattr(args, "bearing_temperature_column", None), SCADA_COLUMN_ALIASES["bearing_temperature_c"]),
+        "pitch_angle_deg": _resolve_column(df, getattr(args, "pitch_angle_column", None), SCADA_COLUMN_ALIASES["pitch_angle_deg"]),
+        "nacelle_direction_deg": _resolve_column(df, getattr(args, "nacelle_direction_column", None), SCADA_COLUMN_ALIASES["nacelle_direction_deg"]),
+        "grid_frequency_hz": _resolve_column(df, getattr(args, "grid_frequency_column", None), SCADA_COLUMN_ALIASES["grid_frequency_hz"]),
+        "ambient_temp_c": _resolve_column(df, getattr(args, "ambient_temperature_column", None), SCADA_COLUMN_ALIASES["ambient_temp_c"]),
+        "source_turbine_id": _resolve_column(df, getattr(args, "source_turbine_column", None), []) if getattr(args, "source_turbine_column", None) else None,
+        "source_wind_farm": _resolve_column(df, getattr(args, "source_wind_farm_column", None), []) if getattr(args, "source_wind_farm_column", None) else None,
     }
 
 
@@ -460,6 +540,11 @@ async def import_scada_csv(args: argparse.Namespace) -> None:
     if args.dry_run:
         preview_scada_csv(args)
         return
+    allow_anonymous_assets = bool(getattr(args, "allow_anonymous_assets", False))
+    if allow_anonymous_assets and not getattr(args, "source_turbine_column", None):
+        raise ValueError("--allow-anonymous-assets requires --source-turbine-column")
+    if not allow_anonymous_assets and getattr(args, "turbine_id", None) is None:
+        raise ValueError("--turbine-id is required unless --allow-anonymous-assets is set")
 
     SCADA_DIR.joinpath(args.dataset_id).mkdir(parents=True, exist_ok=True)
     imported = 0
@@ -468,8 +553,11 @@ async def import_scada_csv(args: argparse.Namespace) -> None:
     min_ts = None
     max_ts = None
     column_maps: dict[str, dict[str, str | None]] = {}
+    anonymous_assets: dict[str, int] = {}
 
     async with async_session() as db:
+        if allow_anonymous_assets:
+            await _assert_anonymous_turbine_schema(db)
         for path in paths:
             try:
                 df = _read_csv_frame(path, args.max_rows)
@@ -503,13 +591,36 @@ async def import_scada_csv(args: argparse.Namespace) -> None:
                     "source_url": args.source_url,
                     "source_license": args.source_license,
                     "dataset_role": "primary_scada_timeline",
+                    "asset_scope": "anonymous_public_dataset" if allow_anonymous_assets else "field_asset",
+                    "field_mapping_version": getattr(args, "field_mapping_version", None),
                     "field_mapping": {k: v for k, v in col_map.items() if v},
                 }
+                turbine_id = args.turbine_id
+                source_asset_id = None
+                source_wind_farm = None
                 if col_map.get("source_turbine_id"):
-                    extra["source_turbine_id"] = str(row[col_map["source_turbine_id"]])
+                    source_asset_id = _asset_part(row[col_map["source_turbine_id"]])
+                    extra["source_turbine_id"] = source_asset_id
+                if col_map.get("source_wind_farm"):
+                    source_wind_farm = _asset_part(row[col_map["source_wind_farm"]])
+                    extra["source_wind_farm"] = source_wind_farm
+                if allow_anonymous_assets:
+                    source_asset_key = f"{source_wind_farm or args.dataset_id}:{source_asset_id or 'unknown'}"
+                    turbine = await _get_or_create_anonymous_turbine(
+                        db,
+                        args.dataset_id,
+                        source_asset_key,
+                        source_asset_id or "unknown",
+                        source_wind_farm,
+                        getattr(args, "asset_name_prefix", "CARE"),
+                        getattr(args, "anonymous_region", "anonymous_public_dataset"),
+                    )
+                    turbine_id = turbine.id
+                    anonymous_assets[source_asset_key] = turbine.id
+                    extra["source_asset_key"] = source_asset_key
 
                 db.add(SCADARecord(
-                    turbine_id=args.turbine_id,
+                    turbine_id=turbine_id,
                     timestamp=timestamp,
                     power_kw=_optional_float(row[col_map["power_kw"]]) if col_map.get("power_kw") else None,
                     wind_speed_ms=_optional_float(row[col_map["wind_speed_ms"]]) if col_map.get("wind_speed_ms") else None,
@@ -545,6 +656,9 @@ async def import_scada_csv(args: argparse.Namespace) -> None:
             "source_paths": [str(p) for p in paths],
             "column_maps": column_maps,
             "dataset_role": "primary_scada_timeline",
+            "allow_anonymous_assets": allow_anonymous_assets,
+            "anonymous_asset_count": len(anonymous_assets),
+            "field_mapping_version": getattr(args, "field_mapping_version", None),
         }
         await db.commit()
 
@@ -553,6 +667,7 @@ async def import_scada_csv(args: argparse.Namespace) -> None:
         "dataset_type": "scada_csv",
         "dataset_id": args.dataset_id,
         "imported": imported,
+        "anonymous_asset_count": len(anonymous_assets),
         "skipped_rows": skipped_rows,
         "skipped_files": skipped_files,
         "time_range": {
@@ -602,7 +717,7 @@ def build_parser() -> argparse.ArgumentParser:
     scada = sub.add_parser("scada-csv")
     scada.add_argument("--path", required=True)
     scada.add_argument("--dataset-id", default="care_to_compare_v6")
-    scada.add_argument("--turbine-id", type=int, required=True)
+    scada.add_argument("--turbine-id", type=int)
     scada.add_argument("--source-doi")
     scada.add_argument("--source-url")
     scada.add_argument("--source-license")
@@ -618,6 +733,11 @@ def build_parser() -> argparse.ArgumentParser:
     scada.add_argument("--grid-frequency-column")
     scada.add_argument("--ambient-temperature-column")
     scada.add_argument("--source-turbine-column")
+    scada.add_argument("--source-wind-farm-column")
+    scada.add_argument("--allow-anonymous-assets", action="store_true")
+    scada.add_argument("--anonymous-region", default="anonymous_public_dataset")
+    scada.add_argument("--asset-name-prefix", default="CARE")
+    scada.add_argument("--field-mapping-version")
     scada.add_argument("--max-rows", type=int)
     scada.add_argument("--batch-size", type=int, default=1000)
     scada.add_argument("--dry-run", action="store_true")

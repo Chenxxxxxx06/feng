@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -22,17 +22,25 @@ class User(Base):
 
 class Turbine(Base):
     __tablename__ = "turbines"
+    __table_args__ = (
+        UniqueConstraint("source_dataset", "source_asset_id", name="uq_turbine_source_asset"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(64), nullable=False, index=True)
-    model = Column(String(64), nullable=False)
-    power_mw = Column(Float, nullable=False)
-    lat = Column(Float, nullable=False)
-    lng = Column(Float, nullable=False)
-    region = Column(String(32), nullable=False)
+    model = Column(String(64), nullable=True)
+    power_mw = Column(Float, nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    region = Column(String(32), nullable=True)
     status = Column(String(16), default="normal")
     hi_value = Column(Float, default=100.0)
     last_maintenance = Column(DateTime, nullable=True)
     commissioned_at = Column(DateTime, nullable=True)
+    source_dataset = Column(String(64), nullable=True, index=True)
+    source_asset_id = Column(String(128), nullable=True, index=True)
+    asset_scope = Column(String(32), default="field_asset")
+    geo_scope = Column(String(32), default="known")
 
     scada_records = relationship("SCADARecord", back_populates="turbine")
     faults = relationship("Fault", back_populates="turbine")
