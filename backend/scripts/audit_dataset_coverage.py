@@ -165,6 +165,10 @@ def collect_facts() -> dict[str, Any]:
     modeling_summary: dict[str, Any] = {}
     if modeling_summary_path.exists():
         modeling_summary = json.loads(modeling_summary_path.read_text(encoding="utf-8"))
+    import_summary_path = REPORTS / "care_scada_import_batch_summary.json"
+    import_summary: dict[str, Any] = {}
+    if import_summary_path.exists():
+        import_summary = json.loads(import_summary_path.read_text(encoding="utf-8"))
 
     care_event_files = int((care_files["file_type"] == "event_dataset").sum()) if "file_type" in care_files.columns else 95
     care_metadata_files = int((care_files["file_type"] != "event_dataset").sum()) if "file_type" in care_files.columns else 6
@@ -207,6 +211,7 @@ def collect_facts() -> dict[str, Any]:
         "vibration_labels": vibration_labels,
         "image_profiles": image_profiles,
         "care_modeling_summary": modeling_summary,
+        "care_import_summary": import_summary,
     }
 
 
@@ -220,6 +225,19 @@ def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, An
         if care_modeling
         else ""
     )
+    care_import = facts.get("care_import_summary", {})
+    if care_import.get("dry_run") is False:
+        import_note = (
+            f"; imported {care_import.get('database_scada_records_for_dataset', care_import.get('rows_imported'))} "
+            f"SCADA rows into SQLite with {care_import.get('anonymous_assets')} anonymous assets"
+        )
+    elif care_import.get("dry_run") is True:
+        import_note = (
+            f"; import dry-run passed for {care_import.get('files_ready')} files and "
+            f"{care_import.get('estimated_import_rows')} estimated rows"
+        )
+    else:
+        import_note = ""
     return [
         {
             "dataset_id": "care_to_compare_v6",
@@ -230,6 +248,7 @@ def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, An
                 f"{facts['care_anomaly_count']} anomaly and {facts['care_normal_count']} normal events; "
                 f"{facts['care_asset_count']} farm-scoped anonymous asset references"
                 f"{normalized_note}"
+                f"{import_note}"
             ),
             "serves": "SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模",
             "limitations": "匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；导入时必须使用匿名资产模式；不能与振动/图像样本伪造成同一台风机证据",
@@ -288,26 +307,38 @@ def build_dataset_capability_profile(facts: dict[str, Any]) -> list[dict[str, An
 
 def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
     care_modeling = facts.get("care_modeling_summary", {})
+    care_import = facts.get("care_import_summary", {})
     normalized_summary = (
         f"CARE 已规范化 {care_modeling.get('normalized_event_files')} 个事件文件、"
         f"{care_modeling.get('total_normalized_rows')} 行"
         if care_modeling
         else "CARE 文件级摘要"
     )
+    if care_import.get("dry_run") is False:
+        db_import_summary = (
+            f"CARE 已入库 {care_import.get('database_scada_records_for_dataset', care_import.get('rows_imported'))} 条 SCADA 记录、"
+            f"{care_import.get('anonymous_assets')} 个匿名资产，并保留批次日志"
+        )
+        data_quality_pending = "传感器异常值分布、页面级质量聚合和阈值标定"
+        scada_pending = "真实额定功率、真实机型、真实地理位置和正常基线标定"
+    else:
+        db_import_summary = normalized_summary
+        data_quality_pending = "导入批次级质量日志、数据库记录数校验、传感器异常值分布和页面级质量聚合"
+        scada_pending = "全量入库批次执行、真实额定功率、真实机型、真实地理位置和正常基线标定"
     return [
         {
             "indicator_group": "数据质量评分",
             "coverage_level": "部分覆盖",
             "covered_by": "CARE 文件结构、时间戳字段、行数；YOLO 图像/标签配对；振动样本可读性",
-            "can_compute_now": f"文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；{normalized_summary}",
-            "missing_or_pending": "导入批次级质量日志、数据库记录数校验、传感器异常值分布和页面级质量聚合",
+            "can_compute_now": f"文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；{db_import_summary}",
+            "missing_or_pending": data_quality_pending,
         },
         {
             "indicator_group": "SCADA运行指标",
             "coverage_level": "部分覆盖",
             "covered_by": f"CARE feature_description categories {facts['care_feature_category_counts']}",
-            "can_compute_now": "运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算",
-            "missing_or_pending": "全量入库批次执行、真实额定功率、真实机型、真实地理位置和正常基线标定",
+            "can_compute_now": f"运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可计算；{db_import_summary}",
+            "missing_or_pending": scada_pending,
         },
         {
             "indicator_group": "振动诊断指标",
@@ -368,12 +399,21 @@ def build_indicator_coverage(facts: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def build_user_story_coverage() -> list[dict[str, Any]]:
+def build_user_story_coverage(facts: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     stories = pd.read_excel(USER_STORY_MATRIX, sheet_name=0)
+    care_import = (facts or {}).get("care_import_summary", {})
+    if care_import.get("dry_run") is False:
+        care_db_evidence = (
+            f"CARE 已完成匿名资产入库："
+            f"{care_import.get('database_scada_records_for_dataset', care_import.get('rows_imported'))} 条 SCADA 记录、"
+            f"{care_import.get('anonymous_assets')} 个匿名资产；仍缺真实坐标、机型、额定功率和现场台账。"
+        )
+    else:
+        care_db_evidence = "CARE 已规范化匿名 asset_id、timestamp、status_type_id，并支持匿名资产入库；仍缺真实坐标、机型、额定功率和现场台账。"
     coverage_by_story = {
-        "US01": ("部分覆盖", "CARE 已规范化匿名 asset_id、timestamp、status_type_id，并支持匿名资产入库；缺真实坐标、真实台账和已标定 HI。"),
+        "US01": ("部分覆盖", care_db_evidence),
         "US02": ("部分覆盖", "CARE 可支持状态和后续 HI；缺机型、额定功率、区域标签、投运信息等真实台账字段。"),
-        "US03": ("部分覆盖", "CARE 已映射并规范化风速、功率、转速、温度、桨距、方向等字段，并支持匿名资产入库；ERA5/现场气象未接入。"),
+        "US03": ("部分覆盖", f"{care_db_evidence} CARE 已映射风速、功率、转速、温度、桨距、方向等字段；ERA5/现场气象未接入。"),
         "US04": ("部分覆盖", "CARE 事件窗口已规范化；NREL/Mendeley 有振动样本；YOLO 有图像标注；模型置信度和跨源融合尚未实现。"),
         "US05": ("已覆盖", "YOLO 有真实图像、真实 bbox、类别 dirt/damage；DTU 有真实巡检图像但无标注。"),
         "US06": ("已覆盖", "NREL/Mendeley 原始振动数据已整理，并已计算 55 行首批时域/频域特征。"),
@@ -384,7 +424,7 @@ def build_user_story_coverage() -> list[dict[str, Any]]:
         "US11": ("缺失", "真实工单流程数据应由系统操作积累或用户导入；不能沿用 demo 工单。"),
         "US12": ("部分覆盖", "阈值配置可先做系统配置；HI 输出、阈值版本和误报漏报统计要等真实指标运行后沉淀。"),
         "US13": ("部分覆盖", "可以总结真实数据状态和缺失项；完整页面摘要依赖各模块 API 入库和质量标记。"),
-        "US14": ("部分覆盖", "已有真实数据源、处理摘要、字段映射、规范化清单和质量报告；还缺数据库导入批次、字段映射版本和运行日志接入。"),
+        "US14": ("部分覆盖", f"{care_db_evidence} 已有真实数据源、处理摘要、字段映射、规范化清单、质量报告和入库批次日志。"),
     }
     rows: list[dict[str, Any]] = []
     for _, story in stories.iterrows():
@@ -437,6 +477,7 @@ def write_markdown_report(
 
 - CARE：{facts['care_event_dataset_files']} 个事件时间序列文件，{facts['care_metadata_files']} 个元数据文件，事件表共 {facts['care_event_count']} 条，其中 anomaly {facts['care_anomaly_count']} 条、normal {facts['care_normal_count']} 条。
 - CARE 规范化：`{json.dumps(facts.get('care_modeling_summary', {}), ensure_ascii=False)}`。
+- CARE 入库：`{json.dumps(facts.get('care_import_summary', {}), ensure_ascii=False)}`。
 - CARE 字段类别：`{json.dumps(facts['care_feature_category_counts'], ensure_ascii=False)}`。
 - 振动样本：`{json.dumps(facts['vibration_counts'], ensure_ascii=False)}`。
 - 图像样本：`{json.dumps(facts['image_profiles'], ensure_ascii=False)}`。
@@ -474,7 +515,7 @@ def main() -> None:
     facts = collect_facts()
     dataset_profile = build_dataset_capability_profile(facts)
     indicator_coverage = build_indicator_coverage(facts)
-    story_coverage = build_user_story_coverage()
+    story_coverage = build_user_story_coverage(facts)
 
     write_csv(REPORTS / "dataset_capability_profile.csv", dataset_profile)
     write_csv(REPORTS / "modeling_indicator_dataset_coverage.csv", indicator_coverage)

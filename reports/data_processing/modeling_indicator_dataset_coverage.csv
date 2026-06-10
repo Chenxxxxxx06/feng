@@ -1,6 +1,6 @@
 ﻿indicator_group,coverage_level,covered_by,can_compute_now,missing_or_pending
-数据质量评分,部分覆盖,CARE 文件结构、时间戳字段、行数；YOLO 图像/标签配对；振动样本可读性,文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；CARE 已规范化 95 个事件文件、5242948 行,导入批次级质量日志、数据库记录数校验、传感器异常值分布和页面级质量聚合
-SCADA运行指标,部分覆盖,"CARE feature_description categories {'active_power': 31, 'bearing': 1, 'direction_yaw': 16, 'electrical': 57, 'gearbox': 11, 'generator': 10, 'hydraulic': 12, 'other_sensor': 63, 'pitch': 4, 'rotational_speed': 14, 'temperature': 127, 'wind_speed': 9}",运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可离线计算,全量入库批次执行、真实额定功率、真实机型、真实地理位置和正常基线标定
+数据质量评分,部分覆盖,CARE 文件结构、时间戳字段、行数；YOLO 图像/标签配对；振动样本可读性,文件级完整性、SCADA 行级时间戳有效率、标准字段非空计数、图像标注配对率、振动特征行数；CARE 已入库 5242948 条 SCADA 记录、36 个匿名资产，并保留批次日志,传感器异常值分布、页面级质量聚合和阈值标定
+SCADA运行指标,部分覆盖,"CARE feature_description categories {'active_power': 31, 'bearing': 1, 'direction_yaw': 16, 'electrical': 57, 'gearbox': 11, 'generator': 10, 'hydraulic': 12, 'other_sensor': 63, 'pitch': 4, 'rotational_speed': 14, 'temperature': 127, 'wind_speed': 9}",运行状态、事件窗口、风速、功率、转速、温度、桨距、方向等标准字段已可计算；CARE 已入库 5242948 条 SCADA 记录、36 个匿名资产，并保留批次日志,真实额定功率、真实机型、真实地理位置和正常基线标定
 振动诊断指标,已覆盖,NREL 齿轮箱 MAT；Mendeley 叶片振动 CSV/XLSX,RMS、峰值、峰峰值、标准差、偏度、峭度、波峰因子、脉冲因子、形状因子、裕度因子、主频/主频bin,NREL 采样率和更多通道选择策略；阈值标定；诊断 API 接入
 叶片图像损伤指标,已覆盖,YOLO 标注图像；DTU 原始巡检图像,真实图像展示、YOLO bbox、类别 dirt/damage、bbox面积占比、标注配对率,模型训练/推理置信度；DTU 无标注；严重度阈值需标定
 健康指数 HI,部分覆盖,CARE SCADA、振动特征、图像 bbox 指标,CARE 标准化 SCADA 可支持功率、温度、运行状态分项；振动和图像可支持样本级分项,权重、阈值、跨源资产关联边界、数据库入库后的统一计算
