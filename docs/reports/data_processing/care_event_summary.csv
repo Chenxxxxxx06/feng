@@ -1,4 +1,0 @@
-﻿dataset_id,wind_farm,event_count,anomaly_count,normal_count,asset_count,event_category_counts
-care_to_compare_v6,Wind Farm A,22,12,10,5,"{'bearing': 2, 'gearbox': 3, 'hydraulic_oil': 6, 'normal_or_unlabeled': 10, 'transformer': 1}"
-care_to_compare_v6,Wind Farm B,15,6,9,9,"{'bearing': 3, 'normal_or_unlabeled': 9, 'transformer': 3}"
-care_to_compare_v6,Wind Farm C,58,27,31,22,"{'blade': 3, 'communication_electrical': 2, 'converter_electrical': 1, 'gearbox': 3, 'hydraulic_oil': 2, 'normal_or_unlabeled': 31, 'other_anomaly': 5, 'pitch': 8, 'rotor_brake': 2, 'transformer': 1}"
