@@ -155,6 +155,23 @@ class TestDiagnosis:
         assert response.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_list_faults_includes_turbine_name(self, client: AsyncClient, auth_headers, db_session, test_turbine):
+        """Test faults include turbine name for frontend display."""
+        fault = Fault(
+            turbine_id=test_turbine.id,
+            fault_type="bearing_wear",
+            confidence=0.91,
+            status="open",
+        )
+        db_session.add(fault)
+        await db_session.commit()
+
+        response = await client.get("/api/diagnosis/faults", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["turbine_name"] == "TEST-001"
+
+    @pytest.mark.asyncio
     async def test_vibration_data(self, client: AsyncClient, auth_headers, test_turbine):
         """Test get vibration data."""
         response = await client.get(
@@ -174,6 +191,12 @@ class TestDiagnosis:
         )
         assert response.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_blade_images_turbine_not_found(self, client: AsyncClient, auth_headers):
+        """Test blade images for missing turbine."""
+        response = await client.get("/api/diagnosis/blade-images?turbine_id=99999", headers=auth_headers)
+        assert response.status_code == 404
+
 
 # ============================================================
 # Prediction Tests
@@ -183,15 +206,33 @@ class TestPrediction:
     """Test prediction endpoints."""
 
     @pytest.mark.asyncio
-    async def test_list_rul(self, client: AsyncClient, auth_headers):
+    async def test_list_rul(self, client: AsyncClient, auth_headers, test_rul_prediction):
         """Test list RUL predictions."""
         response = await client.get("/api/prediction/rul", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert "predictions" in data
+        assert len(data["predictions"]) == 1
+        assert data["predictions"][0]["component"] == "主轴承"
+        assert data["predictions"][0]["turbine_name"] == "TEST-001"
 
     @pytest.mark.asyncio
-    async def test_cost_comparison(self, client: AsyncClient, auth_headers, test_turbine):
+    async def test_list_rul_by_turbine(self, client: AsyncClient, auth_headers, test_turbine, test_rul_prediction):
+        """Test list RUL predictions by turbine id."""
+        response = await client.get(f"/api/prediction/rul?turbine_id={test_turbine.id}", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["predictions"]) == 1
+        assert data["predictions"][0]["turbine_id"] == test_turbine.id
+
+    @pytest.mark.asyncio
+    async def test_list_rul_turbine_not_found(self, client: AsyncClient, auth_headers):
+        """Test list RUL predictions for missing turbine."""
+        response = await client.get("/api/prediction/rul?turbine_id=99999", headers=auth_headers)
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_cost_comparison(self, client: AsyncClient, auth_headers, test_turbine, test_rul_prediction):
         """Test cost comparison."""
         response = await client.post("/api/prediction/cost-comparison", headers=auth_headers, json={
             "turbine_id": test_turbine.id,
@@ -201,6 +242,18 @@ class TestPrediction:
         data = response.json()
         assert "immediate_repair_cost" in data
         assert "recommendation" in data
+        assert data["delayed_repair_cost"] > data["immediate_repair_cost"]
+        assert 0 < data["failure_probability"] <= 1
+        assert data["optimal_window_days"] > 0
+
+    @pytest.mark.asyncio
+    async def test_cost_comparison_turbine_not_found(self, client: AsyncClient, auth_headers):
+        """Test cost comparison for missing turbine."""
+        response = await client.post("/api/prediction/cost-comparison", headers=auth_headers, json={
+            "turbine_id": 99999,
+            "fault_type": "bearing_wear",
+        })
+        assert response.status_code == 404
 
 
 # ============================================================
@@ -230,6 +283,15 @@ class TestWorkOrders:
         assert data["title"] == "测试工单"
 
     @pytest.mark.asyncio
+    async def test_create_workorder_turbine_not_found(self, client: AsyncClient, auth_headers):
+        """Test create work order with missing turbine."""
+        response = await client.post("/api/workorders/", headers=auth_headers, json={
+            "turbine_id": 99999,
+            "title": "不存在风机工单",
+        })
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
     async def test_update_workorder(self, client: AsyncClient, auth_headers, test_turbine):
         """Test update work order status."""
         # Create first
@@ -246,6 +308,32 @@ class TestWorkOrders:
         assert response.status_code == 200
         assert response.json()["status"] == "assigned"
 
+    @pytest.mark.asyncio
+    async def test_update_workorder_invalid_status(self, client: AsyncClient, auth_headers, test_turbine):
+        """Test invalid work order status is rejected."""
+        create_resp = await client.post("/api/workorders/", headers=auth_headers, json={
+            "turbine_id": test_turbine.id,
+            "title": "状态校验测试",
+        })
+        wo_id = create_resp.json()["id"]
+
+        response = await client.put(f"/api/workorders/{wo_id}", headers=auth_headers, json={
+            "status": "bad_status",
+        })
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_delete_workorder(self, client: AsyncClient, auth_headers, test_turbine):
+        """Test delete work order."""
+        create_resp = await client.post("/api/workorders/", headers=auth_headers, json={
+            "turbine_id": test_turbine.id,
+            "title": "删除测试",
+        })
+        wo_id = create_resp.json()["id"]
+
+        response = await client.delete(f"/api/workorders/{wo_id}", headers=auth_headers)
+        assert response.status_code == 200
+
 
 # ============================================================
 # Settings Tests
@@ -261,12 +349,108 @@ class TestSettings:
         assert response.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_save_thresholds_for_current_user(self, client: AsyncClient, auth_headers):
+        """Test save threshold config for current user."""
+        response = await client.put("/api/settings/thresholds", headers=auth_headers, json={
+            "hi_threshold": 72,
+            "email_enabled": True,
+            "email_address": "ops@example.com",
+            "wechat_enabled": False,
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hi_threshold"] == 72
+        assert data["email_enabled"] is True
+
+    @pytest.mark.asyncio
     async def test_pipeline_status(self, client: AsyncClient, auth_headers):
         """Test get pipeline status."""
         response = await client.get("/api/settings/pipeline-status", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert "sources" in data
+
+    @pytest.mark.asyncio
+    async def test_data_source_test_persists_status(self, client: AsyncClient, auth_headers):
+        """Test data source connection status can be tested and listed."""
+        response = await client.post("/api/settings/data-sources/test", headers=auth_headers, json={
+            "source_type": "scada",
+            "connection_params": {"mode": "test"},
+        })
+        assert response.status_code == 200
+
+        list_response = await client.get("/api/settings/data-sources", headers=auth_headers)
+        assert list_response.status_code == 200
+        assert list_response.json()[0]["source_type"] == "scada"
+
+    @pytest.mark.asyncio
+    async def test_update_profile_current_user(self, client: AsyncClient, auth_headers):
+        """Test profile update affects current user."""
+        response = await client.put("/api/settings/profile", headers=auth_headers, json={
+            "api_key": "sk-test",
+            "model_preference": "deepseek-v3",
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["username"] == "testuser"
+        assert data["model_preference"] == "deepseek-v3"
+        assert data["api_provider"] == "DeepSeek"
+
+    @pytest.mark.asyncio
+    async def test_profile_rejects_cross_provider_model_with_saved_key(self, client: AsyncClient, auth_headers):
+        """Test saved provider key cannot be used with another provider's model."""
+        response = await client.put("/api/settings/profile", headers=auth_headers, json={
+            "api_key": "sk-deepseek-test",
+            "model_preference": "deepseek-chat",
+        })
+        assert response.status_code == 200
+        assert response.json()["api_provider"] == "DeepSeek"
+
+        blocked = await client.put("/api/settings/profile", headers=auth_headers, json={
+            "model_preference": "gpt-4o-mini",
+        })
+        assert blocked.status_code == 400
+        assert "DeepSeek" in blocked.json()["detail"]
+
+        allowed = await client.put("/api/settings/profile", headers=auth_headers, json={
+            "model_preference": "deepseek-reasoner",
+        })
+        assert allowed.status_code == 200
+        assert allowed.json()["model_preference"] == "deepseek-reasoner"
+
+
+# ============================================================
+# Personnel Tests
+# ============================================================
+
+class TestPersonnel:
+    """Test personnel management endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_create_list_update_delete_personnel(self, client: AsyncClient, auth_headers):
+        """Test personnel CRUD flow."""
+        create_resp = await client.post("/api/personnel/", headers=auth_headers, json={
+            "name": "张三",
+            "email": "zhangsan@example.com",
+            "skills": ["风机维护"],
+            "region": "陕北",
+        })
+        assert create_resp.status_code == 201
+        person_id = create_resp.json()["id"]
+
+        list_resp = await client.get("/api/personnel/", headers=auth_headers)
+        assert list_resp.status_code == 200
+        assert any(p["name"] == "张三" for p in list_resp.json())
+
+        update_resp = await client.put(f"/api/personnel/{person_id}", headers=auth_headers, json={
+            "name": "张三-检修",
+            "email": "zhangsan2@example.com",
+        })
+        assert update_resp.status_code == 200
+        assert update_resp.json()["name"] == "张三-检修"
+
+        delete_resp = await client.delete(f"/api/personnel/{person_id}", headers=auth_headers)
+        assert delete_resp.status_code == 200
 
 
 # ============================================================

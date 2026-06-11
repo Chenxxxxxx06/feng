@@ -20,6 +20,7 @@ class UserResponse(BaseModel):
     email: str
     role: str
     api_key: Optional[str] = None
+    api_provider: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -88,8 +89,8 @@ class FaultDetailResponse(FaultResponse):
     signals: list[FaultSignalResponse] = []
 
 class BladeDiagnosisRequest(BaseModel):
-    turbine_id: int
-    image_path: str
+    turbine_id: int = Field(gt=0)
+    image_path: str = ""
 
 class BladeDiagnosisResponse(BaseModel):
     turbine_id: int
@@ -113,8 +114,8 @@ class RULListResponse(BaseModel):
     predictions: list[RULResponse]
 
 class CostComparisonRequest(BaseModel):
-    turbine_id: int
-    fault_type: str
+    turbine_id: int = Field(gt=0)
+    fault_type: str = Field(min_length=1, max_length=64)
 
 class CostComparisonResponse(BaseModel):
     immediate_repair_cost: float
@@ -127,18 +128,18 @@ class CostComparisonResponse(BaseModel):
 
 # --- WorkOrder ---
 class WorkOrderCreate(BaseModel):
-    turbine_id: int
+    turbine_id: int = Field(gt=0)
     fault_id: Optional[int] = None
-    title: str
+    title: str = Field(min_length=1, max_length=128)
     description: Optional[str] = None
     assignee: Optional[str] = None
-    cost_estimate: float = 0.0
+    cost_estimate: float = Field(default=0.0, ge=0)
 
 class WorkOrderUpdate(BaseModel):
-    status: Optional[str] = None
+    status: Optional[str] = Field(default=None, max_length=16)
     assignee: Optional[str] = None
-    cost_actual: Optional[float] = None
-    downtime_hours: Optional[float] = None
+    cost_actual: Optional[float] = Field(default=None, ge=0)
+    downtime_hours: Optional[float] = Field(default=None, ge=0)
 
 class WorkOrderResponse(BaseModel):
     id: int
@@ -152,6 +153,7 @@ class WorkOrderResponse(BaseModel):
     cost_actual: Optional[float] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
+    downtime_hours: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -183,28 +185,37 @@ class DataSourceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 class DataSourceTestRequest(BaseModel):
-    source_type: str
-    connection_params: dict
+    source_type: str = Field(min_length=1, max_length=32)
+    connection_params: dict = Field(default_factory=dict)
 
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
-    model_preference: Optional[str] = None
+    api_provider: Optional[str] = None
+    model_preference: Optional[str] = Field(default=None, max_length=64)
 
     model_config = {"protected_namespaces": ()}
 
 
 # --- AI ---
 class AISummaryRequest(BaseModel):
-    page_type: str
+    page_type: str = Field(min_length=1, max_length=64)
     page_data: dict
 
 class AISummaryResponse(BaseModel):
     conclusions: list[str]
     suggestions: list[str]
+    provider: Optional[str] = None
+    api_provider: Optional[str] = None
+    model: Optional[str] = None
+    label: Optional[str] = None
+    mode: Optional[str] = None
+    billing: Optional[str] = None
+    requires_api_key: Optional[bool] = None
+    has_api_key: Optional[bool] = None
 
 class AIFaultAnalysisRequest(BaseModel):
-    turbine_id: int
-    fault_type: str
+    turbine_id: int = Field(gt=0)
+    fault_type: str = Field(min_length=1, max_length=64)
 
 class AnomalyItem(BaseModel):
     indicator: str
@@ -220,7 +231,7 @@ class AIFaultAnalysisResponse(BaseModel):
     anomalies: list[AnomalyItem]
 
 class AICopilotRequest(BaseModel):
-    messages: list[dict]
+    messages: list[dict] = Field(min_length=1)
     page_context: Optional[dict] = None
     knowledge_results: Optional[list[str]] = None
 
@@ -230,16 +241,16 @@ class AICopilotResponse(BaseModel):
 
 # --- Personnel ---
 class PersonnelCreate(BaseModel):
-    name: str
-    email: str
-    skills: list[str] = []
-    region: str = "陕北"
+    name: str = Field(min_length=1, max_length=64)
+    email: str = Field(min_length=3, max_length=128)
+    skills: list[str] = Field(default_factory=list)
+    region: str = Field(default="陕北", max_length=32)
 
 class PersonnelUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=128)
     skills: Optional[list[str]] = None
-    region: Optional[str] = None
+    region: Optional[str] = Field(default=None, max_length=32)
 
 class PersonnelResponse(BaseModel):
     id: int
