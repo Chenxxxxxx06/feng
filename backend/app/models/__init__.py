@@ -184,3 +184,20 @@ class DataImportBatch(Base):
     rows_skipped = Column(Integer)
     anonymous_assets = Column(Integer)
     summary = Column(JSON)
+
+
+class FaultKnowledgeNode(Base):
+    __tablename__ = "fault_knowledge"
+    id = Column(Integer, primary_key=True, index=True)
+    fault_type = Column(String(128), unique=True, nullable=False, index=True)
+    category = Column(String(64), nullable=False, index=True)
+    icon = Column(String(8), default="⚠️")
+    severity = Column(String(16), default="medium")
+    symptoms = Column(JSON, default=list)
+    root_causes = Column(JSON, default=list)
+    solutions = Column(JSON, default=list)
+    related_faults = Column(JSON, default=list)
+    spare_parts = Column(JSON, default=list)
+    cases = Column(JSON, default=list)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
