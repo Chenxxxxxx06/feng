@@ -132,13 +132,33 @@ class WorkOrderCreate(BaseModel):
     title: str
     description: Optional[str] = None
     assignee: Optional[str] = None
+    assignee_id: Optional[int] = None
+    assignee_email: Optional[str] = None
+    priority: Optional[str] = "medium"
+    fault_type: Optional[str] = None
+    due_date: Optional[datetime] = None
     cost_estimate: float = 0.0
 
 class WorkOrderUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
     status: Optional[str] = None
     assignee: Optional[str] = None
+    assignee_id: Optional[int] = None
+    assignee_email: Optional[str] = None
+    priority: Optional[str] = None
+    fault_type: Optional[str] = None
+    due_date: Optional[datetime] = None
+    cost_estimate: Optional[float] = None
     cost_actual: Optional[float] = None
     downtime_hours: Optional[float] = None
+
+class WorkOrderEmailRequest(BaseModel):
+    recipient_user_ids: list[int] = []
+    recipient_emails: list[str] = []
+    subject: Optional[str] = None
+    content: Optional[str] = None
+    use_preview_template: bool = True
 
 class WorkOrderResponse(BaseModel):
     id: int
@@ -147,11 +167,21 @@ class WorkOrderResponse(BaseModel):
     title: str
     description: Optional[str] = None
     status: str
+    priority: Optional[str] = None
+    fault_type: Optional[str] = None
+    due_date: Optional[datetime] = None
+    assignee_id: Optional[int] = None
     assignee: Optional[str] = None
+    assignee_email: Optional[str] = None
     cost_estimate: float
     cost_actual: Optional[float] = None
+    downtime_hours: Optional[float] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    notification_sent_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
