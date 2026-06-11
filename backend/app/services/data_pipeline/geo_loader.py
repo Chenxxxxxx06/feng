@@ -32,6 +32,8 @@ class GeoLoader:
         """Convert turbine list to GeoJSON FeatureCollection."""
         features = []
         for t in turbines:
+            if t.get("lat") is None or t.get("lng") is None:
+                continue
             color = {
                 "normal": "#3fb950",
                 "warning": "#d29922",

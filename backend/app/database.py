@@ -78,7 +78,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def create_tables() -> None:
     """Create all database tables defined in models.
-    
+
     Should be called once during application startup.
     """
     async with engine.begin() as conn:
@@ -88,7 +88,7 @@ async def create_tables() -> None:
 
 async def drop_tables() -> None:
     """Drop all database tables.
-    
+
     Use with caution - this will delete all data!
     """
     async with engine.begin() as conn:

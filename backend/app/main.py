@@ -5,10 +5,12 @@ Provides REST API for wind turbine health management.
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from app.config import get_settings, get_offline_database_path, is_sqlite_url
@@ -21,6 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 @asynccontextmanager
@@ -28,12 +31,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
     # Startup
     logger.info("Starting up PHM system...")
-    
+
     # Check for offline database
     offline_db = get_offline_database_path()
     if offline_db and is_sqlite_url(settings.DATABASE_URL):
         logger.info(f"📦 Using offline dataset database: {offline_db}")
-    
+
     from app.database import engine, Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -66,6 +69,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Total-Count"],
 )
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 
 
 @app.exception_handler(Exception)

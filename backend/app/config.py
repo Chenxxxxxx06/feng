@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./fengdiao_phm.db"
-    
+
     # PostgreSQL specific settings (used when DATABASE_URL starts with postgresql)
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
@@ -79,16 +79,16 @@ def get_project_root() -> Path:
 def get_offline_dataset_path() -> Path | None:
     """
     Get the path to offline dataset folder.
-    
+
     The offline dataset folder should be placed at the same level as backend/ and frontend/.
     Expected name: fengdiao_dataset_db_handoff_20260611
-    
+
     Returns:
         Path to offline dataset folder if exists, None otherwise.
     """
     project_root = get_project_root()
     dataset_folder = project_root / "fengdiao_dataset_db_handoff_20260611"
-    
+
     if dataset_folder.exists() and dataset_folder.is_dir():
         return dataset_folder
     return None
@@ -97,7 +97,7 @@ def get_offline_dataset_path() -> Path | None:
 def get_offline_database_path() -> Path | None:
     """
     Get the path to the SQLite database in the offline dataset folder.
-    
+
     Returns:
         Path to the SQLite database file if exists, None otherwise.
     """
