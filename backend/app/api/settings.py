@@ -19,18 +19,32 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/thresholds", response_model=list[ThresholdConfigResponse])
-async def get_thresholds(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(NotificationConfig))
-    return [ThresholdConfigResponse.model_validate(c) for c in result.scalars().all()]
+async def get_thresholds(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
+    config = result.scalar_one_or_none()
+    if not config:
+        config = NotificationConfig(
+            user_id=user.id,
+            hi_threshold=70.0,
+            email_enabled=True,
+            email_address=user.email,
+            wechat_enabled=False,
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+    return [ThresholdConfigResponse.model_validate(config)]
 
 
 @router.put("/thresholds", response_model=ThresholdConfigResponse)
-async def save_threshold(data: ThresholdConfigRequest, db: AsyncSession = Depends(get_db)):
-    users = await db.execute(select(User).limit(1))
-    user = users.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=400, detail="No user found")
-
+async def save_threshold(
+    data: ThresholdConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
     config = result.scalar_one_or_none()
     if config:

@@ -15,10 +15,19 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
   const [testResults, setTestResults] = useState<Record<string, string>>({});
+  const [emailEnabled, setEmailEnabled] = useState(true);
+  const [emailAddress, setEmailAddress] = useState(user?.email || '');
+  const [wechatEnabled, setWechatEnabled] = useState(false);
 
   useEffect(() => {
     api.get('/settings/thresholds').then(({ data }) => {
-      if (data.length > 0) setHiThreshold(String(data[0].hi_threshold));
+      if (data.length > 0) {
+        const config = data[0] as ThresholdConfig;
+        setHiThreshold(String(config.hi_threshold));
+        setEmailEnabled(config.email_enabled);
+        setEmailAddress(config.email_address || '');
+        setWechatEnabled(config.wechat_enabled);
+      }
     });
     refreshPipeline();
   }, []);
@@ -29,7 +38,16 @@ export default function SettingsPage() {
   };
 
   const saveThreshold = async () => {
-    await api.put('/settings/thresholds', { hi_threshold: Number(hiThreshold) });
+    const { data } = await api.put('/settings/thresholds', {
+      hi_threshold: Number(hiThreshold),
+      email_enabled: emailEnabled,
+      email_address: emailAddress || null,
+      wechat_enabled: wechatEnabled,
+    });
+    setHiThreshold(String(data.hi_threshold));
+    setEmailEnabled(data.email_enabled);
+    setEmailAddress(data.email_address || '');
+    setWechatEnabled(data.wechat_enabled);
     setSaved(true); setTimeout(() => setSaved(false), 2000);
   };
 
@@ -195,11 +213,17 @@ export default function SettingsPage() {
 
         <div className="space-y-2">
           <label className="flex items-center gap-2 text-sm text-text-secondary">
-            <input type="checkbox" className="rounded" />
+            <input type="checkbox" checked={emailEnabled} onChange={(e) => setEmailEnabled(e.target.checked)} className="rounded" />
             启用邮件通知
           </label>
+          <input
+            placeholder="默认通知邮箱"
+            value={emailAddress}
+            onChange={(e) => setEmailAddress(e.target.value)}
+            className="w-72 bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
+          />
           <label className="flex items-center gap-2 text-sm text-text-secondary">
-            <input type="checkbox" className="rounded" />
+            <input type="checkbox" checked={wechatEnabled} onChange={(e) => setWechatEnabled(e.target.checked)} className="rounded" />
             启用企业微信通知
           </label>
         </div>
@@ -222,7 +246,12 @@ function PersonnelSection() {
   const [personnel, setPersonnel] = useState<any[]>([]);
   const [newPerson, setNewPerson] = useState({ name: '', skills: '', region: '陕北', email: '' });
 
-  useEffect(() => { api.get('/personnel/').then(({ data }) => setPersonnel(data)).catch(() => {}); }, [unlocked]);
+  const refreshPersonnel = async () => {
+    const { data } = await api.get('/personnel/');
+    setPersonnel(data);
+  };
+
+  useEffect(() => { refreshPersonnel().catch(() => {}); }, [unlocked]);
 
   const handleUnlock = async () => {
     try {
@@ -233,18 +262,18 @@ function PersonnelSection() {
 
   const addPerson = async () => {
     if (!newPerson.name) return;
-    setPersonnel([...personnel, {
-      id: personnel.length + 1,
+    const { data } = await api.post('/personnel/', {
       name: newPerson.name,
       skills: newPerson.skills.split(',').map((s: string) => s.trim()),
       region: newPerson.region,
-      load: 0,
       email: newPerson.email,
-    }]);
+    });
+    setPersonnel([...personnel, data]);
     setNewPerson({ name: '', skills: '', region: '陕北', email: '' });
   };
 
-  const removePerson = (id: number) => {
+  const removePerson = async (id: number) => {
+    await api.delete(`/personnel/${id}`);
     setPersonnel(personnel.filter(p => p.id !== id));
   };
 

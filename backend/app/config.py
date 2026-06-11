@@ -4,10 +4,13 @@ All sensitive values are loaded from environment variables.
 See .env.example for required variables.
 """
 
-import os
-import secrets
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
 
 
 class Settings(BaseSettings):
@@ -51,7 +54,7 @@ class Settings(BaseSettings):
     WEIXIN_WEBHOOK_URL: str = ""
 
     class Config:
-        env_file = ".env"
+        env_file = (ROOT_DIR / ".env", BACKEND_DIR / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = True
 
