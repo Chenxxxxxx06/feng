@@ -68,7 +68,21 @@ class FaultResponse(BaseModel):
     id: int
     turbine_id: int
     turbine_name: str = ""
+    turbine_region: str = ""
     detected_at: datetime
+    discovered_at: Optional[datetime] = None
+    processing_started_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    handler: Optional[str] = None
+    processing_status: str = "pending"
+    priority: str = "medium"
+    work_order_id: Optional[int] = None
+    work_order_title: Optional[str] = None
+    last_action_at: Optional[datetime] = None
+    maintenance_cost_estimate: Optional[float] = None
+    maintenance_cost_actual: Optional[float] = None
+    status_note: str = ""
     fault_type: str
     confidence: float
     status: str
@@ -84,8 +98,93 @@ class FaultSignalResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class DiagnosisSignalInsight(BaseModel):
+    sensor_name: str
+    value: str
+    normal_range: str
+    contribution_score: float
+    priority: str
+    finding: str
+
+class TroubleshootingStep(BaseModel):
+    order: int
+    title: str
+    action: str
+    expected_effect: str
+
 class FaultDetailResponse(FaultResponse):
     signals: list[FaultSignalResponse] = []
+    signal_insights: list[DiagnosisSignalInsight] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
+
+class AutoFaultDetectionRequest(BaseModel):
+    turbine_id: int
+    component: str = "gearbox_high_speed"
+    window_hours: int = Field(default=24, ge=1, le=168)
+    data_source: str = "vibration"
+
+class AutoFaultDetectionResponse(BaseModel):
+    turbine_id: int
+    component: str
+    analysis_window_hours: int
+    status: str
+    fault_type: str
+    confidence: float
+    confidence_interval: list[float]
+    algorithm_status: str
+    message: str
+    generated_at: datetime
+    signals: list[DiagnosisSignalInsight] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
+
+class BatchAutoFaultDetectionRequest(BaseModel):
+    turbine_ids: list[int] = []
+    region: Optional[str] = None
+    status: Optional[str] = None
+    component: str = "gearbox_high_speed"
+    window_hours: int = Field(default=24, ge=1, le=168)
+    data_source: str = "vibration"
+
+class BatchAutoFaultRecord(BaseModel):
+    record_id: str
+    turbine_id: int
+    turbine_name: str
+    region: str
+    turbine_status: str
+    component: str
+    analysis_window_hours: int
+    status: str
+    fault_type: str
+    confidence: float
+    confidence_interval: list[float]
+    algorithm_status: str
+    message: str
+    generated_at: datetime
+    group_key: str
+    signals: list[DiagnosisSignalInsight] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
+
+class BatchAutoFaultDetectionResponse(BaseModel):
+    success: bool
+    total: int
+    generated_at: datetime
+    records: list[BatchAutoFaultRecord] = []
+    group_summary: dict[str, int] = {}
+    message: str
+
+class VibrationPreviewResponse(BaseModel):
+    turbine_id: int
+    component: str
+    timestamp: datetime
+    duration_seconds: float
+    sample_rate_hz: int
+    rms: float
+    waveform: list[float]
+    spectrum: list[float]
+    peak_frequencies: list[dict]
+    fault_detected: bool
+    algorithm_status: str
+    message: str
 
 class BladeDiagnosisRequest(BaseModel):
     turbine_id: int
@@ -97,6 +196,10 @@ class BladeDiagnosisResponse(BaseModel):
     confidence: float
     damage_bbox: Optional[dict] = None
     image_path: str
+    algorithm_status: str = "stub_pending_external_model"
+    message: str = ""
+    damage_regions: list[dict] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
 
 
 # --- Prediction ---
