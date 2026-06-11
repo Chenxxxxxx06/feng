@@ -33,6 +33,16 @@ QWEN_CONFIG = {
     "vision_model": "qwen-vl-plus",
 }
 
+# -- 共享专业身份预设（token高效，作为最早的系统指令嵌入） --
+WIND_ENGINEER_PRESET = (
+    "你是「风调预顺」PHM系统的AI智能运维助手。"
+    "你是一名资深风电工程师，精通以下领域："
+    "风电机组结构与运行原理（双馈/直驱/半直驱）、SCADA数据分析与异常检测、"
+    "振动监测与CMS信号分析、故障诊断与根因分析（RCA）、"
+    "预测性维护（PdM）与剩余寿命预测（RUL）、备件管理与维修策略优化。"
+    "回答要求：基于数据给出精准结论，涉及安全决策时提醒人工复核，不确定时诚实说明。"
+)
+
 @dataclass(frozen=True)
 class AIModelConfig:
     provider: str
@@ -47,6 +57,7 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
     "qwen-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-plus", "qwen-plus", QWEN_CONFIG["base_url"]),
     "qwen-turbo": AIModelConfig("通义千问 DashScope", "通义千问 qwen-turbo", "qwen-turbo", QWEN_CONFIG["base_url"]),
     "qwen3.6-flash": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.6-flash", "qwen3.6-flash", QWEN_CONFIG["base_url"]),
+    "qwen-vl-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-vl-plus", "qwen-vl-plus", QWEN_CONFIG["base_url"]),
     "deepseek-v4-flash": AIModelConfig("DeepSeek", "DeepSeek deepseek-v4-flash", "deepseek-v4-flash", "https://api.deepseek.com"),
     "deepseek-chat": AIModelConfig("DeepSeek", "DeepSeek deepseek-chat", "deepseek-chat", "https://api.deepseek.com"),
     "deepseek-reasoner": AIModelConfig("DeepSeek", "DeepSeek deepseek-reasoner", "deepseek-reasoner", "https://api.deepseek.com"),
@@ -187,6 +198,14 @@ def _split_system_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(system_parts).strip(), conversation
 
 
+def _build_system_prompt(task_instructions: str) -> str:
+    """将共享工程师身份预设与任务特定指令合并为单个系统提示词。
+
+    预设始终放在最前面，后面紧跟任务指令。
+    """
+    return WIND_ENGINEER_PRESET + "\n\n" + task_instructions
+
+
 def _gemini_chat(
     config: AIModelConfig,
     api_key: str,
@@ -282,15 +301,15 @@ def summarize_page(
     """
     model_status = describe_model(model, api_key, api_provider)
 
-    system_prompt = """你是"风调预顺"PHM系统的AI运维助手。
-根据当前页面数据, 生成简洁的分析报告。
-
-输出格式必须是JSON:
-{
-  "conclusions": ["3条关键结论, 每条25字以内"],
-  "suggestions": ["2条可执行建议, 每条30字以内"]
-}
-只输出JSON, 不要其他文字。"""
+    system_prompt = _build_system_prompt(
+        "根据当前页面数据, 生成简洁的分析报告。\n\n"
+        "输出格式必须是JSON:\n"
+        "{\n"
+        '  "conclusions": ["3条关键结论, 每条25字以内"],\n'
+        '  "suggestions": ["2条可执行建议, 每条30字以内"]\n'
+        "}\n"
+        "只输出JSON, 不要其他文字。"
+    )
 
     user_prompt = f"""页面类型: {page_type}
 当前数据: {json.dumps(page_data, ensure_ascii=False)}
@@ -338,12 +357,14 @@ def diagnose_fault(
     if config["mode"] != "remote":
         raise ValueError(f"{config['provider']} API key is not ready for selected model")
 
-    system_prompt = """你是资深风电运维专家。根据风机数据给出故障诊断建议。
-要求:
-1. 分析可能的根因
-2. 评估风险等级
-3. 给出具体维修建议
-4. 回复简洁专业, 200字以内"""
+    system_prompt = _build_system_prompt(
+        "根据风机数据给出故障诊断建议。\n"
+        "要求:\n"
+        "1. 分析可能的根因\n"
+        "2. 评估风险等级\n"
+        "3. 给出具体维修建议\n"
+        "4. 回复简洁专业, 200字以内"
+    )
 
     user_prompt = f"""风机信息: {json.dumps(turbine_data, ensure_ascii=False)}
 故障数据: {json.dumps(fault_data, ensure_ascii=False)}
@@ -364,40 +385,51 @@ def copilot_chat(
     messages: list[dict],
     page_context: dict,
     knowledge_results: Optional[list[str]] = None,
+    screenshot_description: Optional[str] = None,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
     stream: bool = False,
 ) -> str:
-    """Multi-turn Copilot chat with page context and optional RAG results.
+    """Multi-turn Copilot chat with page context, optional RAG results,
+    and optional screenshot description.
 
     Args:
         messages: conversation history [{role, content}, ...]
         page_context: current page data snapshot
         knowledge_results: RAG-retrieved knowledge snippets
+        screenshot_description: text description of current page screenshot
         stream: return stream generator or string
 
     Returns:
         AI response text
     """
-    system_prompt = f"""你是"风调预顺"PHM系统的AI智能助手 (Copilot)。
+    screenshot_section = ""
+    if screenshot_description:
+        screenshot_section = (
+            f"\n当前页面截图内容（由视觉模型分析）:\n"
+            f"{screenshot_description}\n"
+        )
 
-角色: 风电运维专家 + 数据分析师。
-
-当前页面上下文:
-- 页面: {page_context.get('page_type', 'unknown')}
-- 风机总数: {page_context.get('total_turbines', 0)}
-- 预警风机: {page_context.get('warning_count', 0)}
-- 故障风机: {page_context.get('fault_count', 0)}
-- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}
-
-{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}
-
-规则:
-1. 基于上下文给出准确回答
-2. 涉及安全决策时提醒"建议人工复核"
-3. 回复简洁, 关键数据用数字
-4. 如果上下文信息不足, 诚实说明"""
+    task_prompt = (
+        f"当前页面上下文:\n"
+        f"- 页面: {page_context.get('page_type', 'unknown')}\n"
+        f"- 风机总数: {page_context.get('total_turbines', 0)}\n"
+        f"- 预警风机: {page_context.get('warning_count', 0)}\n"
+        f"- 故障风机: {page_context.get('fault_count', 0)}\n"
+        f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
+        f"{screenshot_section}"
+        f"\n"
+        f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
+        f"\n"
+        f"规则:\n"
+        f"1. 基于上下文给出准确回答\n"
+        f'2. 涉及安全决策时提醒"建议人工复核"\n'
+        f"3. 回复简洁, 关键数据用数字\n"
+        f"4. 如果上下文信息不足, 诚实说明\n"
+        f"5. 如果有页面截图描述, 优先参考截图中的实时数据"
+    )
+    system_prompt = _build_system_prompt(task_prompt)
 
     try:
         return chat(
@@ -415,6 +447,66 @@ def copilot_chat(
     except Exception as e:
         logger.warning(f"Copilot chat failed: {e}")
         return "抱歉, AI服务暂时不可用。请稍后重试。"
+
+
+def describe_screenshot(
+    screenshot_base64: str,
+    page_type: str,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
+) -> str:
+    """Use qwen-vl-plus to describe what's visible on the page screenshot.
+
+    Args:
+        screenshot_base64: Raw base64-encoded JPEG (without data:image prefix)
+        page_type: The page type (dashboard, diagnosis, etc.)
+        api_key: User's DashScope API key
+        api_provider: Provider that the key belongs to
+
+    Returns:
+        Text description of what's visible on screen.
+
+    Raises:
+        ValueError: If API key is not configured for DashScope
+    """
+    config = MODEL_CATALOG["qwen-vl-plus"]
+    _ensure_remote_available(config, api_key, api_provider)
+
+    vision_prompt = (
+        f"你正在查看「风调预顺」PHM系统的{page_type}页面截图。\n"
+        "请用中文简洁描述截图中可以看到的内容：\n"
+        "1. 页面显示了哪些关键数据（数字、图表、状态指标等）\n"
+        "2. 有哪些异常或值得注意的信息\n"
+        "3. 当前页面的风机状态概况\n\n"
+        "要求：\n"
+        "- 描述控制在300字以内\n"
+        "- 只描述你看到的客观信息，不要推测或建议\n"
+        "- 用项目符号列出关键数据点\n"
+        "- 如果截图不清晰或无法识别，诚实说明"
+    )
+
+    client = get_client(api_key, config.base_url)
+    response = client.chat.completions.create(
+        model=config.model_id,
+        messages=[
+            {"role": "system", "content": WIND_ENGINEER_PRESET},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": vision_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{screenshot_base64}"
+                        },
+                    },
+                ],
+            },
+        ],
+        temperature=0.3,
+        max_tokens=512,
+    )
+    return response.choices[0].message.content
 
 
 def fallback_summary(page_type: str) -> dict:
