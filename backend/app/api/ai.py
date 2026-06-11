@@ -139,9 +139,11 @@ async def copilot_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Copilot chat endpoint with page context.
+    """Copilot chat endpoint with page context and optional screenshot.
 
-    Supports multi-turn conversation with page awareness.
+    If a screenshot is provided, it is first analyzed by a vision model
+    (qwen-vl-plus) to extract a text description of the current page state.
+    That description is then fed into the regular chat as additional context.
     """
     # Get current page context
     page_context = data.page_context or {}
@@ -160,11 +162,27 @@ async def copilot_endpoint(
     except Exception as e:
         logger.warning(f"Failed to enhance context: {e}")
 
+    # Analyze screenshot if provided (best-effort, failure does not block chat)
+    screenshot_description: Optional[str] = None
+    if data.screenshot:
+        try:
+            from app.services.qwen_client import describe_screenshot
+            screenshot_description = describe_screenshot(
+                screenshot_base64=data.screenshot,
+                page_type=page_context.get("page_type", "unknown"),
+                api_key=current_user.api_key,
+                api_provider=current_user.api_provider,
+            )
+            logger.info(f"Screenshot analyzed: {screenshot_description[:100]}...")
+        except Exception as e:
+            logger.warning(f"Screenshot analysis failed, proceeding text-only: {e}")
+
     try:
         reply = copilot_chat(
             messages=data.messages,
             page_context=page_context,
             knowledge_results=data.knowledge_results,
+            screenshot_description=screenshot_description,
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,

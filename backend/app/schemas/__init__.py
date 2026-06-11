@@ -378,6 +378,7 @@ class AICopilotRequest(BaseModel):
     messages: list[dict] = Field(min_length=1)
     page_context: Optional[dict] = None
     knowledge_results: Optional[list[str]] = None
+    screenshot: Optional[str] = None  # base64-encoded JPEG screenshot of current page
 
 class AICopilotResponse(BaseModel):
     reply: str
