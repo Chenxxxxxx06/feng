@@ -11,7 +11,7 @@ interface Message {
   content: string;
 }
 
-export default function CopilotFAB() {
+export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: string }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: '你好！我是风调预顺AI助手。我可以帮你分析风机数据、解释故障原因、生成维护建议。请随时提问。' },
@@ -78,6 +78,15 @@ export default function CopilotFAB() {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
+  // Auto-send initialMessage from parent (e.g. KnowledgeBase "AI诊断" button)
+  useEffect(() => {
+    if (initialMessage) {
+      setOpen(true);
+      setTimeout(() => handleSend(initialMessage), 200);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessage]);
+
   const captureScreenshot = async (): Promise<string | null> => {
     try {
       const mainEl = document.querySelector('main');
@@ -100,12 +109,12 @@ export default function CopilotFAB() {
     }
   };
 
-  const handleSend = async () => {
-    const text = input.trim();
+  const handleSend = async (textOverride?: string) => {
+    const text = (textOverride ?? input).trim();
     if (!text) return;
     const userMsg: Message = { role: 'user', content: text };
     setMessages((prev) => [...prev, userMsg]);
-    setInput('');
+    if (!textOverride) setInput('');
     setLoading(true);
 
     // Capture screenshot (best-effort, failure does not block chat)
@@ -208,7 +217,7 @@ export default function CopilotFAB() {
                 className="flex-1 bg-bg-secondary border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
               />
               <button
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={loading || !input.trim()}
                 className="px-4 py-2 bg-accent-blue text-white rounded-lg text-xs hover:opacity-90 disabled:opacity-40 transition-opacity"
               >
