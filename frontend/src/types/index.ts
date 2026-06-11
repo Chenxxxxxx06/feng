@@ -1,14 +1,18 @@
 export interface Turbine {
   id: number;
   name: string;
-  model: string;
-  power_mw: number;
-  lat: number;
-  lng: number;
+  model: string | null;
+  power_mw: number | null;
+  lat: number | null;
+  lng: number | null;
   region: string;
   status: 'normal' | 'warning' | 'fault';
   hi_value: number;
   last_maintenance: string | null;
+  source_dataset?: string | null;
+  source_asset_id?: string | null;
+  asset_scope?: string;
+  geo_scope?: string;
 }
 
 export interface TurbineSummary {
