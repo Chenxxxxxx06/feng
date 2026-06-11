@@ -4,7 +4,7 @@ Provides AI-powered analysis using Qwen API with fallback to local analysis.
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -136,6 +136,7 @@ async def analyze_fault(
 @router.post("/copilot", response_model=AICopilotResponse)
 async def copilot_endpoint(
     data: AICopilotRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -187,6 +188,11 @@ async def copilot_endpoint(
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
         )
+        # Trigger knowledge extraction in background
+        from app.services.knowledge_extractor import try_extract_knowledge
+        all_messages = data.messages + [{"role": "assistant", "content": reply}]
+        background_tasks.add_task(try_extract_knowledge, all_messages, current_user.api_key, current_user.api_provider)
+
         return AICopilotResponse(reply=reply)
     except Exception as e:
         logger.error(f"Copilot chat failed: {e}")

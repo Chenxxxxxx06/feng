@@ -1,42 +1,225 @@
-# 风调预顺 — PHM预测性运维系统
+# 🌪️ 风调预顺 — PHM 预测性运维系统
 
-> 风电设备健康管理与预测性维护平台
+> *"预知风云变幻，守护每一度清洁能源"*
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green.svg)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-18-61DAFB.svg)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6.svg)](https://www.typescriptlang.org/)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" />
+  <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/ECharts-5.5-AA344D?style=for-the-badge&logo=apacheecharts&logoColor=white" />
+  <img src="https://img.shields.io/badge/Tailwind-3-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" />
+  <img src="https://img.shields.io/badge/Qwen-Plus-FF6A00?style=for-the-badge&logo=openai&logoColor=white" />
+  <img src="https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white" />
+</p>
+
+<p align="center">
+  <b>风电设备健康管理 · 故障智能诊断 · 预测性维护 · 知识图谱 · 多Agent协作</b>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.0-blue" />
+  <img src="https://img.shields.io/badge/status-active-success" />
+  <img src="https://img.shields.io/badge/license-Educational-lightgrey" />
+  <img src="https://img.shields.io/badge/commits-80+-brightgreen" />
+</p>
 
 ---
 
 ## 📋 项目简介
 
-风调预顺是一个面向风电行业的**预测性健康管理(PHM)**系统，集成了风场监控、故障诊断、预测性维护和工单管理等核心功能。
+**风调预顺**是面向风电行业的**预测性健康管理 (Prognostics and Health Management)** 平台，为陕西省风场提供从实时监控、故障诊断、预测维护到工单管理的全链路智能化运维方案。
 
-### 核心特性
+### 🎯 核心能力
 
-- 🗺️ **风场地图监控** - 陕西省风场可视化，实时风机状态展示
-- 🔍 **故障诊断** - 真实数据集叶片标注展示、振动样本分析、故障根因分析
-- 📈 **预测性维护** - RUL剩余寿命预测、维护成本对比
-- 📋 **工单管理** - 全生命周期工单流转、邮件通知
-- 🤖 **AI助手** - Copilot悬浮窗、智能问答、页面感知
-- ⚙️ **系统管理** - 阈值配置、数据管道、人员管理
+| 模块 | 能力 | 亮点 |
+|------|------|------|
+| 🗺️ **风场监控** | 30台风机实时地图 | ECharts 可视化 + SCADA 实时数据 |
+| 🔍 **故障诊断** | 自动故障检测 + 批量检测 | 实时诊断工作台 + 振动频谱分析 |
+| 📈 **预测决策** | RUL 剩余寿命 + 成本对比 | 维修时机优化 + 经济效益分析 |
+| 📋 **工单管理** | 全生命周期流转 | 邮件通知 + 人员指派 + 优先级管理 |
+| 📚 **故障百科** | 21种故障知识节点 | 9大分类 + 知识图谱可视化 + Demo模式 |
+| 🤖 **AI 助手** | Copilot 悬浮对话 | Qwen多模型 + 截图识图 + 预设提示词 |
+| 🧠 **多Agent诊断** | 智能调度诊断 | Orchestrator → Data + Knowledge → Synthesizer |
+| 🌱 **知识自增长** | 对话→知识自动提取 | QualityGate → Extract → Dedup → Ingest |
+| ⚙️ **系统管理** | 阈值/数据源/人员/密钥 | 个人AI模型配置 + API密钥管理 |
+
+---
+
+## 👥 团队成员
+
+<table>
+  <tr>
+    <td align="center"><b>👑 陈曦</b></td>
+    <td align="center"><b>⚙️ 朱彤浩</b></td>
+    <td align="center"><b>🤖 王红涓</b></td>
+    <td align="center"><b>🎨 战心悦</b></td>
+  </tr>
+  <tr>
+    <td align="center">技术负责人</td>
+    <td align="center">后端架构</td>
+    <td align="center">AI 服务</td>
+    <td align="center">前端 + AI 交互</td>
+  </tr>
+  <tr>
+    <td style="font-size:12px">
+      • 整体架构设计<br/>
+      • 分支管理与代码合并<br/>
+      • 知识图谱 + Agent架构<br/>
+      • AI诊断 + 知识自增长<br/>
+      • 部署方案设计
+    </td>
+    <td style="font-size:12px">
+      • 后端核心框架<br/>
+      • 数据库模型 (SQLAlchemy)<br/>
+      • API Schema (Pydantic)<br/>
+      • 认证安全 (JWT)<br/>
+      • 离线数据库 + manage_db<br/>
+      • 匿名资产 (CARE) 支持
+    </td>
+    <td style="font-size:12px">
+      • P2 后端 AI APIs<br/>
+      • Qwen 客户端增强<br/>
+      • 多AI提供商支持<br/>
+      • AI 诊断/分析/总结<br/>
+      • 设置页重构
+    </td>
+    <td style="font-size:12px">
+      • 前端基础设施 (React/Vite)<br/>
+      • 工单优化 + 邮件通知<br/>
+      • AI 助手预设定 + 截图识图<br/>
+      • 可拖动面板<br/>
+      • App.tsx / 路由 / 布局
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><b>📊 牛中义</b></td>
+    <td align="center"><b>🧪 逄晋</b></td>
+    <td align="center"><b>🔬 lililala223322</b></td>
+    <td align="center"><b>🌐 全组</b></td>
+  </tr>
+  <tr>
+    <td align="center">数据集成</td>
+    <td align="center">测试 + 前端编辑</td>
+    <td align="center">诊断工作台</td>
+    <td align="center">协作贡献</td>
+  </tr>
+  <tr>
+    <td style="font-size:12px">
+      • CARE 数据全量入库<br/>
+      • SCADA 主时间线<br/>
+      • 数据管道 (气象/地理/振动)<br/>
+      • 前端仪表盘 + 风机地图<br/>
+      • 数据集成策略
+    </td>
+    <td style="font-size:12px">
+      • P4 测试 + 种子数据<br/>
+      • 前端编辑优化 v0.1/v0.2<br/>
+      • 页面UI迭代
+    </td>
+    <td style="font-size:12px">
+      • P5 前端监控诊断页面<br/>
+      • 实时诊断工作台<br/>
+      • 诊断编排器
+    </td>
+    <td style="font-size:12px">
+      • 设计文档 5+ 份<br/>
+      • 代码审查与质量保障<br/>
+      • 分支规范管理<br/>
+      • 部署方案
+    </td>
+  </tr>
+</table>
+
+---
+
+## 📊 开发进度
+
+```
+████████████████████░░  85%  v2.0 — AI Agent + 知识图谱
+```
+
+| 模块 | 进度 | 状态 |
+|------|:--:|:--:|
+| 认证系统 (JWT) | ██████████ | ✅ 完成 |
+| 风机管理 (30台+SCADA) | ██████████ | ✅ 完成 |
+| 故障诊断 (自动+批量) | ██████████ | ✅ 完成 |
+| 预测决策 (RUL+成本) | ██████████ | ✅ 完成 |
+| 工单管理 (全生命周期) | ██████████ | ✅ 完成 |
+| AI 助手 (Copilot) | ██████████ | ✅ 完成 |
+| **故障百科 (21节点+图谱)** | ██████████ | ✅ 完成 |
+| **多Agent诊断架构** | █████████░ | ✅ 后端完成 |
+| **知识自增长 Pipeline** | █████████░ | ✅ 后端完成 |
+| **API Key 全链路贯通** | ██████████ | ✅ 完成 |
+| 部署上线 (阿里云) | ██████░░░░ | 📝 方案就绪 |
+| 移动端适配 | ███░░░░░░░ | 🔜 计划中 |
 
 ---
 
 ## 🏗️ 技术架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      前端 (React)                        │
-│  React 18 + TypeScript + Vite + TailwindCSS + ECharts   │
-├─────────────────────────────────────────────────────────┤
-│                    后端 (FastAPI)                         │
-│  Python 3.10+ + SQLAlchemy + Pydantic + JWT Auth        │
-├─────────────────────────────────────────────────────────┤
-│                    数据层                                 │
-│  PostgreSQL/SQLite + Redis (可选) + Milvus (可选)        │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        🌐 Nginx 反向代理                          │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────┐  ┌────────────────────────────┐ │
+│  │     🖥️ 前端 (React 18)       │  │   ⚡ 后端 (FastAPI)         │ │
+│  │                             │  │                            │ │
+│  │  📄 7 个页面               │  │  📡 10 个 API 模块         │ │
+│  │  🧩 20+ 组件               │  │  🗄️ 12 个数据表            │ │
+│  │  🎨 Tailwind + ECharts     │  │  🔐 JWT 鉴权              │ │
+│  │  📚 知识图谱 (Force Graph)  │  │  🤖 4 Agent 协作           │ │
+│  │  🤖 CopilotFAB (可拖动)    │  │  📊 数据管道 (SCADA/气象)  │ │
+│  │                             │  │                            │ │
+│  └──────────────┬──────────────┘  └─────────────┬──────────────┘ │
+│                 │                               │                 │
+│                 └───────────┬───────────────────┘                 │
+│                             │                                     │
+│  ┌──────────────────────────▼──────────────────────────────────┐ │
+│  │                      🗄️ 数据层                               │ │
+│  │  SQLite (开发) / PostgreSQL (生产) / Redis (缓存·可选)       │ │
+│  │  AI: Qwen (百炼) / OpenAI / Ollama 本地                      │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🧠 AI 智能体架构 (v2.0 新增)
+
+```
+用户提问 "3号风机振动超标是什么原因?"
+        │
+        ▼
+   ┌──────────────────────┐
+   │ ① Orchestrator Agent │  意图解析 → 并行派发
+   └──────┬───────┬───────┘
+          │       │
+    ┌─────▼──┐ ┌──▼──────┐
+    │② Data  │ │③ Knowl. │   Data Agent: 查 SCADA/RUL/故障历史
+    │ Agent  │ │ Agent   │   Knowl Agent: 查 21节点知识图谱
+    └────┬───┘ └──┬──────┘
+         │        │
+         └───┬────┘
+             ▼
+   ┌──────────────────────┐
+   │ ④ Synthesizer Agent  │  交叉验证 → 置信度 → 诊断报告
+   └──────────────────────┘
+             │
+             ▼
+   📊 Copilot 面板展示诊断报告 + 建议行动
+```
+
+### 知识自增长闭环
+
+```
+Copilot 诊断对话 → QualityGate → Extract (LLM) → Dedup (LLM) → Auto-Ingest
+                                                                      │
+                                                                      ▼
+                                                          📚 知识图谱自动更新
+                                                          🤖 AI提取标签 + 置信度
+                                                          [确认] [删除] 审核入口
 ```
 
 ---
@@ -45,303 +228,184 @@
 
 ### 前置要求
 
-- Python 3.10+
-- Node.js 18+
-- npm 或 yarn
+- **Python 3.10+** (推荐 conda 环境)
+- **Node.js 18+**
+- (可选) 阿里百炼 API Key → [免费申请](https://dashscope.aliyun.com/)
 
-### 1. 克隆项目
-
-```bash
-git clone <repository-url>
-cd fengdiao-pHM
-```
-
-### 2. 配置环境变量
+### 3 分钟启动
 
 ```bash
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑 .env 文件，填入真实配置
-# 至少需要配置 DASHSCOPE_API_KEY（AI功能）
-```
-
-### 3. 启动后端
-
-```bash
+# 1. 后端
 cd backend
-
-# 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate  # Windows
-
-# 安装依赖
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m scripts.seed_data          # 初始化数据库 + 21个知识节点
+python -m app.main                    # 启动 → http://localhost:8000
 
-# 启动服务
-python -m app.main
-# 或
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-后端服务将运行在 http://localhost:8000
-
-- API文档: http://localhost:8000/api/docs
-- ReDoc: http://localhost:8000/api/redoc
-
-### 4. 启动前端
-
-```bash
+# 2. 前端 (新终端)
 cd frontend
-
-# 安装依赖
 npm install
+npm run dev                           # 启动 → http://localhost:5173
 
-# 启动开发服务器
-npm run dev
+# 3. 打开浏览器 → http://localhost:5173
+#    登录: admin / admin123
 ```
-
-前端应用将运行在 http://localhost:5173
-
-### 5. 访问系统
-
-1. 打开 http://localhost:5173
-2. 注册新账号或使用默认账号登录
-3. 开始使用系统
-
-### 6. 导入真实诊断数据
-
-系统不生成模拟 SCADA 曲线、振动波形、叶片图像或业务标签。若未导入真实数据集，页面会显示缺失说明。
-
-建议先导入 SCADA 主时间线，再导入振动和叶片图像诊断样本：
-
-```bash
-cd backend
-
-# 导入公开或实测SCADA CSV，作为系统主时间线
-python -m scripts.import_real_datasets scada-csv ^
-  --path <真实SCADA CSV路径或目录> ^
-  --turbine-id 1 ^
-  --dataset-id care_to_compare_v6 ^
-  --source-doi 10.5281/zenodo.15846963 ^
-  --source-url https://zenodo.org/records/15846963 ^
-  --dry-run
-
-python -m scripts.import_real_datasets scada-csv ^
-  --path <真实SCADA CSV路径或目录> ^
-  --turbine-id 1 ^
-  --dataset-id care_to_compare_v6 ^
-  --source-doi 10.5281/zenodo.15846963 ^
-  --source-url https://zenodo.org/records/15846963
-
-# 导入公开或实测振动CSV/TXT
-python -m scripts.import_real_datasets vibration-csv ^
-  --path <真实振动CSV或TXT路径> ^
-  --turbine-id 1 ^
-  --dataset-id <数据集ID> ^
-  --label <源数据标签> ^
-  --source-doi <DOI或留空> ^
-  --source-url <数据集页面或留空>
-
-# 导入真实叶片图像和YOLO标注
-python -m scripts.import_real_datasets blade-yolo ^
-  --dataset-dir <真实叶片图像YOLO目录> ^
-  --turbine-id 1 ^
-  --dataset-id <数据集ID> ^
-  --classes crack,erosion,delamination ^
-  --require-label
-```
-
-已整理的数据源候选见 `backend/data/real_dataset_sources.json`。下载和使用前应核对数据集页面的版本、许可证、样本质量和引用要求。
-`--dry-run` 只输出字段映射和质量预检报告，不写入数据库；确认 `ready_for_import=true` 后再去掉该参数正式导入。
-
-数据整合原则见 `DATA_INTEGRATION_STRATEGY.md`。SCADA、振动、图像、气象和工单数据不强行伪造成同一台真实风机的完整历史；系统通过 `source_dataset`、`source_file`、`dataset_window` 等字段保留来源边界。
-机器可读执行方案见 `backend/data/data_integration_plan.json`，系统设置页会通过 `/api/settings/data-integration-plan` 展示各层当前接入状态。
-本地真实数据包解压状态见 `backend/data/local_dataset_inventory.json`。大型原始数据文件位于 `backend/data/scada/`、`backend/data/vibration/` 等忽略目录，不提交到 Git 仓库。
 
 ---
 
 ## 📁 项目结构
 
 ```
-fengdiao-pHM/
-├── backend/                    # 后端服务
+feng/
+├── backend/
 │   ├── app/
-│   │   ├── api/               # API路由
-│   │   │   ├── auth.py        # 认证管理
-│   │   │   ├── turbines.py    # 风机管理
-│   │   │   ├── diagnosis.py   # 故障诊断
-│   │   │   ├── prediction.py  # 预测决策
-│   │   │   ├── workorders.py  # 工单管理
-│   │   │   ├── settings.py    # 系统设置
-│   │   │   ├── ai.py          # AI服务
-│   │   │   └── personnel.py   # 人员管理
-│   │   ├── core/              # 核心模块
-│   │   │   └── security.py    # 安全认证
-│   │   ├── models/            # 数据模型
-│   │   ├── schemas/           # Pydantic模式
-│   │   ├── services/          # 业务服务
-│   │   │   ├── data_pipeline/ # 数据管道
-│   │   │   ├── health_index.py# 健康指数
-│   │   │   └── qwen_client.py # AI客户端
-│   │   ├── config.py          # 配置管理
-│   │   ├── database.py        # 数据库连接
-│   │   └── main.py            # 应用入口
-│   ├── data/                  # 数据文件
-│   ├── scripts/               # 工具脚本
-│   ├── tests/                 # 测试文件
-│   └── requirements.txt       # Python依赖
-├── frontend/                   # 前端应用
+│   │   ├── api/                     # 10 个 API 模块
+│   │   │   ├── auth.py              # 认证 (register/login/me)
+│   │   │   ├── turbines.py          # 风机管理
+│   │   │   ├── diagnosis.py         # 故障诊断 + 实时诊断工作台
+│   │   │   ├── prediction.py        # RUL 预测 + 成本对比
+│   │   │   ├── workorders.py        # 工单生命周期 + 邮件通知
+│   │   │   ├── settings.py          # 系统设置 + 阈值/数据源
+│   │   │   ├── ai.py                # AI 服务 (summary/analyze/copilot)
+│   │   │   ├── personnel.py         # 人员管理
+│   │   │   ├── knowledge.py         # 🆕 故障百科 CRUD + 图谱数据
+│   │   │   └── agent.py             # 🆕 多 Agent 诊断
+│   │   ├── models/__init__.py       # 12 个数据模型 (含 FaultKnowledgeNode)
+│   │   ├── schemas/__init__.py      # Pydantic 模式定义
+│   │   ├── services/
+│   │   │   ├── agents/              # 🆕 4 Agent 实现
+│   │   │   │   ├── orchestrator.py  # 调度器
+│   │   │   │   ├── data_agent.py    # 数据查询
+│   │   │   │   ├── knowledge_agent.py # 知识检索
+│   │   │   │   └── synthesizer.py   # 汇总输出
+│   │   │   ├── knowledge_extractor.py # 🆕 对话→知识提取
+│   │   │   ├── diagnosis_orchestrator.py
+│   │   │   ├── qwen_client.py       # Qwen/OpenAI 客户端
+│   │   │   ├── email_service.py     # 邮件服务
+│   │   │   └── data_pipeline/       # 数据管道 (SCADA/气象/地理)
+│   │   ├── core/security.py         # JWT + 密码哈希
+│   │   ├── config.py                # 配置管理
+│   │   ├── database.py              # SQLite/PostgreSQL + 离线DB
+│   │   └── main.py                  # FastAPI 入口
+│   ├── scripts/                     # 9 个数据处理脚本
+│   ├── tests/
+│   └── requirements.txt
+├── frontend/
 │   ├── src/
-│   │   ├── components/        # 组件
-│   │   │   ├── AIAssistant/   # AI助手组件
-│   │   │   ├── Common/        # 通用组件
-│   │   │   ├── Layout/        # 布局组件
-│   │   │   └── Map/           # 地图组件
-│   │   ├── pages/             # 页面
-│   │   │   ├── Dashboard/     # 风场监控
-│   │   │   ├── Diagnosis/     # 故障诊断
-│   │   │   ├── Prediction/    # 预测决策
-│   │   │   ├── WorkOrder/     # 工单管理
-│   │   │   ├── Settings/      # 系统设置
-│   │   │   └── TurbineDetail/ # 风机详情
-│   │   ├── services/          # 服务
-│   │   ├── styles/            # 样式
-│   │   └── types/             # 类型定义
+│   │   ├── pages/
+│   │   │   ├── Dashboard/           # 风场监控
+│   │   │   ├── Diagnosis/           # 故障诊断
+│   │   │   ├── Prediction/          # 预测决策
+│   │   │   ├── WorkOrder/           # 工单管理
+│   │   │   ├── Knowledge/           # 🆕 故障百科 + 知识图谱
+│   │   │   ├── Settings/            # 系统设置
+│   │   │   ├── TurbineDetail/       # 风机详情
+│   │   │   └── Login/               # 登录
+│   │   ├── components/
+│   │   │   ├── AIAssistant/         # CopilotFAB + AIPanel
+│   │   │   ├── Layout/              # AppLayout (侧边栏)
+│   │   │   └── Map/                 # 风机地图
+│   │   ├── data/fault-kb.json       # 🆕 21 故障节点预设数据
+│   │   ├── services/
+│   │   └── types/
 │   ├── package.json
 │   └── vite.config.ts
-├── .env.example                # 环境变量模板
-├── .gitignore                  # Git忽略配置
-└── README.md                   # 项目说明
+├── docs/superpowers/specs/          # 设计文档
+│   ├── 2026-06-11-ai-agent-operation-engine-design.md
+│   ├── 2026-06-11-fault-knowledge-graph-design.md
+│   ├── 2026-06-11-feature-brainstorm.md
+│   ├── 2026-06-12-knowledge-self-growth-design.md
+│   └── deployment-guide.md          # 🆕 阿里云部署指南
+├── .env.example
+└── README.md
 ```
 
 ---
 
-## 🔧 配置说明
+## 📡 API 端点
 
-### 环境变量
-
-| 变量名 | 说明 | 必填 | 默认值 |
-|--------|------|------|--------|
-| `APP_NAME` | 应用名称 | 否 | 风调预顺 - PHM预测性运维系统 |
-| `DEBUG` | 调试模式 | 否 | false |
-| `SECRET_KEY` | JWT密钥 | 是 | - |
-| `DATABASE_URL` | 数据库连接 | 否 | sqlite+aiosqlite:///./fengdiao_phm.db |
-| `DASHSCOPE_API_KEY` | 阿里百炼API密钥 | 否 | - |
-| `OPENAI_API_KEY` | OpenAI API密钥 | 否 | - |
-
-### 数据库配置
-
-**SQLite (开发环境)**
-```env
-DATABASE_URL=sqlite+aiosqlite:///./fengdiao_phm.db
-```
-
-**PostgreSQL (生产环境)**
-```env
-DATABASE_URL=postgresql+asyncpg://username:password@localhost:5432/fengdiao_phm
-```
-
----
-
-## 📊 API文档
-
-启动后端服务后，访问以下地址查看API文档：
-
-- **Swagger UI**: http://localhost:8000/api/docs
-- **ReDoc**: http://localhost:8000/api/redoc
-
-### 主要API端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/auth/register` | POST | 用户注册 |
-| `/api/auth/login` | POST | 用户登录 |
-| `/api/turbines/` | GET | 获取风机列表 |
-| `/api/turbines/{id}` | GET | 获取风机详情 |
-| `/api/diagnosis/faults` | GET | 获取故障列表 |
-| `/api/prediction/rul` | GET | 获取RUL预测 |
-| `/api/workorders/` | GET/POST | 工单管理 |
-| `/api/ai/summary` | POST | AI页面总结 |
-| `/api/ai/copilot` | POST | AI对话 |
-| `/api/personnel/` | GET | 人员列表 |
+| 端点 | 方法 | 说明 | 鉴权 |
+|------|------|------|:--:|
+| `/api/auth/register` | POST | 用户注册 | - |
+| `/api/auth/login` | POST | 用户登录 → 返回 JWT | - |
+| `/api/auth/me` | GET | 当前用户信息 | 🔐 |
+| `/api/turbines/` | GET | 风机列表 + 统计 | 🔐 |
+| `/api/turbines/{id}` | GET | 风机详情 + SCADA | 🔐 |
+| `/api/diagnosis/faults` | GET | 故障列表 | 🔐 |
+| `/api/diagnosis/auto-fault-detection` | POST | 🆕 自动故障检测 | 🔐 |
+| `/api/prediction/rul` | GET | RUL 预测 | 🔐 |
+| `/api/prediction/cost-comparison` | POST | 维修成本对比 | 🔐 |
+| `/api/workorders/` | GET/POST | 工单列表 + 创建 | 🔐 |
+| `/api/workorders/{id}` | PUT/DELETE | 工单更新/删除 | 🔐 |
+| `/api/workorders/{id}/send-email` | POST | 发送工单邮件 | 🔐 |
+| `/api/knowledge-base` | GET | 🆕 故障知识列表 | 🔐 |
+| `/api/knowledge-base/search?q=` | GET | 🆕 知识搜索 | 🔐 |
+| `/api/knowledge-base/{id}` | GET | 🆕 故障详情 | 🔐 |
+| `/api/knowledge-graph` | GET | 🆕 图谱数据 (节点+边) | 🔐 |
+| `/api/knowledge-base/{id}/verify` | PATCH | 🆕 确认AI提取 | 🔐 |
+| `/api/agent/diagnose` | POST | 🆕 多Agent诊断 | 🔐 |
+| `/api/ai/summary` | POST | AI 页面总结 | 🔐 |
+| `/api/ai/analyze-fault` | POST | AI 故障分析 | 🔐 |
+| `/api/ai/copilot` | POST | AI 对话 + 知识提取 | 🔐 |
+| `/api/personnel/` | GET/POST | 人员管理 | 🔐 |
+| `/api/settings/` | GET/PUT | 系统设置 | 🔐 |
 
 ---
 
-## 🧪 测试
+## 🚀 生产部署
 
-```bash
-cd backend
+详见 [`docs/superpowers/specs/deployment-guide.md`](docs/superpowers/specs/deployment-guide.md)
 
-# 运行测试
-pytest
-
-# 运行测试并生成覆盖率报告
-pytest --cov=app --cov-report=html
 ```
-
----
-
-## 🚀 部署
-
-### Docker部署 (推荐)
-
-```bash
-# 构建镜像
-docker build -t fengdiao-phm .
-
-# 运行容器
-docker run -d -p 8000:8000 --env-file .env fengdiao-phm
+阿里云 ECS 轻量服务器 → Nginx → 前端 dist/ + 后端 uvicorn → SQLite
+月费: ~¥230-300
 ```
-
-### 手动部署
-
-1. 配置Nginx反向代理
-2. 使用Gunicorn运行后端
-3. 构建前端并部署到静态文件服务器
 
 ---
 
 ## 📈 版本历史
 
-### v2.0 (2026-05-29)
-- ✅ 修复安全性问题（移除硬编码密钥）
-- ✅ 补全缺失API端点（人员管理、AI分析）
-- ✅ 改善代码规范和文档
-- ✅ 添加.env.example配置模板
-- ✅ 优化数据库配置
+### v2.0 (2026-06-12) 🆕
+- ✅ **故障百科**: 21 节点知识图谱 + 9 大分类
+- ✅ **多 Agent 诊断**: Orchestrator → Data + Knowledge → Synthesizer
+- ✅ **知识自增长**: Copilot 对话 → LLM 提取 → 自动入库
+- ✅ **API Key 全链路贯通**: 用户密钥 → 所有 LLM 调用
+- ✅ **Demo 模式**: 知识图谱示例开关
+- ✅ **部署方案**: 阿里云完整部署指南
 
-### v1.0 (2026-05-01)
-- 🎉 初始版本发布
-- ✅ 核心功能实现
+### v1.5 (2026-06-11)
+- ✅ 实时诊断工作台 (diagnosis_orchestrator)
+- ✅ AI 助手预设定 + 可拖动 + 截图识图
+- ✅ 工单邮件通知 + 优化
+- ✅ 离线数据库支持 + manage_db 工具
+- ✅ 文档整理 + 分支管理规范化
+
+### v1.0 (2026-05)
+- 🎉 初始版本: 8 个核心模块 + AI 助手 + 数据管道
 
 ---
 
-## 🤝 贡献指南
+## 🤝 分支管理规范
 
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
+```
+master    ← 纯代码 (不含文档)
+dev       ← 完整项目 (代码 + 文档 + 报告)
+chenxi    ← 技术负责人工作分支
+feature/* ← 各成员功能分支
+```
+
+- 每人从 `dev` 拉取最新代码创建功能分支
+- 开发完成后提交 → 由技术负责人审核合并
+- 合并到 `dev` → 验证 → 推送 `master` (纯代码)
 
 ---
 
 ## 📄 许可证
 
-本项目仅供学习和研究使用。
+本项目为**西北工业大学软件架构设计课程**项目，仅供学习和研究使用。
 
 ---
 
-## 📞 联系方式
-
-如有问题，请通过以下方式联系：
-
-- 项目Issues: [GitHub Issues](链接)
-- 邮箱: your-email@example.com
-
----
-
-> **风调预顺** — 让风电运维更智能、更高效
+<p align="center">
+  <b>🌪️ 风调预顺 — 预知风云变幻，守护每一度清洁能源</b><br/>
+  <sub>西北工业大学 · 第十五组 · 2026</sub>
+</p>

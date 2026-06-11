@@ -80,10 +80,10 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
 
   // Auto-send initialMessage from parent (e.g. KnowledgeBase "AI诊断" button)
   useEffect(() => {
-    if (initialMessage) {
-      setOpen(true);
-      setTimeout(() => handleSend(initialMessage), 200);
-    }
+    if (!initialMessage) return;
+    setOpen(true);
+    const timer = setTimeout(() => handleSend(initialMessage), 200);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMessage]);
 
@@ -126,19 +126,31 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
     }
 
     try {
-      const payload: Record<string, unknown> = {
-        messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
-        page_context: {
-          page_type: window.location.pathname.replace('/', '') || 'dashboard',
-          url: window.location.href,
-        },
-      };
-      if (screenshot) {
-        payload.screenshot = screenshot;
+      const allMsgs = [...messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
+
+      // Route diagnosis queries to multi-agent endpoint
+      const isDiagnosis = /风机|故障|振动|温度|异常|原因|怎么修|什么问|诊断|方案|备件|维修|停机|RL/.test(text);
+      let reply: string;
+
+      if (isDiagnosis) {
+        try {
+          const { data } = await api.post('/agent/diagnose', { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard' } }, { timeout: 90000 });
+          reply = data.report || data.message || JSON.stringify(data);
+        } catch {
+          // Fallback to regular copilot
+          const payload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href } };
+          if (screenshot) payload.screenshot = screenshot;
+          const { data } = await api.post('/ai/copilot', payload, { timeout: 60000 });
+          reply = data.reply;
+        }
+      } else {
+        const payload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href } };
+        if (screenshot) payload.screenshot = screenshot;
+        const { data } = await api.post('/ai/copilot', payload, { timeout: 60000 });
+        reply = data.reply;
       }
 
-      const { data } = await api.post('/ai/copilot', payload, { timeout: 60000 });
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.reply }]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch {
       setMessages((prev) => [...prev, { role: 'error', content: 'AI服务暂不可用, 请稍后重试' }]);
     } finally {
