@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 import uvicorn
 
 from app.config import get_settings
@@ -31,10 +32,23 @@ async def lifespan(app: FastAPI):
     from app.database import engine, Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_runtime_schema(conn)
     logger.info("Database tables created/verified")
     yield
     # Shutdown
     logger.info("Shutting down PHM system...")
+
+
+async def ensure_runtime_schema(conn):
+    """Apply small additive schema fixes for existing local SQLite databases."""
+    if settings.DATABASE_URL.startswith("sqlite"):
+        result = await conn.execute(text("PRAGMA table_info(users)"))
+        columns = {row[1] for row in result.fetchall()}
+        if "api_provider" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN api_provider VARCHAR(64)"))
+            logger.info("Added users.api_provider column")
+    else:
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
 
 
 app = FastAPI(

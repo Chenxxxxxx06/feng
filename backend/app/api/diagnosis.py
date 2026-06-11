@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import Fault, FaultSignal, BladeImage
+from app.models import Fault, FaultSignal, Turbine
 from app.schemas import (
     FaultResponse, FaultDetailResponse, FaultSignalResponse,
     BladeDiagnosisRequest, BladeDiagnosisResponse,
@@ -20,21 +20,39 @@ async def list_faults(
     status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Fault)
+    q = select(Fault, Turbine.name).join(Turbine, Turbine.id == Fault.turbine_id)
     if turbine_id:
         q = q.where(Fault.turbine_id == turbine_id)
     if status:
         q = q.where(Fault.status == status)
     q = q.order_by(Fault.detected_at.desc())
     result = await db.execute(q)
-    faults = result.scalars().all()
-    return [FaultResponse.model_validate(f) for f in faults]
+    return [
+        FaultResponse(
+            id=fault.id,
+            turbine_id=fault.turbine_id,
+            turbine_name=turbine_name,
+            detected_at=fault.detected_at,
+            fault_type=fault.fault_type,
+            confidence=fault.confidence,
+            status=fault.status,
+            details=fault.details,
+        )
+        for fault, turbine_name in result.all()
+    ]
 
 
 @router.get("/faults/{fault_id}", response_model=FaultDetailResponse)
 async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Fault).where(Fault.id == fault_id))
-    fault = result.scalar_one_or_none()
+    result = await db.execute(
+        select(Fault, Turbine.name)
+        .join(Turbine, Turbine.id == Fault.turbine_id)
+        .where(Fault.id == fault_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    fault, turbine_name = row
     if not fault:
         raise HTTPException(status_code=404, detail="Fault not found")
 
@@ -46,6 +64,7 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
     return FaultDetailResponse(
         id=fault.id,
         turbine_id=fault.turbine_id,
+        turbine_name=turbine_name,
         detected_at=fault.detected_at,
         fault_type=fault.fault_type,
         confidence=fault.confidence,
@@ -56,8 +75,15 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/blade-diagnosis", response_model=BladeDiagnosisResponse)
-async def diagnose_blade(data: BladeDiagnosisRequest):
+async def diagnose_blade(
+    data: BladeDiagnosisRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """Run blade image diagnosis using the simulation pipeline."""
+    turbine = await db.get(Turbine, data.turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
     results = blade_simulator.generate_inspection(data.turbine_id, num_images=1)
     r = results[0]
     return BladeDiagnosisResponse(
@@ -74,11 +100,16 @@ async def get_vibration_data(
     turbine_id: int = Query(...),
     component: str = Query("gearbox_high_speed"),
     fault_type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get vibration waveform for a turbine component.
 
     Supports optional fault injection for demonstration.
     """
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
     from app.services.data_pipeline.vibration_loader import vibration_loader
     return vibration_loader.generate_waveform(
         turbine_id=turbine_id,
@@ -96,4 +127,8 @@ async def list_blade_images(
 
     Returns simulated results. In production, these come from the database.
     """
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
     return blade_simulator.generate_inspection(turbine_id, num_images=3)

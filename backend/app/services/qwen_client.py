@@ -12,8 +12,10 @@ Configuration:
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
+import httpx
 from openai import OpenAI
 
 from app.config import get_settings
@@ -31,35 +33,121 @@ QWEN_CONFIG = {
     "vision_model": "qwen-vl-plus",
 }
 
-_client: Optional[OpenAI] = None
+@dataclass(frozen=True)
+class AIModelConfig:
+    provider: str
+    label: str
+    model_id: str
+    base_url: str = ""
+    api_style: str = "openai"
+    requires_api_key: bool = True
 
 
-def get_client() -> OpenAI:
-    """Get or create OpenAI client for Qwen API."""
-    global _client
-    if _client is None:
-        if not QWEN_CONFIG["api_key"]:
-            logger.warning("DASHSCOPE_API_KEY not set, AI features will use fallback")
-            raise ValueError("DASHSCOPE_API_KEY environment variable not set")
-        _client = OpenAI(
-            base_url=QWEN_CONFIG["base_url"],
-            api_key=QWEN_CONFIG["api_key"],
-        )
-    return _client
+MODEL_CATALOG: dict[str, AIModelConfig] = {
+    "qwen-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-plus", "qwen-plus", QWEN_CONFIG["base_url"]),
+    "qwen-turbo": AIModelConfig("通义千问 DashScope", "通义千问 qwen-turbo", "qwen-turbo", QWEN_CONFIG["base_url"]),
+    "qwen3.6-flash": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.6-flash", "qwen3.6-flash", QWEN_CONFIG["base_url"]),
+    "deepseek-v4-flash": AIModelConfig("DeepSeek", "DeepSeek deepseek-v4-flash", "deepseek-v4-flash", "https://api.deepseek.com"),
+    "deepseek-chat": AIModelConfig("DeepSeek", "DeepSeek deepseek-chat", "deepseek-chat", "https://api.deepseek.com"),
+    "deepseek-reasoner": AIModelConfig("DeepSeek", "DeepSeek deepseek-reasoner", "deepseek-reasoner", "https://api.deepseek.com"),
+    "deepseek-v3": AIModelConfig("DeepSeek", "DeepSeek deepseek-v3", "deepseek-chat", "https://api.deepseek.com"),
+    "glm-5-flash": AIModelConfig("智谱GLM", "智谱 GLM-5-Flash", "glm-5-flash", "https://open.bigmodel.cn/api/paas/v4/"),
+    "kimi-k2.6": AIModelConfig("Kimi Moonshot", "Kimi kimi-k2.6", "kimi-k2.6", "https://api.moonshot.cn/v1"),
+    "gpt-4o-mini": AIModelConfig("OpenAI", "OpenAI gpt-4o-mini", "gpt-4o-mini", settings.OPENAI_BASE_URL),
+    "gpt-4.1": AIModelConfig("OpenAI", "OpenAI gpt-4.1", "gpt-4.1", settings.OPENAI_BASE_URL),
+    "gpt-4": AIModelConfig("OpenAI", "OpenAI gpt-4", "gpt-4", settings.OPENAI_BASE_URL),
+    "gpt-3.5-turbo": AIModelConfig("OpenAI", "OpenAI gpt-3.5-turbo", "gpt-3.5-turbo", settings.OPENAI_BASE_URL),
+    "claude-sonnet-4-6": AIModelConfig("Claude", "Claude claude-sonnet-4-6", "claude-sonnet-4-6", api_style="anthropic"),
+    "claude-haiku-4-5": AIModelConfig("Claude", "Claude claude-haiku-4-5", "claude-haiku-4-5-20251001", api_style="anthropic"),
+    "gemini-2.5-flash": AIModelConfig("Google Gemini", "Gemini gemini-2.5-flash", "gemini-2.5-flash", api_style="gemini"),
+    "gemini-3.5-flash": AIModelConfig("Google Gemini", "Gemini gemini-3.5-flash", "gemini-3.5-flash", api_style="gemini"),
+    "ollama-local": AIModelConfig("Ollama本地模型", "Ollama qwen2.5", "qwen2.5", "http://localhost:11434/v1", requires_api_key=False),
+}
+
+MODEL_ALIASES = {
+    "qwen3.5-flash": "qwen3.6-flash",
+    "deepseek-v3": "deepseek-chat",
+    "claude-sonnet-4": "claude-sonnet-4-6",
+    "claude-4": "claude-sonnet-4-6",
+}
+
+
+def normalize_model_preference(model: Optional[str]) -> str:
+    """Normalize legacy UI values to a current model preference key."""
+    return MODEL_ALIASES.get(model or "", model or QWEN_CONFIG["default_model"])
+
+
+def resolve_model_config(model: Optional[str]) -> AIModelConfig:
+    """Resolve a stored model preference to the exact model called upstream."""
+    key = normalize_model_preference(model)
+    return MODEL_CATALOG.get(key, MODEL_CATALOG[QWEN_CONFIG["default_model"]])
+
+
+def describe_model(model: Optional[str], api_key: Optional[str], api_provider: Optional[str] = None) -> dict:
+    """Return non-secret status metadata for the configured model."""
+    config = resolve_model_config(model)
+    has_key = bool(api_key)
+    provider_matches = api_provider == config.provider
+    key_bound = bool(api_provider)
+    if not config.requires_api_key:
+        mode = "remote"
+        billing = "no_remote_charge"
+    elif not has_key:
+        mode = "local_fallback"
+        billing = "no_remote_charge"
+    elif not key_bound:
+        mode = "key_unbound"
+        billing = "no_remote_charge"
+    elif not provider_matches:
+        mode = "provider_mismatch"
+        billing = "no_remote_charge"
+    else:
+        mode = "remote"
+        billing = "provider_billed"
+    return {
+        "provider": config.provider,
+        "api_provider": api_provider,
+        "model": config.model_id,
+        "label": config.label,
+        "mode": mode,
+        "billing": billing,
+        "requires_api_key": config.requires_api_key,
+        "has_api_key": has_key,
+    }
+
+
+def _ensure_remote_available(config: AIModelConfig, api_key: Optional[str], api_provider: Optional[str]) -> None:
+    if not config.requires_api_key:
+        return
+    if config.requires_api_key and not api_key:
+        raise ValueError(f"{config.provider} API key not configured")
+    if not api_provider:
+        raise ValueError("API key is not bound to a provider; please save it again")
+    if api_provider != config.provider:
+        raise ValueError(f"API key belongs to {api_provider}, but selected model requires {config.provider}")
+
+
+def get_client(api_key: Optional[str], base_url: str) -> OpenAI:
+    """Create an OpenAI-compatible client for the selected provider."""
+    return OpenAI(base_url=base_url, api_key=api_key or "ollama")
 
 
 def chat(
     messages: list[dict],
     model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 1024,
     stream: bool = False,
 ) -> str:
-    """Single-turn chat with Qwen.
+    """Single-turn chat with the selected AI provider.
 
     Args:
         messages: List of message dicts with 'role' and 'content'
-        model: Model to use (defaults to qwen-plus)
+        model: Model preference stored for the current user
+        api_key: API key saved for the current user
+        api_provider: Provider that the saved API key belongs to
         temperature: Sampling temperature (0-1)
         max_tokens: Maximum tokens to generate
         stream: Whether to stream the response
@@ -71,9 +159,18 @@ def chat(
         ValueError: If API key not configured
         Exception: If API call fails
     """
-    client = get_client()
+    config = resolve_model_config(model)
+    _ensure_remote_available(config, api_key, api_provider)
+
+    if config.api_style == "gemini":
+        return _gemini_chat(config, api_key or "", messages, temperature, max_tokens)
+
+    if config.api_style == "anthropic":
+        return _anthropic_chat(config, api_key or "", messages, temperature, max_tokens)
+
+    client = get_client(api_key, config.base_url)
     response = client.chat.completions.create(
-        model=model or QWEN_CONFIG["default_model"],
+        model=config.model_id,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
@@ -84,16 +181,107 @@ def chat(
     return response.choices[0].message.content
 
 
-def summarize_page(page_type: str, page_data: dict) -> dict:
+def _split_system_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+    system_parts = [m.get("content", "") for m in messages if m.get("role") == "system"]
+    conversation = [m for m in messages if m.get("role") != "system"]
+    return "\n\n".join(system_parts).strip(), conversation
+
+
+def _gemini_chat(
+    config: AIModelConfig,
+    api_key: str,
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    system_prompt, conversation = _split_system_messages(messages)
+    contents = []
+    for message in conversation:
+        role = "model" if message.get("role") == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": str(message.get("content", ""))}]})
+
+    payload: dict = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+    if system_prompt:
+        payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.model_id}:generateContent"
+    with httpx.Client(timeout=30) as client:
+        response = client.post(url, params={"key": api_key}, json=payload)
+        response.raise_for_status()
+        data = response.json()
+    candidates = data.get("candidates") or []
+    parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+    text = "".join(part.get("text", "") for part in parts).strip()
+    if not text:
+        raise ValueError("Gemini response did not include text")
+    return text
+
+
+def _anthropic_chat(
+    config: AIModelConfig,
+    api_key: str,
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    system_prompt, conversation = _split_system_messages(messages)
+    payload: dict = {
+        "model": config.model_id,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": [
+            {
+                "role": "assistant" if message.get("role") == "assistant" else "user",
+                "content": str(message.get("content", "")),
+            }
+            for message in conversation
+        ],
+    }
+    if system_prompt:
+        payload["system"] = system_prompt
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    with httpx.Client(timeout=30) as client:
+        response = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+    text = "".join(part.get("text", "") for part in data.get("content", []) if part.get("type") == "text").strip()
+    if not text:
+        raise ValueError("Claude response did not include text")
+    return text
+
+
+def summarize_page(
+    page_type: str,
+    page_data: dict,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
+) -> dict:
     """Generate AI summary for a page.
 
     Args:
         page_type: "dashboard" | "diagnosis" | "prediction"
         page_data: current page context (turbine stats, alerts, etc.)
+        model: Current user's stored model preference
+        api_key: Current user's stored AI service key
+        api_provider: Provider that the stored key belongs to
 
     Returns:
         {"conclusions": [...], "suggestions": [...]}
     """
+    model_status = describe_model(model, api_key, api_provider)
+
     system_prompt = """你是"风调预顺"PHM系统的AI运维助手。
 根据当前页面数据, 生成简洁的分析报告。
 
@@ -113,19 +301,30 @@ def summarize_page(page_type: str, page_data: dict) -> dict:
         result = chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=QWEN_CONFIG["cheap_model"], temperature=0.3, max_tokens=512)
+        ], model=model or QWEN_CONFIG["cheap_model"], api_key=api_key, api_provider=api_provider, temperature=0.3, max_tokens=512)
 
         # Try to parse JSON from response
         result = result.strip()
         if result.startswith("```"):
             result = result.split("\n", 1)[1].rsplit("\n", 1)[0]
-        return json.loads(result)
+        parsed = json.loads(result)
+        parsed.update(model_status)
+        return parsed
     except Exception as e:
         logger.warning(f"AI summary failed, using fallback: {e}")
-        return fallback_summary(page_type)
+        fallback = fallback_summary(page_type)
+        fallback_mode = model_status["mode"] if model_status["mode"] in {"key_unbound", "provider_mismatch"} else "local_fallback"
+        fallback.update({**model_status, "mode": fallback_mode, "billing": "no_remote_charge"})
+        return fallback
 
 
-def diagnose_fault(turbine_data: dict, fault_data: list[dict]) -> str:
+def diagnose_fault(
+    turbine_data: dict,
+    fault_data: list[dict],
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
+) -> str:
     """Generate fault diagnosis report.
 
     Args:
@@ -135,6 +334,10 @@ def diagnose_fault(turbine_data: dict, fault_data: list[dict]) -> str:
     Returns:
         Diagnosis report text
     """
+    config = describe_model(model, api_key, api_provider)
+    if config["mode"] != "remote":
+        raise ValueError(f"{config['provider']} API key is not ready for selected model")
+
     system_prompt = """你是资深风电运维专家。根据风机数据给出故障诊断建议。
 要求:
 1. 分析可能的根因
@@ -151,16 +354,19 @@ def diagnose_fault(turbine_data: dict, fault_data: list[dict]) -> str:
         return chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], temperature=0.5, max_tokens=512)
+        ], model=model, api_key=api_key, api_provider=api_provider, temperature=0.5, max_tokens=512)
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
-        return "AI诊断服务暂不可用, 建议人工排查。"
+        raise
 
 
 def copilot_chat(
     messages: list[dict],
     page_context: dict,
     knowledge_results: Optional[list[str]] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
     stream: bool = False,
 ) -> str:
     """Multi-turn Copilot chat with page context and optional RAG results.
@@ -199,7 +405,9 @@ def copilot_chat(
                 {"role": "system", "content": system_prompt},
                 *messages,
             ],
-            model=QWEN_CONFIG["default_model"],
+            model=model or QWEN_CONFIG["default_model"],
+            api_key=api_key,
+            api_provider=api_provider,
             temperature=0.5,
             max_tokens=1024,
             stream=stream,

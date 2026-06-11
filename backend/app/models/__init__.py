@@ -13,6 +13,7 @@ class User(Base):
     password_hash = Column(String(256), nullable=False)
     role = Column(String(32), default="viewer")
     api_key = Column(String(256), nullable=True)
+    api_provider = Column(String(64), nullable=True)
     model_preference = Column(String(64), default="gpt-4")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now(timezone.utc))
