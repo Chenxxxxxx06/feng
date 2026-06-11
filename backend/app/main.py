@@ -5,15 +5,14 @@ Provides REST API for wind turbine health management.
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 import uvicorn
 
-from app.config import get_settings, get_offline_database_path, is_sqlite_url
+from app.config import get_settings
 
 # Configure logging
 logging.basicConfig(
@@ -23,7 +22,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 @asynccontextmanager
@@ -31,19 +29,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
     # Startup
     logger.info("Starting up PHM system...")
-
-    # Check for offline database
-    offline_db = get_offline_database_path()
-    if offline_db and is_sqlite_url(settings.DATABASE_URL):
-        logger.info(f"📦 Using offline dataset database: {offline_db}")
-
     from app.database import engine, Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Database tables created/verified")
+        await ensure_runtime_schema(conn)
+    logger.info("Database tables created/verified")
     yield
     # Shutdown
     logger.info("Shutting down PHM system...")
+
+
+async def ensure_runtime_schema(conn):
+    """Apply small additive schema fixes for existing local SQLite databases."""
+    if settings.DATABASE_URL.startswith("sqlite"):
+        result = await conn.execute(text("PRAGMA table_info(users)"))
+        columns = {row[1] for row in result.fetchall()}
+        if "api_provider" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN api_provider VARCHAR(64)"))
+            logger.info("Added users.api_provider column")
+    else:
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
 
 
 app = FastAPI(
@@ -69,9 +74,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Total-Count"],
 )
-
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 
 
 @app.exception_handler(Exception)
