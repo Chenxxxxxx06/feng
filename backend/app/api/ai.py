@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import Turbine, SCADARecord, Fault
+from app.models import Turbine, SCADARecord, Fault, User
 from app.schemas import (
     AISummaryRequest, AISummaryResponse,
     AIFaultAnalysisRequest, AIFaultAnalysisResponse,
@@ -24,13 +24,22 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.post("/summary", response_model=AISummaryResponse)
-async def generate_summary(data: AISummaryRequest):
+async def generate_summary(
+    data: AISummaryRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Generate AI summary for a page.
 
     Uses Qwen API with fallback to local summary.
     """
     try:
-        summary = summarize_page(data.page_type, data.page_data)
+        summary = summarize_page(
+            data.page_type,
+            data.page_data,
+            model=current_user.model_preference,
+            api_key=current_user.api_key,
+            api_provider=current_user.api_provider,
+        )
         return AISummaryResponse(**summary)
     except Exception as e:
         logger.warning(f"AI summary failed, using fallback: {e}")
@@ -43,6 +52,7 @@ async def generate_summary(data: AISummaryRequest):
 async def analyze_fault(
     data: AIFaultAnalysisRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Analyze fault using AI and SCADA data.
 
@@ -104,7 +114,13 @@ async def analyze_fault(
     ]
 
     try:
-        diagnosis = diagnose_fault(turbine_data, fault_data)
+        diagnosis = diagnose_fault(
+            turbine_data,
+            fault_data,
+            model=current_user.model_preference,
+            api_key=current_user.api_key,
+            api_provider=current_user.api_provider,
+        )
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
         diagnosis = _generate_local_diagnosis(turbine_data, anomalies)
@@ -121,10 +137,13 @@ async def analyze_fault(
 async def copilot_endpoint(
     data: AICopilotRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Copilot chat endpoint with page context.
+    """Copilot chat endpoint with page context and optional screenshot.
 
-    Supports multi-turn conversation with page awareness.
+    If a screenshot is provided, it is first analyzed by a vision model
+    (qwen-vl-plus) to extract a text description of the current page state.
+    That description is then fed into the regular chat as additional context.
     """
     # Get current page context
     page_context = data.page_context or {}
@@ -143,11 +162,30 @@ async def copilot_endpoint(
     except Exception as e:
         logger.warning(f"Failed to enhance context: {e}")
 
+    # Analyze screenshot if provided (best-effort, failure does not block chat)
+    screenshot_description: Optional[str] = None
+    if data.screenshot:
+        try:
+            from app.services.qwen_client import describe_screenshot
+            screenshot_description = describe_screenshot(
+                screenshot_base64=data.screenshot,
+                page_type=page_context.get("page_type", "unknown"),
+                api_key=current_user.api_key,
+                api_provider=current_user.api_provider,
+            )
+            logger.info(f"Screenshot analyzed: {screenshot_description[:100]}...")
+        except Exception as e:
+            logger.warning(f"Screenshot analysis failed, proceeding text-only: {e}")
+
     try:
         reply = copilot_chat(
             messages=data.messages,
             page_context=page_context,
             knowledge_results=data.knowledge_results,
+            screenshot_description=screenshot_description,
+            model=current_user.model_preference,
+            api_key=current_user.api_key,
+            api_provider=current_user.api_provider,
         )
         return AICopilotResponse(reply=reply)
     except Exception as e:
@@ -168,14 +206,19 @@ def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:
     anomalies = []
     rated_power_kw = rated_power_mw * 1000
 
-    # Calculate averages
-    avg_power = sum(r.power_kw or 0 for r in scada_records) / len(scada_records)
-    avg_gen_temp = sum(r.gen_temperature_c or 0 for r in scada_records) / len(scada_records)
-    avg_gearbox_temp = sum(r.gearbox_temperature_c or 0 for r in scada_records) / len(scada_records)
-    avg_bearing_temp = sum(r.bearing_temperature_c or 0 for r in scada_records) / len(scada_records)
+    def avg(attr: str) -> float | None:
+        values = [getattr(r, attr) for r in scada_records if getattr(r, attr) is not None]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    avg_power = avg("power_kw")
+    avg_gen_temp = avg("gen_temperature_c")
+    avg_gearbox_temp = avg("gearbox_temperature_c")
+    avg_bearing_temp = avg("bearing_temperature_c")
 
     # Check generator temperature
-    if avg_gen_temp > 95:
+    if avg_gen_temp is not None and avg_gen_temp > 95:
         deviation = f"+{avg_gen_temp - 85:.1f}°C"
         anomalies.append({
             "indicator": "发电机温度",
@@ -186,7 +229,7 @@ def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:
         })
 
     # Check gearbox temperature
-    if avg_gearbox_temp > 80:
+    if avg_gearbox_temp is not None and avg_gearbox_temp > 80:
         deviation = f"+{avg_gearbox_temp - 70:.1f}°C"
         anomalies.append({
             "indicator": "齿轮箱温度",
@@ -197,7 +240,7 @@ def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:
         })
 
     # Check bearing temperature
-    if avg_bearing_temp > 75:
+    if avg_bearing_temp is not None and avg_bearing_temp > 75:
         deviation = f"+{avg_bearing_temp - 65:.1f}°C"
         anomalies.append({
             "indicator": "轴承温度",
@@ -208,8 +251,13 @@ def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:
         })
 
     # Check power output (low power at high wind)
-    avg_wind = sum(r.wind_speed_ms or 0 for r in scada_records) / len(scada_records)
-    if avg_wind > 8 and avg_power < rated_power_kw * 0.5:
+    avg_wind = avg("wind_speed_ms")
+    if (
+        avg_wind is not None
+        and avg_power is not None
+        and avg_wind > 8
+        and avg_power < rated_power_kw * 0.5
+    ):
         anomalies.append({
             "indicator": "功率输出",
             "value": f"{avg_power:.0f}kW",
