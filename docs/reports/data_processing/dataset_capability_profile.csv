@@ -1,8 +1,0 @@
-﻿dataset_id,data_type,available_evidence,serves,limitations,coverage_level
-care_to_compare_v6,SCADA time series and event windows,95 event datasets; 95 event_info rows; 45 anomaly and 50 normal events; 36 farm-scoped anonymous asset references; normalized 95 event files with 5242948 rows; imported 5242948 SCADA rows into SQLite with 36 anonymous assets,SCADA运行指标、数据质量、故障窗口、HI/RUL入口、数据源监控、离线建模,匿名数据；没有真实经纬度、真实风机型号、真实额定功率、业务工单和成本；导入时必须使用匿名资产模式；不能与振动/图像样本伪造成同一台风机证据,核心技术数据已标准化，支持匿名资产入库
-nrel_grc_gearbox_cm,Gearbox vibration samples,"20 processed MAT samples; labels {'damaged': 10, 'healthy': 10}",齿轮箱振动波形、时域/频域指标、样本级故障诊断解释,不是 CARE 同一风机；当前未确认所有通道采样率；只能作为诊断样本库和算法演示来源,样本级覆盖
-mendeley_blade_vibration_faults,Blade vibration samples,"35 processed CSV/XLSX samples; labels {'crack': 7, 'erosion': 7, 'healthy': 7, 'twist': 7, 'unbalance': 7}",叶片振动波形、时域/频域指标、样本级故障诊断解释,不是 CARE 同一风机；标签来自真实文件名/数据集结构，后续要保留来源说明,样本级覆盖
-yolo_annotated_wind_turbine_surface_damage,Blade surface image detection samples,"13470 images; 2995 YOLO label files; 2995 paired image-label samples; class counts {'dirt': 581, 'damage': 8770}",叶片图像损伤定位、bbox面积占比、图像诊断证据,类别以数据集 labels.txt 为准；不生成模型置信度；不代表 CARE 风机现场巡检历史,样本级覆盖
-dtu_drone_inspection,Raw drone inspection images,701 raw images; labels 0,真实巡检图像展示、图像质量检查、来源追溯,没有检测标注；不能编造损伤类别或 bbox,图像展示覆盖，标注诊断缺失
-era5_or_site_weather,External weather,not downloaded,环境背景、RUL增强、页面解释,需要真实坐标和时间范围后再匹配；不能替代 SCADA 传感器,缺失，可后置
-business_records,"Work orders, costs, inventory, personnel",not available from public datasets,成本决策、维护日历、工单闭环、备件采购,必须由系统真实操作积累或用户提供带来源记录；不能预置伪造历史,缺失，需要自建或导入
