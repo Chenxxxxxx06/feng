@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from app.config import get_settings
+from app.config import get_settings, get_offline_database_path, is_sqlite_url
 
 # Configure logging
 logging.basicConfig(
@@ -28,10 +28,16 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
     # Startup
     logger.info("Starting up PHM system...")
+    
+    # Check for offline database
+    offline_db = get_offline_database_path()
+    if offline_db and is_sqlite_url(settings.DATABASE_URL):
+        logger.info(f"📦 Using offline dataset database: {offline_db}")
+    
     from app.database import engine, Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created/verified")
+    logger.info("✅ Database tables created/verified")
     yield
     # Shutdown
     logger.info("Shutting down PHM system...")
