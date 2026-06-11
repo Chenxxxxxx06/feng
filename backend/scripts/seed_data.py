@@ -382,6 +382,9 @@ async def seed():
         await db.commit()
         print("   ✅ 数据源配置完成")
 
+    # Seed knowledge base
+    await seed_knowledge_base()
+
     print("\n" + "=" * 60)
     print("🎉 数据库初始化完成！")
     print("=" * 60)
@@ -404,7 +407,7 @@ async def create_default_admin():
     """Create default admin user if no users exist."""
     async with async_session() as db:
         now = datetime.now(timezone.utc)
-        
+
         admin = User(
             username="admin",
             email="admin@fengdiao.com",
@@ -414,7 +417,7 @@ async def create_default_admin():
         )
         db.add(admin)
         await db.commit()
-        
+
         # Create notification config
         config = NotificationConfig(
             user_id=admin.id,
@@ -425,9 +428,48 @@ async def create_default_admin():
         )
         db.add(config)
         await db.commit()
-        
+
         print("   ✅ 创建默认管理员用户")
         print("   🔑 登录账号: admin / admin123")
+
+
+async def seed_knowledge_base():
+    """Seed fault knowledge base from JSON preset."""
+    import json
+    from pathlib import Path
+    from app.models import FaultKnowledgeNode
+
+    kb_path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "fault-kb.json"
+    if not kb_path.exists():
+        print("   ⚠️  fault-kb.json 不存在, 跳过知识库初始化")
+        return
+
+    data = json.loads(kb_path.read_text(encoding="utf-8"))
+    async with async_session() as db:
+        count = 0
+        for node_data in data.get("nodes", []):
+            existing = await db.execute(
+                select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == node_data["fault_type"])
+            )
+            if existing.scalar_one_or_none():
+                continue
+            node = FaultKnowledgeNode(
+                fault_type=node_data["fault_type"],
+                category=node_data["category"],
+                icon=node_data.get("icon", "⚠️"),
+                severity=node_data.get("severity", "medium"),
+                symptoms=node_data.get("symptoms", []),
+                root_causes=node_data.get("root_causes", []),
+                solutions=node_data.get("solutions", []),
+                related_faults=node_data.get("related_faults", []),
+                spare_parts=node_data.get("spare_parts", []),
+                cases=node_data.get("cases", []),
+            )
+            db.add(node)
+            count += 1
+        await db.commit()
+        if count > 0:
+            print(f"   ✅ 知识库: 导入 {count} 个故障节点")
 
 
 if __name__ == "__main__":
