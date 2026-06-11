@@ -86,6 +86,10 @@ backend/data/modeling/
 # --- Local verification artifacts ---
 frontend/prediction-cost-verified.png
 
+# --- Local handoff packages ---
+handoff_packages/
+*_handoff_*.zip
+
 # --- Secrets ---
 API_KEYS_PLACEHOLDER.txt
 *.pem
