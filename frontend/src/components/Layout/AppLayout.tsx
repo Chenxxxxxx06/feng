@@ -6,6 +6,7 @@ const navItems = [
   { path: '/diagnosis', icon: '◇', label: '故障诊断' },
   { path: '/prediction', icon: '◎', label: '预测决策' },
   { path: '/workorder', icon: '▣', label: '维修工单' },
+  { path: '/knowledge', icon: '📚', label: '故障百科' },
   { path: '/settings', icon: '⚙', label: '系统设置' },
 ];
 
