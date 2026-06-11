@@ -7,6 +7,7 @@ interface User {
   email: string;
   role: string;
   api_key: string | null;
+  api_provider: string | null;
   model_preference: string;
 }
 
@@ -29,18 +30,26 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (username, password) => {
     set({ loading: true });
-    const { data } = await api.post('/auth/login', { username, password });
-    localStorage.setItem('token', data.access_token);
-    localStorage.setItem('user', JSON.stringify(data.user));
-    set({ token: data.access_token, user: data.user, initialized: true, loading: false });
+    try {
+      const { data } = await api.post('/auth/login', { username, password });
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      set({ token: data.access_token, user: data.user, initialized: true });
+    } finally {
+      set({ loading: false });
+    }
   },
 
   register: async (username, email, password) => {
     set({ loading: true });
-    const { data } = await api.post('/auth/register', { username, email, password });
-    localStorage.setItem('token', data.access_token);
-    localStorage.setItem('user', JSON.stringify(data.user));
-    set({ token: data.access_token, user: data.user, initialized: true, loading: false });
+    try {
+      const { data } = await api.post('/auth/register', { username, email, password });
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      set({ token: data.access_token, user: data.user, initialized: true });
+    } finally {
+      set({ loading: false });
+    }
   },
 
   logout: () => {
