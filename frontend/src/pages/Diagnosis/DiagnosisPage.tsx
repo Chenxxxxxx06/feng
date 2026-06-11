@@ -17,7 +17,6 @@ export default function DiagnosisPage() {
     setSelected(data);
   };
 
-  // Compute summary stats
   const openCount = faults.filter(f => f.status === 'open').length;
   const weekAgo = new Date(Date.now() - 7 * 86400000);
   const weekNew = faults.filter(f => new Date(f.detected_at) > weekAgo).length;
@@ -30,104 +29,114 @@ export default function DiagnosisPage() {
     : 100;
 
   const cards = [
-    { label: '总故障数', value: String(faults.length), unit: '条', color: 'text-accent-blue', icon: '📋' },
-    { label: '待处理', value: String(openCount), unit: '条', color: openCount > 0 ? 'text-accent-red' : 'text-accent-green', icon: '🔴' },
-    { label: '本周新增', value: String(weekNew), unit: '条', color: weekNew > 0 ? 'text-accent-yellow' : 'text-text-secondary', icon: '📈' },
-    { label: '平均置信度', value: avgConfidence, unit: '', color: 'text-accent-cyan', icon: '🎯' },
-    { label: '诊断健康度', value: String(healthScore), unit: '分', color: healthScore >= 80 ? 'text-accent-green' : healthScore >= 60 ? 'text-accent-yellow' : 'text-accent-red', icon: '💚' },
+    { label: 'TOTAL_FAULTS', value: String(faults.length), unit: 'REC', color: '#00E5FF' },
+    { label: 'PENDING', value: String(openCount), unit: 'REC', color: openCount > 0 ? '#FF1744' : '#00E676' },
+    { label: 'WEEKLY_NEW', value: String(weekNew), unit: 'REC', color: weekNew > 0 ? '#FF9100' : '#8899AA' },
+    { label: 'AVG_CONFIDENCE', value: avgConfidence, unit: '', color: '#2979FF' },
+    { label: 'DIAG_HEALTH', value: String(healthScore), unit: 'PT', color: healthScore >= 80 ? '#00E676' : healthScore >= 60 ? '#FF9100' : '#FF1744' },
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header + Summary Cards */}
-      <div className="flex-shrink-0 border-b border-border-default bg-bg-secondary px-6 py-4">
-        <h2 className="text-sm font-semibold mb-3">故障诊断中心</h2>
+    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: '#020204' }}>
+      {/* Header */}
+      <div className="flex-shrink-0 px-5 py-3 relative z-10" style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
+        <div className="flex items-center gap-4 mb-4">
+          <span className="font-mono text-[10px] tracking-widest" style={{ color: '#00E5FF' }}>[02]</span>
+          <h2 className="text-sm font-semibold font-display tracking-wider" style={{ color: '#E8ECF1' }}>
+            FAULT_DIAGNOSIS :: ANALYZER
+          </h2>
+        </div>
         <div className="grid grid-cols-5 gap-3">
           {cards.map((c) => (
-            <div key={c.label} className="bg-bg-card border border-border-default rounded-lg px-3 py-2.5 flex items-center gap-3">
-              <span className="text-xl">{c.icon}</span>
-              <div>
-                <p className="text-[10px] text-text-muted">{c.label}</p>
-                <p className={`text-lg font-mono font-bold ${c.color}`}>{c.value}<span className="text-[10px] font-normal text-text-muted ml-0.5">{c.unit}</span></p>
+            <div key={c.label} className="hud-panel px-3.5 py-3 fade-in" style={{ background: '#161922' }}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.color, boxShadow: `0 0 4px ${c.color}` }} />
+                <p className="font-mono text-[8px] uppercase tracking-widest" style={{ color: '#445566' }}>{c.label}</p>
               </div>
+              <p className="kpi-value-sm" style={{ color: c.color }}>
+                {c.value}
+                <span className="kpi-unit">{c.unit}</span>
+              </p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Main Content: Fault List + Root Cause */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Fault List */}
-        <div className="flex-1 overflow-auto p-6">
+      {/* Fault List + Root Cause */}
+      <div className="flex-1 flex overflow-hidden relative z-10">
+        <div className="flex-1 overflow-auto p-5">
           {loading ? (
-            <p className="text-text-muted text-sm">加载中...</p>
+            <p className="font-mono text-[11px] tracking-wider animate-pulse" style={{ color: '#00E5FF' }}>SCANNING...</p>
           ) : (
             <div className="space-y-2">
               {faults.map((f) => (
-                <div
-                  key={f.id}
-                  onClick={() => viewDetail(f.id)}
-                  className={`bg-bg-card border rounded-lg p-3.5 cursor-pointer transition-colors ${
-                    selected?.id === f.id ? 'border-accent-blue ring-1 ring-accent-blue/30' : 'border-border-default hover:border-border-active'
-                  }`}
-                >
+                <div key={f.id} onClick={() => viewDetail(f.id)}
+                  className="hud-panel p-4 cursor-pointer slide-up"
+                  style={{
+                    background: selected?.id === f.id ? 'rgba(0,229,255,0.03)' : '#161922',
+                    borderColor: selected?.id === f.id ? 'rgba(0,229,255,0.3)' : undefined,
+                  }}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className={`w-2 h-2 rounded-full ${f.status === 'open' ? 'bg-accent-red' : 'bg-accent-green'}`} />
-                      <span className="font-medium text-sm">{f.fault_type}</span>
-                      <span className="text-xs text-text-muted">风机 #{f.turbine_id} {f.turbine_name || ''}</span>
+                      <span className="w-2 h-2 rounded-full" style={{
+                        background: f.status === 'open' ? '#FF1744' : '#00E676',
+                        boxShadow: `0 0 6px ${f.status === 'open' ? '#FF1744' : '#00E676'}`,
+                      }} />
+                      <span className="font-medium text-[13px]" style={{ color: '#E8ECF1' }}>{f.fault_type}</span>
+                      <span className="font-mono text-[10px] tracking-wider" style={{ color: '#445566' }}>
+                        TURBINE#{f.turbine_id} {f.turbine_name || ''}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-4 text-xs text-text-muted">
-                      <span>置信度: <span className="text-accent-yellow font-mono">{(f.confidence * 100).toFixed(0)}%</span></span>
+                    <div className="flex items-center gap-3 font-mono text-[10px] tracking-wider" style={{ color: '#445566' }}>
+                      <span>CONF <span style={{ color: '#FF9100' }}>{(f.confidence * 100).toFixed(0)}%</span></span>
                       <span>{new Date(f.detected_at).toLocaleDateString('zh-CN')}</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] ${f.status === 'open' ? 'bg-accent-red/20 text-accent-red' : 'bg-accent-green/20 text-accent-green'}`}>
-                        {f.status === 'open' ? '待处理' : '已关闭'}
+                      <span className={`chip text-[9px] ${f.status === 'open' ? 'chip-red' : 'chip-green'}`}>
+                        {f.status === 'open' ? 'OPEN' : 'CLOSED'}
                       </span>
                     </div>
                   </div>
                 </div>
               ))}
-              {faults.length === 0 && <p className="text-text-muted text-sm">暂无故障记录</p>}
+              {faults.length === 0 && <p className="font-mono text-[11px] tracking-wider" style={{ color: '#445566' }}>NO_FAULT_RECORDS</p>}
             </div>
           )}
 
           {/* Root Cause */}
           {selected && (
-            <div className="mt-4 bg-bg-card border border-border-default rounded-lg p-4">
-              <h3 className="text-sm font-medium mb-4">
-                故障根因分析 — {selected.fault_type}
-                <span className="ml-2 text-xs text-text-muted">风机 #{selected.turbine_id}</span>
+            <div className="mt-4 hud-panel p-4 slide-up" style={{ background: '#161922' }}>
+              <h3 className="font-mono text-[10px] uppercase tracking-widest mb-3 flex items-center gap-2" style={{ color: '#00E5FF' }}>
+                <span style={{ color: '#FF9100' }}>[RCA]</span> ROOT_CAUSE :: {selected.fault_type}
+                <span className="font-mono text-[9px] ml-2" style={{ color: '#445566' }}>T#{selected.turbine_id}</span>
               </h3>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {selected.signals?.map((sig) => (
-                  <div key={sig.id} className="flex items-center gap-3 bg-bg-hover rounded px-3 py-2 text-xs">
-                    <span className={`w-14 px-1.5 py-0.5 rounded text-center text-[10px] font-mono ${
-                      sig.priority === 'high' ? 'bg-accent-red/20 text-accent-red' :
-                      sig.priority === 'medium' ? 'bg-accent-yellow/20 text-accent-yellow' :
-                      'bg-text-muted/20 text-text-muted'
-                    }`}>
-                      {sig.priority === 'high' ? '高' : sig.priority === 'medium' ? '中' : '低'}
-                    </span>
-                    <span className="flex-1 text-text-primary">{sig.sensor_name}</span>
-                    {/* Progress bar for contribution */}
-                    <div className="w-32 bg-bg-secondary rounded-full h-1.5 mr-2">
-                      <div className="h-full rounded-full bg-accent-blue" style={{ width: `${(sig.contribution_score * 100).toFixed(0)}%` }} />
+                  <div key={sig.id} className="flex items-center gap-3 px-3 py-2.5 text-[11px]"
+                    style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: '2px' }}>
+                    <span className={`chip text-[9px] w-12 justify-center ${
+                      sig.priority === 'high' ? 'chip-red' : sig.priority === 'medium' ? 'chip-amber' : ''
+                    }`}>{sig.priority === 'high' ? 'HIGH' : sig.priority === 'medium' ? 'MED' : 'LOW'}</span>
+                    <span className="flex-1" style={{ color: '#E8ECF1' }}>{sig.sensor_name}</span>
+                    <div className="progress-hud w-32">
+                      <div className="progress-hud-fill" style={{ width: `${(sig.contribution_score * 100).toFixed(0)}%`, background: '#00E5FF' }} />
                     </div>
-                    <span className="text-text-muted font-mono w-14 text-right">{(sig.contribution_score * 100).toFixed(1)}%</span>
+                    <span className="w-14 text-right font-mono font-medium" style={{ color: '#8899AA' }}>
+                      {(sig.contribution_score * 100).toFixed(1)}%
+                    </span>
                   </div>
                 ))}
               </div>
               {selected.details && (
-                <div className="mt-3 p-3 bg-accent-yellow/5 border border-accent-yellow/20 rounded text-xs">
-                  <p className="text-accent-yellow font-medium mb-1">💡 排查建议：</p>
-                  <p className="text-text-secondary">{JSON.stringify(selected.details)}</p>
+                <div className="mt-3 p-3 font-mono text-[9px] tracking-wider" style={{
+                  background: 'rgba(255,145,0,0.03)', border: '1px solid rgba(255,145,0,0.12)', borderRadius: '2px',
+                  color: '#FF9100',
+                }}>
+                  {'>'} RECOMMENDATION: {JSON.stringify(selected.details)}
                 </div>
               )}
             </div>
           )}
         </div>
       </div>
-
       <CopilotFAB />
     </div>
   );

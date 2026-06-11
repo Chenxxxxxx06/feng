@@ -1,15 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import api from '../../services/api';
 
-interface Message {
-  role: 'user' | 'assistant' | 'error';
-  content: string;
-}
+interface Message { role: 'user' | 'assistant' | 'error'; content: string }
 
 export default function CopilotFAB() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: '你好！我是风调预顺AI助手。我可以帮你分析风机数据、解释故障原因、生成维护建议。请随时提问。' },
+    { role: 'assistant', content: 'SYS::AI_READY. 风调预顺控制中心在线。我可以解析风机数据、诊断故障、生成维护建议。' },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,101 +23,112 @@ export default function CopilotFAB() {
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setLoading(true);
-
     try {
       const { data } = await api.post('/ai/copilot', {
         messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
-        page_context: {
-          page_type: window.location.pathname.replace('/', '') || 'dashboard',
-          url: window.location.href,
-        },
+        page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href },
       });
       setMessages((prev) => [...prev, { role: 'assistant', content: data.reply }]);
     } catch {
-      setMessages((prev) => [...prev, { role: 'error', content: 'AI服务暂不可用, 请稍后重试' }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+      setMessages((prev) => [...prev, { role: 'error', content: 'ERR::AI_SERVICE_UNAVAILABLE' }]);
+    } finally { setLoading(false); }
   };
 
   return (
     <>
-      {/* Floating Action Button */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center"
-          style={{ boxShadow: '0 0 20px rgba(88,166,255,0.4)' }}
+          className="fixed bottom-6 right-6 z-50 flex items-center justify-center transition-all hover:scale-105"
+          style={{
+            width: 48, height: 48,
+            border: '1px solid rgba(0,229,255,0.3)',
+            borderRadius: '2px',
+            background: 'rgba(0,229,255,0.06)',
+            boxShadow: '0 0 20px rgba(0,229,255,0.12)',
+          }}
         >
-          <span className="text-2xl">💬</span>
-          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-accent-green border-2 border-bg-primary animate-pulse" />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00E5FF" strokeWidth="1.5">
+            <path d="M12 2a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5 5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"/>
+            <path d="M3 14c0 4.97 4.03 9 9 9s9-4.03 9-9"/>
+          </svg>
+          <span
+            className="absolute top-0 right-0 w-3 h-3 rounded-full border-2 animate-pulse"
+            style={{ background: '#00E676', borderColor: '#020204' }}
+          />
         </button>
       )}
 
-      {/* Chat Panel */}
       {open && (
-        <div className="fixed bottom-6 right-6 z-50 w-[400px] h-[560px] bg-bg-card border border-border-default rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <div
+          className="fixed bottom-6 right-6 z-50 flex flex-col overflow-hidden"
+          style={{
+            width: 420, height: 540,
+            background: '#11141C',
+            border: '1px solid rgba(0,229,255,0.15)',
+            borderRadius: '4px',
+            boxShadow: '0 0 40px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,229,255,0.04)',
+          }}
+        >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-secondary">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">🤖</span>
+          <div className="flex items-center justify-between px-4 py-3 flex-shrink-0"
+            style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 flex items-center justify-center"
+                style={{ border: '1px solid rgba(0,229,255,0.2)', borderRadius: '2px', background: 'rgba(0,229,255,0.04)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00E5FF" strokeWidth="1.5">
+                  <path d="M12 2a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5 5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"/>
+                  <path d="M3 14c0 4.97 4.03 9 9 9s9-4.03 9-9"/>
+                </svg>
+              </div>
               <div>
-                <h3 className="text-sm font-medium">风调AI助手</h3>
-                <p className="text-[10px] text-accent-green">Qwen-Plus · 在线</p>
+                <h3 className="text-xs font-semibold font-display tracking-wider" style={{ color: '#E8ECF1' }}>AI COPILOT</h3>
+                <p className="font-mono text-[9px] tracking-wider" style={{ color: '#00E676' }}>ONLINE</p>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="text-text-muted hover:text-text-primary text-lg">✕</button>
+            <button onClick={() => setOpen(false)}
+              className="w-6 h-6 flex items-center justify-center transition-colors"
+              style={{ color: '#445566' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#E8ECF1')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#445566')}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
 
           {/* Messages */}
-          <div ref={chatRef} className="flex-1 overflow-auto p-4 space-y-3 text-xs">
+          <div ref={chatRef} className="flex-1 overflow-auto p-3 space-y-2.5 text-[12px]">
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-lg px-3 py-2 ${
-                  m.role === 'user'
-                    ? 'bg-accent-blue/20 text-text-primary'
-                    : m.role === 'error'
-                    ? 'bg-accent-red/10 text-accent-red'
-                    : 'bg-bg-hover text-text-primary'
-                }`}>
+                <div className="max-w-[88%] px-3 py-2.5" style={{
+                  background: m.role === 'user' ? 'rgba(0,229,255,0.05)' : m.role === 'error' ? 'rgba(255,23,68,0.05)' : 'rgba(255,255,255,0.03)',
+                  border: m.role === 'user' ? '1px solid rgba(0,229,255,0.15)' : m.role === 'error' ? '1px solid rgba(255,23,68,0.15)' : '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: '2px',
+                  color: m.role === 'error' ? '#FF1744' : '#E8ECF1',
+                }}>
                   {m.content}
                 </div>
               </div>
             ))}
-            {loading && <p className="text-text-muted animate-pulse">AI思考中...</p>}
+            {loading && <p className="font-mono text-[10px] tracking-wider animate-pulse" style={{ color: '#00E5FF' }}>PROCESSING...</p>}
           </div>
 
           {/* Input */}
-          <div className="p-3 border-t border-border-default">
-            <div className="flex gap-2">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="输入问题, 如: A-003风机当前状态如何?"
-                className="flex-1 bg-bg-secondary border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
-              />
-              <button
-                onClick={handleSend}
-                disabled={loading || !input.trim()}
-                className="px-4 py-2 bg-accent-blue text-white rounded-lg text-xs hover:opacity-90 disabled:opacity-40 transition-opacity"
-              >
-                发送
+          <div className="p-3 flex-shrink-0" style={{ borderTop: '1px solid rgba(0,229,255,0.12)' }}>
+            <div className="flex gap-1.5">
+              <span className="font-mono text-[10px] self-center flex-shrink-0" style={{ color: '#00E5FF' }}>&gt;</span>
+              <input value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                placeholder="QUERY..."
+                className="input-hud flex-1 text-[11px]" style={{ padding: '7px 10px' }} />
+              <button onClick={handleSend} disabled={loading || !input.trim()}
+                className="btn-prime-filled text-[10px] px-3" style={{ opacity: loading || !input.trim() ? 0.3 : 1 }}>
+                SEND
               </button>
             </div>
-            <div className="flex gap-2 mt-2">
-              {['总结当前状态', '最近故障', '健康趋势分析'].map((q) => (
-                <button
-                  key={q}
-                  onClick={() => { setInput(q); }}
-                  className="text-[10px] px-2 py-1 rounded border border-border-default text-text-muted hover:text-accent-blue hover:border-accent-blue transition-colors"
-                >
-                  {q}
-                </button>
+            <div className="flex gap-1 mt-2">
+              {['STATUS', 'FAULTS', 'TREND'].map((q) => (
+                <button key={q} onClick={() => setInput(q)}
+                  className="chip text-[9px] cursor-pointer">{q}</button>
               ))}
             </div>
           </div>

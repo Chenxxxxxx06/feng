@@ -4,10 +4,44 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: { primary: '#0a0e14', secondary: '#12161e', card: '#161c26', hover: '#1c2433' },
-        border: { default: '#1e2a3a', active: '#2d4a6e' },
-        text: { primary: '#e6edf3', secondary: '#8b949e', muted: '#5c6975' },
-        accent: { blue: '#58a6ff', green: '#3fb950', yellow: '#d29922', red: '#f85149', cyan: '#39d2c0' },
+        void: {
+          deep: '#020204',
+          base: '#0A0C10',
+          elevated: '#11141C',
+          card: '#161922',
+        },
+        neon: {
+          cyan: '#00E5FF',
+          'cyan-dim': 'rgba(0,229,255,0.08)',
+          'cyan-glow': 'rgba(0,229,255,0.25)',
+          blue: '#2979FF',
+          'blue-dim': 'rgba(41,121,255,0.08)',
+          amber: '#FF9100',
+          'amber-dim': 'rgba(255,145,0,0.08)',
+          red: '#FF1744',
+          'red-dim': 'rgba(255,23,68,0.08)',
+          green: '#00E676',
+          'green-dim': 'rgba(0,230,118,0.08)',
+        },
+        border: {
+          hud: 'rgba(0,229,255,0.12)',
+          'hud-strong': 'rgba(0,229,255,0.25)',
+          subtle: 'rgba(255,255,255,0.06)',
+        },
+        text: {
+          pri: '#E8ECF1',
+          sec: '#8899AA',
+          dim: '#445566',
+        },
+      },
+      fontFamily: {
+        display: ['"Rajdhani"', '"PingFang SC"', 'sans-serif'],
+        body: ['"Inter"', '"PingFang SC"', 'sans-serif'],
+        mono: ['"JetBrains Mono"', '"SF Mono"', 'monospace'],
+      },
+      fontSize: {
+        'kpi': ['3rem', { lineHeight: '1', fontWeight: '600', letterSpacing: '0.02em' }],
+        'kpi-sm': ['2rem', { lineHeight: '1', fontWeight: '600', letterSpacing: '0.02em' }],
       },
     },
   },
