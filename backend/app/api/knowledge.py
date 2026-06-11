@@ -7,8 +7,11 @@ from typing import Optional
 
 from app.database import get_db
 from app.models import FaultKnowledgeNode, Turbine, Fault, WorkOrder
+from app.api.auth import get_current_user
 
-router = APIRouter()
+from app.api.auth import get_current_user
+
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/knowledge-base")
@@ -88,11 +91,13 @@ async def get_knowledge_graph(db: AsyncSession = Depends(get_db)):
     def add_edge(source: str, target: str, label: str = ""):
         edges.append({"source": source, "target": target, "label": label})
 
-    # 1. 故障知识节点
+    # 1. 故障知识节点 + 构建 name→id 查找表
     result = await db.execute(select(FaultKnowledgeNode))
     fault_nodes = result.scalars().all()
+    fault_name_to_id: dict[str, str] = {}
     for fn in fault_nodes:
         fid = f"fault_{fn.id}"
+        fault_name_to_id[fn.fault_type] = fid
         add_node(fid, fn.fault_type, "fault", fn.icon, 40,
                  {"severity": fn.severity, "category": fn.category})
 
@@ -112,8 +117,9 @@ async def get_knowledge_graph(db: AsyncSession = Depends(get_db)):
             add_node(sid2, sol["action"], "solution", "🔧", 22)
             add_edge(fid, sid2, f"{sol.get('difficulty','')}")
         for rf in (fn.related_faults or []):
-            target_id = f"fault_{rf['name']}"
-            add_edge(fid, target_id, f"伴生{int(rf['probability']*100)}%")
+            target_id = fault_name_to_id.get(rf.get("name", ""))
+            if target_id:
+                add_edge(fid, target_id, f"伴生{int(rf['probability']*100)}%")
         for sp in (fn.spare_parts or []):
             spid = f"part_{sp['name'][:30]}"
             add_node(spid, sp["name"], "spare_part", "📦", 20)
@@ -168,4 +174,28 @@ def _node_to_dict(n: FaultKnowledgeNode) -> dict:
         "related_faults": n.related_faults or [],
         "spare_parts": n.spare_parts or [],
         "cases": n.cases or [],
+        "source": getattr(n, "source", "manual"),
+        "confidence": getattr(n, "confidence", 1.0),
+        "verified": getattr(n, "verified", True),
     }
+
+
+@router.patch("/knowledge-base/{node_id}/verify")
+async def verify_node(node_id: int, db: AsyncSession = Depends(get_db)):
+    node = await db.get(FaultKnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "节点不存在")
+    node.verified = True
+    node.confidence = 1.0
+    await db.commit()
+    return {"status": "verified"}
+
+
+@router.delete("/knowledge-base/{node_id}")
+async def delete_knowledge_node(node_id: int, db: AsyncSession = Depends(get_db)):
+    node = await db.get(FaultKnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "节点不存在")
+    await db.delete(node)
+    await db.commit()
+    return {"status": "deleted"}

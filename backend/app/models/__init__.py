@@ -201,3 +201,7 @@ class FaultKnowledgeNode(Base):
     cases = Column(JSON, default=list)
     created_at = Column(DateTime(timezone=True), default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    source = Column(String(32), default="manual")
+    confidence = Column(Float, default=1.0)
+    verified = Column(Boolean, default=True)
+    extracted_from = Column(Text, nullable=True)
