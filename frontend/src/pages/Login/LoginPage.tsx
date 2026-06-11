@@ -39,7 +39,7 @@ export default function LoginPage() {
 
       {/* Auth panel */}
       <div
-        className="relative z-10 w-[400px] p-8"
+        className="relative z-10 w-[400px] p-8 hud-frame frame-cyan"
         style={{
           background: '#11141C',
           border: '1px solid rgba(0,229,255,0.12)',
@@ -50,7 +50,7 @@ export default function LoginPage() {
         {/* Identity */}
         <div className="text-center mb-8">
           <div
-            className="w-14 h-14 flex items-center justify-center mx-auto mb-4"
+            className="w-14 h-14 flex items-center justify-center mx-auto mb-4 logo-pulse"
             style={{
               border: '1px solid rgba(0,229,255,0.2)',
               borderRadius: '2px',
@@ -63,7 +63,7 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1
-            className="text-2xl font-semibold tracking-widest mb-1"
+            className="text-2xl font-semibold tracking-widest mb-1 text-glow-cyan"
             style={{ fontFamily: '"Rajdhani","PingFang SC",sans-serif', color: '#E8ECF1', letterSpacing: '0.06em' }}
           >
             风调预顺

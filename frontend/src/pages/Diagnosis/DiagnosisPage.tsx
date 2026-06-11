@@ -37,9 +37,9 @@ export default function DiagnosisPage() {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: '#020204' }}>
+    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: 'transparent' }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-5 py-3 relative z-10" style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
+      <div className="flex-shrink-0 px-5 py-3 relative z-10 edge-beam" style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
         <div className="flex items-center gap-4 mb-4">
           <span className="font-mono text-[10px] tracking-widest" style={{ color: '#00E5FF' }}>[02]</span>
           <h2 className="text-sm font-semibold font-display tracking-wider" style={{ color: '#E8ECF1' }}>
@@ -48,7 +48,7 @@ export default function DiagnosisPage() {
         </div>
         <div className="grid grid-cols-5 gap-3">
           {cards.map((c) => (
-            <div key={c.label} className="hud-panel px-3.5 py-3 fade-in" style={{ background: '#161922' }}>
+            <div key={c.label} className="hud-panel kpi-card px-3.5 py-3 fade-in" style={{ background: '#161922' }}>
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.color, boxShadow: `0 0 4px ${c.color}` }} />
                 <p className="font-mono text-[8px] uppercase tracking-widest" style={{ color: '#445566' }}>{c.label}</p>

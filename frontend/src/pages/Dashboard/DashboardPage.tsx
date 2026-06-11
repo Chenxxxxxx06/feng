@@ -34,9 +34,9 @@ export default function DashboardPage() {
   const avail = summary.total > 0 ? ((healthy + warning) / summary.total * 100).toFixed(1) : '--';
 
   return (
-    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: '#020204' }}>
+    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: 'transparent' }}>
       {/* ── Command Bar ── */}
-      <div className="flex-shrink-0 px-5 py-3 flex items-center justify-between relative z-10"
+      <div className="flex-shrink-0 px-5 py-3 flex items-center justify-between relative z-10 edge-beam"
         style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
         <div className="flex items-center gap-4">
           <span className="font-mono text-[10px] tracking-widest" style={{ color: '#00E5FF' }}>[01]</span>
@@ -47,7 +47,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full" style={{ background: '#00E676', boxShadow: '0 0 6px rgba(0,230,118,0.5)' }} />
+            <span className="w-2 h-2 rounded-full live-dot" style={{ background: '#00E676', boxShadow: '0 0 6px rgba(0,230,118,0.5)' }} />
             <span className="font-mono text-[10px] tracking-wider" style={{ color: '#00E676' }}>SYS::NOMINAL</span>
           </div>
           <span className="font-mono text-[10px] tracking-wider" style={{ color: '#445566' }}>
@@ -71,6 +71,13 @@ export default function DashboardPage() {
       {/* ── Map Area + Slide-out ── */}
       <div className="flex-1 relative mx-5 mb-3 overflow-hidden relative z-10"
         style={{ border: '1px solid rgba(0,229,255,0.12)', borderRadius: '2px' }}>
+        {/* viewport corner ticks */}
+        <div className="pointer-events-none absolute inset-0 z-[15]" aria-hidden>
+          <span className="absolute top-1.5 left-1.5 w-3.5 h-3.5" style={{ borderTop: '1px solid rgba(0,229,255,0.4)', borderLeft: '1px solid rgba(0,229,255,0.4)' }} />
+          <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5" style={{ borderTop: '1px solid rgba(0,229,255,0.4)', borderRight: '1px solid rgba(0,229,255,0.4)' }} />
+          <span className="absolute bottom-1.5 left-1.5 w-3.5 h-3.5" style={{ borderBottom: '1px solid rgba(0,229,255,0.4)', borderLeft: '1px solid rgba(0,229,255,0.4)' }} />
+          <span className="absolute bottom-1.5 right-1.5 w-3.5 h-3.5" style={{ borderBottom: '1px solid rgba(0,229,255,0.4)', borderRight: '1px solid rgba(0,229,255,0.4)' }} />
+        </div>
         {loading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center"
             style={{ background: 'rgba(2,2,4,0.7)', backdropFilter: 'blur(4px)' }}>
@@ -194,7 +201,7 @@ function KPICard({ label, value, unit, accent }: { label: string; value: string;
   };
   const c = colors[accent] || '#00E5FF';
   return (
-    <div className="hud-panel px-4 py-3 flex flex-col justify-center slide-up" style={{ background: '#161922' }}>
+    <div className="hud-panel kpi-card px-4 py-3 flex flex-col justify-center slide-up" style={{ background: '#161922' }}>
       <div className="flex items-center gap-2 mb-1.5">
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: c, boxShadow: `0 0 6px ${c}` }} />
         <span className="font-mono text-[8px] uppercase tracking-widest" style={{ color: '#445566' }}>{label}</span>

@@ -96,7 +96,7 @@ function MaintenanceCalendar() {
               <p className="mt-0.5 ml-2.5 font-mono text-[9px]" style={{ color: '#445566' }}>T#{wo.turbine_id} {wo.assignee || 'UNASSIGNED'}</p>
             </div>
           ))}
-          {tooltip.ords.length === 0 && tooltip.ruls.length === 0 && <p className="font-mono text-[9px]" style={{ color: '#445566' }}>NO_WORK_ORDERS</p>}
+          {tooltip.orders.length === 0 && tooltip.ruls.length === 0 && <p className="font-mono text-[9px]" style={{ color: '#445566' }}>NO_WORK_ORDERS</p>}
         </div>
       )}
     </div>
@@ -144,8 +144,8 @@ export default function PredictionPage() {
   const highRisk = predictions.filter(p => p.remaining_life_days < 180).sort((a, b) => a.remaining_life_days - b.remaining_life_days);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: '#020204' }}>
-      <div className="flex-shrink-0 px-5 py-3 relative z-10" style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
+    <div className="h-full flex flex-col overflow-hidden relative" style={{ background: 'transparent' }}>
+      <div className="flex-shrink-0 px-5 py-3 relative z-10 edge-beam" style={{ borderBottom: '1px solid rgba(0,229,255,0.12)', background: '#0A0C10' }}>
         <div className="flex items-center gap-4">
           <span className="font-mono text-[10px] tracking-widest" style={{ color: '#00E5FF' }}>[03]</span>
           <h2 className="text-sm font-semibold font-display tracking-wider" style={{ color: '#E8ECF1' }}>

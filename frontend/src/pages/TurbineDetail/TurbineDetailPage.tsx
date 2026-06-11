@@ -88,7 +88,7 @@ export default function TurbineDetailPage() {
   );
 
   return (
-    <div className="h-full flex relative" style={{ background: '#020204' }}>
+    <div className="h-full flex relative" style={{ background: 'transparent' }}>
       <div className="flex-1 overflow-auto p-6 space-y-4 relative z-10">
         {/* Header */}
         <div className="flex items-center gap-3 fade-in">

@@ -57,7 +57,7 @@ export default function WorkOrderPage() {
   const FAULT_TYPES = ['轴承磨损', '齿轮箱点蚀', '发电机过热', '叶片裂纹', '变桨系统故障', '冷却系统故障', '主轴不对中', '电气故障'];
 
   return (
-    <div className="h-full overflow-auto p-5 relative" style={{ background: '#020204' }}>
+    <div className="h-full overflow-auto p-5 relative" style={{ background: 'transparent' }}>
       <div className="relative z-10">
         <div className="flex items-center justify-between mb-4 fade-in">
           <div className="flex items-center gap-4">

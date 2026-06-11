@@ -25,11 +25,11 @@ export default function AppLayout() {
       >
         {/* Logo block */}
         <div
-          className="h-14 flex items-center gap-2.5 px-4"
+          className="h-14 flex items-center gap-2.5 px-4 edge-beam"
           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
           <div
-            className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+            className="w-8 h-8 flex items-center justify-center flex-shrink-0 logo-pulse"
             style={{
               border: '1px solid rgba(0,229,255,0.2)',
               borderRadius: '2px',
@@ -84,6 +84,19 @@ export default function AppLayout() {
           })}
         </nav>
 
+        {/* System telemetry chrome */}
+        <div className="px-4 py-2.5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[9px] uppercase tracking-widest" style={{ color: '#445566' }}>
+              UPLINK
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="sig-bars"><i /><i /><i /><i /></span>
+              <span className="font-mono text-[9px] tracking-wider" style={{ color: '#00E676' }}>SYNC</span>
+            </div>
+          </div>
+        </div>
+
         {/* User footer */}
         <div
           className="p-4"
@@ -122,8 +135,15 @@ export default function AppLayout() {
       </aside>
 
       {/* ── Main — control center viewport ── */}
-      <main className="flex-1 overflow-hidden hex-bg scan-line" style={{ background: '#020204' }}>
+      <main className="flex-1 overflow-hidden hex-bg scan-line relative" style={{ background: '#020204' }}>
         <Outlet />
+        {/* Persistent HUD corner frame (decorative, never blocks interaction) */}
+        <div className="pointer-events-none absolute inset-0 z-40" aria-hidden>
+          <span className="absolute top-2 left-2 w-4 h-4" style={{ borderTop: '1px solid rgba(0,229,255,0.35)', borderLeft: '1px solid rgba(0,229,255,0.35)' }} />
+          <span className="absolute top-2 right-2 w-4 h-4" style={{ borderTop: '1px solid rgba(0,229,255,0.35)', borderRight: '1px solid rgba(0,229,255,0.35)' }} />
+          <span className="absolute bottom-2 left-2 w-4 h-4" style={{ borderBottom: '1px solid rgba(0,229,255,0.35)', borderLeft: '1px solid rgba(0,229,255,0.35)' }} />
+          <span className="absolute bottom-2 right-2 w-4 h-4" style={{ borderBottom: '1px solid rgba(0,229,255,0.35)', borderRight: '1px solid rgba(0,229,255,0.35)' }} />
+        </div>
       </main>
     </div>
   );

@@ -56,7 +56,7 @@ export default function SettingsPage() {
   const sourceIcons: Record<string, string> = { scada: 'SCADA', vibration: 'VIB', image: 'IMG', weather: 'WX' };
 
   return (
-    <div className="h-full overflow-auto p-5 space-y-4 relative" style={{ background: '#020204' }}>
+    <div className="h-full overflow-auto p-5 space-y-4 relative" style={{ background: 'transparent' }}>
       <div className="relative z-10">
         <div className="flex items-center gap-4 mb-5 fade-in">
           <span className="font-mono text-[10px] tracking-widest" style={{ color: '#00E5FF' }}>[05]</span>
