@@ -3,9 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import DataSource, Turbine
+from app.models import Turbine
 from app.schemas import TurbineResponse, TurbineListResponse
 from app.services.data_pipeline.era5_loader import era5_loader
+from app.services.data_pipeline.open_meteo_loader import (
+    OpenMeteoWeatherError,
+    open_meteo_loader,
+)
 from app.services.data_pipeline.geo_loader import geo_loader
 from app.api.auth import get_current_user
 from app.models import User as UserModel
@@ -20,9 +24,12 @@ async def list_turbines(
     hi_min: float | None = Query(None, description="HI最小值"),
     hi_max: float | None = Query(None, description="HI最大值"),
     status: str | None = Query(None, description="状态"),
+    source_dataset: str | None = Query("care_to_compare_v6", description="数据集ID"),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Turbine)
+    if source_dataset:
+        q = q.where(Turbine.source_dataset == source_dataset)
     if model:
         q = q.where(Turbine.model == model)
     if region:
@@ -91,11 +98,6 @@ async def get_scada_data(
     turbine = result.scalar_one_or_none()
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
-
-    source_result = await db.execute(select(DataSource).where(DataSource.source_type == "scada"))
-    source = source_result.scalar_one_or_none()
-    if not source or source.status != "connected":
-        return []
 
     # Try recent records first. Imported public datasets are often historical,
     # so if no recent records exist, return the latest real dataset window and
@@ -219,6 +221,12 @@ async def get_turbine_wind(
         )
 
     try:
-        return era5_loader.get_wind_at(turbine.lat, turbine.lng)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return await open_meteo_loader.get_current_weather(turbine.lat, turbine.lng)
+    except OpenMeteoWeatherError:
+        try:
+            return era5_loader.get_wind_at(turbine.lat, turbine.lng)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Open-Meteo weather lookup failed and no local weather dataset is available.",
+            ) from exc
