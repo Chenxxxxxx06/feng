@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 import uvicorn
 
 from app.config import get_settings
@@ -31,10 +32,23 @@ async def lifespan(app: FastAPI):
     from app.database import engine, Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_runtime_schema(conn)
     logger.info("Database tables created/verified")
     yield
     # Shutdown
     logger.info("Shutting down PHM system...")
+
+
+async def ensure_runtime_schema(conn):
+    """Apply small additive schema fixes for existing local SQLite databases."""
+    if settings.DATABASE_URL.startswith("sqlite"):
+        result = await conn.execute(text("PRAGMA table_info(users)"))
+        columns = {row[1] for row in result.fetchall()}
+        if "api_provider" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN api_provider VARCHAR(64)"))
+            logger.info("Added users.api_provider column")
+    else:
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
 
 
 app = FastAPI(
@@ -85,7 +99,7 @@ async def health_check():
 # --- Router registration ---
 from app.api import (
     auth, turbines, diagnosis, prediction,
-    workorders, settings as settings_api, ai, personnel
+    workorders, settings as settings_api, ai, personnel, knowledge, agent
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证管理"])
@@ -93,6 +107,8 @@ app.include_router(turbines.router, prefix="/api/turbines", tags=["风机管理"
 app.include_router(diagnosis.router, prefix="/api/diagnosis", tags=["故障诊断"])
 app.include_router(prediction.router, prefix="/api/prediction", tags=["预测决策"])
 app.include_router(workorders.router, prefix="/api/workorders", tags=["工单管理"])
+app.include_router(knowledge.router, prefix="/api", tags=["故障百科"])
+app.include_router(agent.router, prefix="/api", tags=["AI诊断"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["系统设置"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
 app.include_router(personnel.router, prefix="/api/personnel", tags=["人员管理"])

@@ -75,11 +75,15 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
-        <TurbineMap turbines={summary.turbines} selectedId={selectedId} onSelect={setSelectedId} />
-        <FilterPanel filters={filters} onChange={setFilters} />
+        <div className="absolute inset-0 z-0">
+          <TurbineMap turbines={summary.turbines} selectedId={selectedId} onSelect={setSelectedId} />
+        </div>
+        <div className="relative z-[700]">
+          <FilterPanel filters={filters} onChange={setFilters} />
+        </div>
 
         {/* Slide-out Detail Panel */}
-        <div className={`absolute top-0 right-0 h-full w-[370px] glass-panel shadow-2xl transform transition-transform duration-300 z-10 flex flex-col border-l border-border-subtle ${
+        <div className={`absolute top-0 right-0 h-full w-[370px] glass-panel shadow-2xl transform transition-transform duration-300 z-[800] flex flex-col border-l border-border-subtle ${
           detail ? 'translate-x-0' : 'translate-x-full'
         }`}>
           {detail && (
