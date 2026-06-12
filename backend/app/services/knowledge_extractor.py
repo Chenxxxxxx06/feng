@@ -61,7 +61,7 @@ EXTRACTOR_PROMPT = """你是风电故障知识提取器。从以下对话中提�
 要求: 只提取对话明确提到的信息，没提到的用[]或null。没有诊断内容返回{{"skip":true,"reason":"..."}}"""
 
 
-async def extract_knowledge(messages: list[dict], api_key: str | None = None, api_provider: str | None = None) -> dict | None:
+async def extract_knowledge(messages: list[dict], api_key: str | None = None, api_provider: str | None = None, base_url: str | None = None) -> dict | None:
     import asyncio
     from app.services.qwen_client import chat
 
@@ -69,7 +69,8 @@ async def extract_knowledge(messages: list[dict], api_key: str | None = None, ap
 
     prompt = EXTRACTOR_PROMPT.format(messages=msgs_text)
     response = await asyncio.to_thread(
-        chat, [{"role": "user", "content": prompt}], "qwen-max", api_key, api_provider, 0.2, 1024,
+        chat, [{"role": "user", "content": prompt}], "qwen-max", api_key,
+        api_provider if not base_url else None, base_url=base_url, temperature=0.2, max_tokens=1024,
     )
 
     try:
@@ -96,7 +97,7 @@ DEDUP_PROMPT = """判断两个风电故障是否指向同一类故障。
 判断标准: 故障名本质相同或症状≥2个重叠且分类相同 → 同一故障"""
 
 
-async def check_dedup(extracted: dict, db_session: AsyncSession, api_key: str | None = None, api_provider: str | None = None) -> tuple[bool, int | None]:
+async def check_dedup(extracted: dict, db_session: AsyncSession, api_key: str | None = None, api_provider: str | None = None, base_url: str | None = None) -> tuple[bool, int | None]:
     if extracted.get("skip"):
         return False, None
 
@@ -130,7 +131,8 @@ async def check_dedup(extracted: dict, db_session: AsyncSession, api_key: str | 
         )
         try:
             response = await asyncio.to_thread(
-                chat, [{"role": "user", "content": prompt}], "qwen-max", api_key, api_provider, 0.1, 256,
+                chat, [{"role": "user", "content": prompt}], "qwen-max", api_key,
+                api_provider if not base_url else None, base_url=base_url, temperature=0.1, max_tokens=256,
             )
             text = response.strip()
             match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -201,19 +203,19 @@ async def auto_ingest(extracted: dict, is_dup: bool, existing_id: int | None, me
 
 # ── Main entry ─────────────────────────────────────────────
 
-async def try_extract_knowledge(messages: list[dict], api_key: str | None = None, api_provider: str | None = None):
+async def try_extract_knowledge(messages: list[dict], api_key: str | None = None, api_provider: str | None = None, base_url: str | None = None):
     """Main pipeline: called as background task after Copilot response."""
     try:
         if not quality_gate(messages):
             return
 
-        extracted = await extract_knowledge(messages, api_key, api_provider)
+        extracted = await extract_knowledge(messages, api_key, api_provider, base_url)
         if not extracted or extracted.get("skip"):
             return
 
         # Use single session for dedup + ingest to avoid TOCTOU race
         async with async_session() as db:
-            is_dup, existing_id = await check_dedup(extracted, db, api_key, api_provider)
+            is_dup, existing_id = await check_dedup(extracted, db, api_key, api_provider, base_url)
             await auto_ingest(extracted, is_dup, existing_id, messages, db)
 
     except Exception as e:

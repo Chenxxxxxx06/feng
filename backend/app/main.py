@@ -47,8 +47,12 @@ async def ensure_runtime_schema(conn):
         if "api_provider" not in columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN api_provider VARCHAR(64)"))
             logger.info("Added users.api_provider column")
+        if "api_base_url" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN api_base_url VARCHAR(512)"))
+            logger.info("Added users.api_base_url column")
     else:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(512)"))
 
 
 app = FastAPI(

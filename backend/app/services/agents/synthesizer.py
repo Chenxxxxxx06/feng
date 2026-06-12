@@ -53,8 +53,8 @@ Knowledge Agent 输出:
 
 
 class SynthesizerAgent(AgentBase):
-    def __init__(self, model: str = "qwen-max", api_key: str | None = None, api_provider: str | None = None):
-        super().__init__(name="synthesizer", system_prompt=SYNTHESIZER_PROMPT, model=model, api_key=api_key, api_provider=api_provider)
+    def __init__(self, model: str = "qwen-max", api_key: str | None = None, api_provider: str | None = None, api_base_url: str | None = None):
+        super().__init__(name="synthesizer", system_prompt=SYNTHESIZER_PROMPT, model=model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
 
     async def run(self, **kwargs) -> AgentResult:
         """Override: synthesizer outputs Markdown, not JSON."""
