@@ -1,5 +1,6 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import html2canvas from 'html2canvas';
+import { marked } from 'marked';
 import api from '../../services/api';
 import { useCopilotStore } from '../../services/copilotStore';
 import type { Message } from '../../services/copilotStore';
@@ -135,7 +136,9 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
 
       if (isDiagnosis) {
         try {
-          const { data } = await api.post('/agent/diagnose', { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard' } }, { timeout: 90000 });
+          const diagPayload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard' } };
+          if (screenshot) diagPayload.screenshot = screenshot;
+          const { data } = await api.post('/agent/diagnose', diagPayload, { timeout: 90000 });
           reply = data.report || data.message || JSON.stringify(data);
         } catch {
           const payload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href } };
@@ -211,7 +214,11 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
                     ? 'bg-accent-red/10 text-accent-red'
                     : 'bg-bg-hover text-text-primary'
                 }`}>
-                  {m.content}
+                  {m.role === 'assistant' ? (
+                    <Markdown content={m.content} />
+                  ) : (
+                    m.content
+                  )}
                 </div>
               </div>
             ))}
@@ -251,5 +258,22 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
         </div>
       )}
     </>
+  );
+}
+
+function Markdown({ content }: { content: string }) {
+  const html = useMemo(() => {
+    try {
+      return marked(content, { breaks: true, gfm: true });
+    } catch {
+      return content;
+    }
+  }, [content]);
+
+  return (
+    <div
+      className="copilot-markdown text-xs leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }

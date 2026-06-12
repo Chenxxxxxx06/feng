@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     role: str
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
+    api_base_url: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -335,9 +336,16 @@ class DataSourceTestRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    model_preference: Optional[str] = Field(default=None, max_length=64)
+    api_base_url: Optional[str] = Field(default=None, max_length=512)
+    model_preference: Optional[str] = Field(default=None, max_length=128)
 
     model_config = {"protected_namespaces": ()}
+
+
+class AITestConnectionRequest(BaseModel):
+    api_key: str
+    model: str
+    base_url: str
 
 
 # --- AI ---
