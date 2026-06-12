@@ -1,28 +1,30 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import html2canvas from 'html2canvas';
 import api from '../../services/api';
+import { useCopilotStore } from '../../services/copilotStore';
+import type { Message } from '../../services/copilotStore';
 
 const PANEL_W = 400;
 const PANEL_H = 560;
 const EDGE_GAP = 24;
 
-interface Message {
-  role: 'user' | 'assistant' | 'error';
-  content: string;
-}
-
 export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: string }) {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: '你好！我是风调预顺AI助手。我可以帮你分析风机数据、解释故障原因、生成维护建议。请随时提问。' },
-  ]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const messages = useCopilotStore((s) => s.messages);
+  const input = useCopilotStore((s) => s.input);
+  const loading = useCopilotStore((s) => s.loading);
+  const open = useCopilotStore((s) => s.open);
+  const panelPos = useCopilotStore((s) => s.panelPos);
+  const addMessage = useCopilotStore((s) => s.addMessage);
+  const setInput = useCopilotStore((s) => s.setInput);
+  const setLoading = useCopilotStore((s) => s.setLoading);
+  const setOpen = useCopilotStore((s) => s.setOpen);
+  const setPanelPos = useCopilotStore((s) => s.setPanelPos);
+
   const chatRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
-  const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
+  const initialSent = useRef(false);
 
   // Initialize panel position to bottom-right when opened
   useEffect(() => {
@@ -31,19 +33,19 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
       const y = Math.max(0, window.innerHeight - PANEL_H - EDGE_GAP);
       setPanelPos({ x, y });
     }
-  }, [open]);
+  }, [open, setPanelPos]);
 
   // Clamp position on window resize
   useEffect(() => {
     const handleResize = () => {
-      setPanelPos((prev) => ({
-        x: Math.max(0, Math.min(prev.x, window.innerWidth - PANEL_W)),
-        y: Math.max(0, Math.min(prev.y, window.innerHeight - PANEL_H)),
-      }));
+      setPanelPos({
+        x: Math.max(0, Math.min(panelPos.x, window.innerWidth - PANEL_W)),
+        y: Math.max(0, Math.min(panelPos.y, window.innerHeight - PANEL_H)),
+      });
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [panelPos.x, panelPos.y, setPanelPos]);
 
   // Drag handlers
   const onDragStart = useCallback((e: React.MouseEvent) => {
@@ -52,7 +54,6 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
       x: e.clientX - panelPos.x,
       y: e.clientY - panelPos.y,
     };
-    // Prevent text selection during drag
     e.preventDefault();
   }, [panelPos]);
 
@@ -72,7 +73,7 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
       document.removeEventListener('mousemove', onDragMove);
       document.removeEventListener('mouseup', onDragEnd);
     };
-  }, []);
+  }, [setPanelPos]);
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -80,7 +81,8 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
 
   // Auto-send initialMessage from parent (e.g. KnowledgeBase "AI诊断" button)
   useEffect(() => {
-    if (!initialMessage) return;
+    if (!initialMessage || initialSent.current) return;
+    initialSent.current = true;
     setOpen(true);
     const timer = setTimeout(() => handleSend(initialMessage), 200);
     return () => clearTimeout(timer);
@@ -100,9 +102,8 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
         backgroundColor: '#080c12',
       });
 
-      // Compress to JPEG at quality 0.6 to limit payload size
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      return dataUrl.split(',')[1]; // strip "data:image/jpeg;base64," prefix
+      return dataUrl.split(',')[1];
     } catch (err) {
       console.warn('Screenshot capture failed:', err);
       return null;
@@ -113,11 +114,10 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
     const text = (textOverride ?? input).trim();
     if (!text) return;
     const userMsg: Message = { role: 'user', content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    addMessage(userMsg);
     if (!textOverride) setInput('');
     setLoading(true);
 
-    // Capture screenshot (best-effort, failure does not block chat)
     let screenshot: string | null = null;
     try {
       screenshot = await captureScreenshot();
@@ -126,9 +126,10 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
     }
 
     try {
-      const allMsgs = [...messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
+      // Get all messages currently in store (including the one just added)
+      const currentMsgs = useCopilotStore.getState().messages;
+      const allMsgs = [...currentMsgs].map((m) => ({ role: m.role, content: m.content }));
 
-      // Route diagnosis queries to multi-agent endpoint
       const isDiagnosis = /风机|故障|振动|温度|异常|原因|怎么修|什么问|诊断|方案|备件|维修|停机|RL/.test(text);
       let reply: string;
 
@@ -137,7 +138,6 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
           const { data } = await api.post('/agent/diagnose', { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard' } }, { timeout: 90000 });
           reply = data.report || data.message || JSON.stringify(data);
         } catch {
-          // Fallback to regular copilot
           const payload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href } };
           if (screenshot) payload.screenshot = screenshot;
           const { data } = await api.post('/ai/copilot', payload, { timeout: 60000 });
@@ -150,9 +150,9 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
         reply = data.reply;
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+      addMessage({ role: 'assistant', content: reply });
     } catch {
-      setMessages((prev) => [...prev, { role: 'error', content: 'AI服务暂不可用, 请稍后重试' }]);
+      addMessage({ role: 'error', content: 'AI服务暂不可用, 请稍后重试' });
     } finally {
       setLoading(false);
     }
