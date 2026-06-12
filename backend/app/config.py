@@ -26,7 +26,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./fengdiao_phm.db"
     
-    # PostgreSQL specific settings (used when DATABASE_URL starts with postgresql)
+    # PostgreSQL specific settings
+    POSTGRESQL_URL: str = "postgresql+asyncpg://fengdiao_user:your_password@localhost:5432/fengdiao_phm"
+    
+    # Database priority: sqlite | postgresql
+    DB_PRIORITY: str = "sqlite"
+    
+    # PostgreSQL connection pool settings (used when DATABASE_URL starts with postgresql)
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_RECYCLE: int = 3600
