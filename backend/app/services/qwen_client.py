@@ -520,13 +520,13 @@ def describe_screenshot(
     Raises:
         ValueError: If API key is not configured
     """
-    # Use user's base_url if provided, else fall back to catalog
-    effective_url = base_url or MODEL_CATALOG["qwen-vl-plus"].base_url
-    vision_model = "qwen-vl-plus"  # Default vision model
+    config = MODEL_CATALOG["qwen-vl-plus"]
+    # Fallback to env var when user hasn't set their own key in Settings
     if not api_key:
         api_key = settings.DASHSCOPE_API_KEY
-    if not api_key:
-        raise ValueError("API key not configured for screenshot analysis")
+    if not api_provider and api_key:
+        api_provider = config.provider
+    _ensure_remote_available(config, api_key, api_provider)
 
     vision_prompt = (
         f"你正在查看「风调预顺」PHM系统的{page_type}页面截图。\n"

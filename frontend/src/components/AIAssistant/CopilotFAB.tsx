@@ -1,5 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRef, useEffect, useCallback } from 'react';
 import html2canvas from 'html2canvas';
 import api from '../../services/api';
 import { useCopilotStore } from '../../services/copilotStore';
@@ -11,15 +10,7 @@ const FAB_W = 56;
 const FAB_H = 56;
 const EDGE_GAP = 24;
 
-export interface PageContext {
-  turbine_id?: number;
-  turbine_name?: string;
-  fault_id?: number;
-  fault_type?: string;
-  [key: string]: unknown;
-}
-
-export default function CopilotFAB({ initialMessage = '', pageContext }: { initialMessage?: string; pageContext?: PageContext }) {
+export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: string }) {
   const messages = useCopilotStore((s) => s.messages);
   const input = useCopilotStore((s) => s.input);
   const loading = useCopilotStore((s) => s.loading);
@@ -30,25 +21,12 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const setLoading = useCopilotStore((s) => s.setLoading);
   const setOpen = useCopilotStore((s) => s.setOpen);
   const setPanelPos = useCopilotStore((s) => s.setPanelPos);
-  const fabPos = useCopilotStore((s) => s.fabPos);
-  const setFabPos = useCopilotStore((s) => s.setFabPos);
-  const navigate = useNavigate();
 
   const chatRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const initialSent = useRef(false);
-  const fabRef = useRef<HTMLButtonElement>(null);
-  const fabDragging = useRef(false);
-  const fabDragOffset = useRef({ x: 0, y: 0 });
-  const fabHasMoved = useRef(false);
-  const fabDragStart = useRef({ x: 0, y: 0 });
-  const fabPosRef = useRef({ x: 0, y: 0 });
-  const [mode, setMode] = useState<'chat' | 'agent'>('chat');
-
-  // Keep fabPosRef in sync with store
-  useEffect(() => { fabPosRef.current = fabPos; }, [fabPos]);
 
   // Initialize panel position to bottom-right when opened
   useEffect(() => {
@@ -120,21 +98,6 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
       document.removeEventListener('mouseup', onDragEnd);
     };
   }, [setPanelPos]);
-
-  // FAB drag handlers — direct DOM manipulation for zero-lag dragging
-  const onFabMouseDown = useCallback((e: React.MouseEvent) => {
-    fabDragging.current = true;
-    fabHasMoved.current = false;
-    fabDragStart.current = { x: e.clientX, y: e.clientY };
-    const currentX = fabPosRef.current.x;
-    const currentY = fabPosRef.current.y;
-    fabDragOffset.current = {
-      x: e.clientX - currentX,
-      y: e.clientY - currentY,
-    };
-    // Disable transition during drag for instant response
-    if (fabRef.current) fabRef.current.style.transition = 'none';
-  }, []);
 
   useEffect(() => {
     const onFabDragMove = (e: MouseEvent) => {
@@ -216,32 +179,23 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
       // Silently fall back to text-only mode
     }
 
-    // Build page_context: merge auto-detected info with page-specific context from props
-    const baseContext: Record<string, unknown> = {
-      page_type: window.location.pathname.replace('/', '') || 'dashboard',
-      url: window.location.href,
-    };
-    if (pageContext) Object.assign(baseContext, pageContext);
-
     try {
       // Get all messages currently in store (including the one just added)
       const currentMsgs = useCopilotStore.getState().messages;
       const allMsgs = [...currentMsgs].map((m) => ({ role: m.role, content: m.content }));
 
+      const isDiagnosis = /风机|故障|振动|温度|异常|原因|怎么修|什么问|诊断|方案|备件|维修|停机|RL/.test(text);
       let reply: string;
 
-      if (mode === 'agent') {
-        // Agent 任务模式 — 规划 → 执行 → 总结
-        const { data } = await api.post('/agent/task', { messages: allMsgs, page_context: baseContext }, { timeout: 90000 });
-        reply = data.report || data.message || JSON.stringify(data);
-
-        // Execute frontend actions (e.g. navigate to another page)
-        const actions: Array<{ type: string; url: string }> = data.actions || [];
-        for (const action of actions) {
-          if (action.type === 'navigate' && action.url) {
-            // Use navigate for smooth SPA transition, close the panel
-            setTimeout(() => { setOpen(false); navigate(action.url); }, 300);
-          }
+      if (isDiagnosis) {
+        try {
+          const { data } = await api.post('/agent/diagnose', { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard' } }, { timeout: 90000 });
+          reply = data.report || data.message || JSON.stringify(data);
+        } catch {
+          const payload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href } };
+          if (screenshot) payload.screenshot = screenshot;
+          const { data } = await api.post('/ai/copilot', payload, { timeout: 60000 });
+          reply = data.reply;
         }
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
