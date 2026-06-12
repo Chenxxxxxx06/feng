@@ -326,7 +326,11 @@ class DemoHandler(BaseHTTPRequestHandler):
                 })
                 try:
                     from app.services.qwen_client import summarize_page
-                    result = summarize_page(pt, page_data)
+                    from app.config import get_settings
+                    s = get_settings()
+                    result = summarize_page(pt, page_data,
+                        api_key=s.DASHSCOPE_API_KEY,
+                        api_provider="通义千问 DashScope")
                     return self._send(result)
                 except Exception:
                     from app.services.qwen_client import fallback_summary
@@ -342,8 +346,27 @@ class DemoHandler(BaseHTTPRequestHandler):
                     "total_turbines": len(TURBINES), "warning_count": warning, "fault_count": fault,
                 })
                 try:
-                    from app.services.qwen_client import copilot_chat
-                    reply = copilot_chat(messages, page_context)
+                    from app.services.qwen_client import copilot_chat, describe_screenshot
+                    from app.config import get_settings
+                    s = get_settings()
+                    api_key = s.DASHSCOPE_API_KEY
+                    api_provider = "通义千问 DashScope"
+                    # Analyze screenshot if provided
+                    screenshot_desc = None
+                    if body.get("screenshot"):
+                        try:
+                            screenshot_desc = describe_screenshot(
+                                body["screenshot"],
+                                page_context.get("page_type", "unknown"),
+                                api_key=api_key,
+                                api_provider=api_provider,
+                            )
+                        except Exception:
+                            pass  # best-effort
+                    reply = copilot_chat(messages, page_context,
+                        screenshot_description=screenshot_desc,
+                        api_key=api_key,
+                        api_provider=api_provider)
                     return self._send({"reply": reply, "role": "assistant"})
                 except Exception as e:
                     return self._send({"reply": f"AI服务暂不可用: {str(e)}", "role": "error"})
@@ -371,9 +394,13 @@ class DemoHandler(BaseHTTPRequestHandler):
                 t = next((x for x in TURBINES if x["id"] == turbine_id), TURBINES[0])
                 try:
                     from app.services.qwen_client import diagnose_fault
+                    from app.config import get_settings
+                    s = get_settings()
                     diagnosis = diagnose_fault(
                         {"name": t["name"], "model": t["model"], "region": t["region"], "hi_value": t["hi_value"], "status": t["status"]},
                         [{"fault_type": fault_type, "confidence": 0.87, "detected_at": datetime.now().isoformat()}],
+                        api_key=s.DASHSCOPE_API_KEY,
+                        api_provider="通义千问 DashScope",
                     )
                 except Exception:
                     diagnosis = f"根据SCADA数据分析，{t['name']}存在{fault_type}。建议: 1.停机检查相关部件温度 2.安排振动复测 3.必要时更换受损部件。"

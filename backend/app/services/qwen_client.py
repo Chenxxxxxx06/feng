@@ -470,6 +470,11 @@ def describe_screenshot(
         ValueError: If API key is not configured for DashScope
     """
     config = MODEL_CATALOG["qwen-vl-plus"]
+    # Fallback to env var when user hasn't set their own key in Settings
+    if not api_key:
+        api_key = settings.DASHSCOPE_API_KEY
+    if not api_provider and api_key:
+        api_provider = config.provider
     _ensure_remote_available(config, api_key, api_provider)
 
     vision_prompt = (
