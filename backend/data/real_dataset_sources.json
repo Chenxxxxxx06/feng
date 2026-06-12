@@ -1,0 +1,146 @@
+{
+  "vibration": [
+    {
+      "id": "nrel_grc_gearbox_cm",
+      "name": "Wind Turbine Gearbox Condition Monitoring Vibration Analysis Benchmarking Datasets",
+      "publisher": "National Renewable Energy Laboratory / U.S. Department of Energy",
+      "doi": "10.25984/1844194",
+      "landing_page": "https://data.openei.org/submissions/738",
+      "catalog_page": "https://catalog.data.gov/dataset/wind-turbine-gearbox-condition-monitoring-vibration-analysis-benchmarking-datasets",
+      "license": "CC BY 4.0",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "method_demo_only_not_same_asset_as_care",
+      "download_urls": [
+        "https://data.openei.org/files/738/Healthy.zip",
+        "https://data.openei.org/files/738/Damaged.zip"
+      ],
+      "download_size_bytes": {
+        "Healthy.zip": 1396482609,
+        "Damaged.zip": 1548930919
+      },
+      "local_format_note": "The downloaded 738.zip expands to Healthy.zip and Damaged.zip. Each inner archive expands to MATLAB .mat files with channels such as Speed, Torque, AN3-AN10.",
+      "quality_note": "The downloaded NREL license file requires acknowledging DOE/NREL and says the dataset files must not be shared directly with others; direct other users to NREL/OEDI for download.",
+      "quality_rules": [
+        "use original downloaded files only",
+        "record healthy/damaged label from source documentation",
+        "keep source filename in imported waveform JSON",
+        "read MATLAB .mat variables explicitly; do not treat .mat files as CSV",
+        "reject files without numeric vibration channels",
+        "reject vibration series shorter than the configured minimum sample count"
+      ]
+    },
+    {
+      "id": "mendeley_blade_vibration_faults",
+      "name": "Wind Turbine Blades Fault Diagnosis based on Vibration Dataset Analysis",
+      "publisher": "Mendeley Data",
+      "doi": "10.17632/5d7vbdp8f7.4",
+      "landing_page": "https://data.mendeley.com/datasets/5d7vbdp8f7/4",
+      "license": "CC BY 4.0",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "method_demo_only_not_same_asset_as_care",
+      "local_format_note": "The downloaded archive expands to 35 condition files: 28 semicolon-delimited CSV files and 7 XLSX files. The source page states 1 kHz sampling and 500 samples per channel.",
+      "quality_rules": [
+        "use original downloaded files only",
+        "record source condition label",
+        "preserve sample rate from dataset documentation",
+        "parse semicolon-delimited CSV files and XLSX files with structured readers",
+        "reject nonnumeric or empty vibration columns"
+      ]
+    }
+  ],
+  "scada": [
+    {
+      "id": "care_to_compare_v6",
+      "name": "CARE to Compare - Wind Turbine SCADA Data For Early Fault Detection",
+      "publisher": "Fraunhofer IEE / Zenodo",
+      "doi": "10.5281/zenodo.15846963",
+      "landing_page": "https://zenodo.org/records/15846963",
+      "license": "Creative Commons Attribution Share Alike 4.0 International",
+      "dataset_role": "primary_scada_timeline",
+      "alignment_scope": "operational_core_for_scada_and_event_windows",
+      "download_urls": [
+        "https://zenodo.org/api/records/15846963/files/CARE_To_Compare.zip/content"
+      ],
+      "download_size_bytes": {
+        "CARE_To_Compare.zip": 5503439673
+      },
+      "checksum": {
+        "CARE_To_Compare.zip": "md5:2547b58c21ac8c242d13232860cf500c"
+      },
+      "verified_on": "2026-06-10",
+      "quality_note": "Use Zenodo record 15846963, version v6. The Zenodo page states the dataset contains 95 datasets, 89 years of SCADA, 36 turbines, and that Avg signals are generally more reliable than Min/Max/Std statistics for many analyses.",
+      "quality_rules": [
+        "use original downloaded CSV files only",
+        "preserve source filename and DOI",
+        "map source timestamp and sensor columns explicitly",
+        "verify CARE_To_Compare.zip md5 before extraction",
+        "reject rows with missing timestamp",
+        "do not invent turbine identity beyond dataset metadata"
+      ]
+    }
+  ],
+  "blade_images": [
+    {
+      "id": "dtu_drone_inspection",
+      "name": "DTU - Drone inspection images of wind turbine",
+      "publisher": "Mendeley Data / Technical University of Denmark",
+      "doi": "10.17632/hd96prn3nc.2",
+      "landing_page": "https://data.mendeley.com/datasets/hd96prn3nc/2",
+      "license": "CC BY-NC 3.0",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "image_method_demo_only_not_same_asset_as_care",
+      "download_urls": [
+        "https://data.mendeley.com/public-api/zip/hd96prn3nc/download/2"
+      ],
+      "download_size_bytes": {
+        "hd96prn3nc-2.zip": 3029715385
+      },
+      "quality_rules": [
+        "use original downloaded images only",
+        "preserve image filename and dataset DOI",
+        "reject images below configured minimum resolution",
+        "do not invent labels when no annotation is present"
+      ]
+    },
+    {
+      "id": "yolo_annotated_wind_turbine_surface_damage",
+      "name": "YOLO Annotated Wind Turbine Surface Damage",
+      "publisher": "Mendeley Data",
+      "doi": "10.17632/t6fwpc735s.1",
+      "landing_page": "https://data.mendeley.com/datasets/t6fwpc735s/1",
+      "license": "CC BY-NC 3.0",
+      "source_doi": "10.17632/hd96prn3nc.2",
+      "dataset_role": "diagnostic_sample_library",
+      "alignment_scope": "annotated_image_method_demo_only_not_same_asset_as_care",
+      "download_urls": [
+        "https://data.mendeley.com/public-api/zip/t6fwpc735s/download/1"
+      ],
+      "download_size_bytes": {
+        "t6fwpc735s-1.zip": 2756431451
+      },
+      "quality_rules": [
+        "use image and YOLO label pairs only",
+        "store bounding boxes converted from source YOLO labels",
+        "do not create model confidence for manual labels",
+        "skip samples with invalid label geometry"
+      ]
+    }
+  ],
+  "weather": [
+    {
+      "id": "era5_single_levels",
+      "name": "ERA5 hourly data on single levels from 1940 to present",
+      "publisher": "Copernicus Climate Data Store / ECMWF",
+      "landing_page": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels",
+      "license": "Copernicus licence",
+      "dataset_role": "optional_weather_context",
+      "alignment_scope": "optional_context_only_requires_time_and_location_match",
+      "quality_rules": [
+        "use only when turbine or farm coordinates and timestamp range are available",
+        "record request bounding box, variables, time range and CDS dataset id",
+        "do not replace SCADA wind speed or site measurements with ERA5 values",
+        "mark weather values as contextual reanalysis data"
+      ]
+    }
+  ]
+}

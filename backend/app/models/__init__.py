@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -13,26 +13,35 @@ class User(Base):
     password_hash = Column(String(256), nullable=False)
     role = Column(String(32), default="viewer")
     api_key = Column(String(256), nullable=True)
+    api_provider = Column(String(64), nullable=True)
     model_preference = Column(String(64), default="gpt-4")
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=func.now())
 
     notification_configs = relationship("NotificationConfig", back_populates="user")
 
 
 class Turbine(Base):
     __tablename__ = "turbines"
+    __table_args__ = (
+        UniqueConstraint("source_dataset", "source_asset_id", name="uq_turbine_source_asset"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(64), nullable=False, index=True)
-    model = Column(String(64), nullable=False)
-    power_mw = Column(Float, nullable=False)
-    lat = Column(Float, nullable=False)
-    lng = Column(Float, nullable=False)
-    region = Column(String(32), nullable=False)
+    model = Column(String(64), nullable=True)
+    power_mw = Column(Float, nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    region = Column(String(32), nullable=True)
     status = Column(String(16), default="normal")
     hi_value = Column(Float, default=100.0)
-    last_maintenance = Column(DateTime, nullable=True)
-    commissioned_at = Column(DateTime, nullable=True)
+    last_maintenance = Column(DateTime(timezone=True), nullable=True)
+    commissioned_at = Column(DateTime(timezone=True), nullable=True)
+    source_dataset = Column(String(64), nullable=True, index=True)
+    source_asset_id = Column(String(128), nullable=True, index=True)
+    asset_scope = Column(String(32), default="field_asset")
+    geo_scope = Column(String(32), default="known")
 
     scada_records = relationship("SCADARecord", back_populates="turbine")
     faults = relationship("Fault", back_populates="turbine")
@@ -43,7 +52,7 @@ class SCADARecord(Base):
     __tablename__ = "scada_records"
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
-    timestamp = Column(DateTime, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     power_kw = Column(Float)
     wind_speed_ms = Column(Float)
     rotor_rpm = Column(Float)
@@ -63,7 +72,7 @@ class VibrationData(Base):
     __tablename__ = "vibration_data"
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
-    timestamp = Column(DateTime, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     component = Column(String(32), nullable=False)
     rms = Column(Float)
     peak_freq_hz = Column(Float)
@@ -74,7 +83,7 @@ class BladeImage(Base):
     __tablename__ = "blade_images"
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
-    timestamp = Column(DateTime, nullable=False)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
     image_path = Column(String(256), nullable=False)
     diagnosis_type = Column(String(32), nullable=True)
     diagnosis_confidence = Column(Float, nullable=True)
@@ -85,7 +94,7 @@ class Fault(Base):
     __tablename__ = "faults"
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
-    detected_at = Column(DateTime, default=datetime.now(timezone.utc))
+    detected_at = Column(DateTime(timezone=True), default=func.now())
     fault_type = Column(String(64), nullable=False)
     confidence = Column(Float, nullable=False)
     status = Column(String(16), default="open")
@@ -111,7 +120,7 @@ class RULPrediction(Base):
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
     component = Column(String(32), nullable=False)
-    predicted_at = Column(DateTime, default=datetime.now(timezone.utc))
+    predicted_at = Column(DateTime(timezone=True), default=func.now())
     remaining_life_days = Column(Float, nullable=False)
     confidence_lower = Column(Float, nullable=False)
     confidence_upper = Column(Float, nullable=False)
@@ -130,8 +139,8 @@ class WorkOrder(Base):
     assignee = Column(String(64), nullable=True)
     cost_estimate = Column(Float, default=0.0)
     cost_actual = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
-    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     downtime_hours = Column(Float, nullable=True)
 
 
@@ -143,7 +152,7 @@ class NotificationConfig(Base):
     email_enabled = Column(Boolean, default=False)
     email_address = Column(String(128), nullable=True)
     wechat_enabled = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=func.now())
 
     user = relationship("User", back_populates="notification_configs")
 
@@ -155,5 +164,44 @@ class DataSource(Base):
     name = Column(String(64), nullable=False)
     connection_params = Column(JSON, nullable=True)
     status = Column(String(16), default="disconnected")
-    last_connected_at = Column(DateTime, nullable=True)
-    last_data_at = Column(DateTime, nullable=True)
+    last_connected_at = Column(DateTime(timezone=True), nullable=True)
+    last_data_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DataImportBatch(Base):
+    __tablename__ = "data_import_batches"
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(String(64), nullable=False, index=True)
+    source_type = Column(String(32), nullable=False)
+    status = Column(String(16), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
+    manifest_path = Column(Text)
+    field_mapping_version = Column(Text)
+    files_total = Column(Integer)
+    files_imported = Column(Integer)
+    rows_imported = Column(Integer)
+    rows_skipped = Column(Integer)
+    anonymous_assets = Column(Integer)
+    summary = Column(JSON)
+
+
+class FaultKnowledgeNode(Base):
+    __tablename__ = "fault_knowledge"
+    id = Column(Integer, primary_key=True, index=True)
+    fault_type = Column(String(128), unique=True, nullable=False, index=True)
+    category = Column(String(64), nullable=False, index=True)
+    icon = Column(String(8), default="⚠️")
+    severity = Column(String(16), default="medium")
+    symptoms = Column(JSON, default=list)
+    root_causes = Column(JSON, default=list)
+    solutions = Column(JSON, default=list)
+    related_faults = Column(JSON, default=list)
+    spare_parts = Column(JSON, default=list)
+    cases = Column(JSON, default=list)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    source = Column(String(32), default="manual")
+    confidence = Column(Float, default=1.0)
+    verified = Column(Boolean, default=True)
+    extracted_from = Column(Text, nullable=True)

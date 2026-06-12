@@ -3,6 +3,9 @@
 Comprehensive seed script for PHM system demonstration.
 Populates database with turbines, SCADA data, faults, predictions, and work orders.
 
+This script detects if an offline dataset exists and skips seeding if it does,
+to avoid overwriting pre-populated CARE dataset data.
+
 Usage:
     cd backend
     python -m scripts.seed_data
@@ -16,13 +19,20 @@ import random
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from app.database import async_session, engine, Base
+from app.config import get_offline_database_path
 from app.models import (
     Turbine, SCADARecord, Fault, FaultSignal, RULPrediction,
     WorkOrder, User, NotificationConfig, DataSource
 )
 from app.core.security import hash_password
+
+
+def check_offline_dataset_exists() -> bool:
+    """Check if offline dataset database exists."""
+    offline_db = get_offline_database_path()
+    return offline_db is not None
 
 
 # 陕西省风场数据 — 真实地理坐标
@@ -93,11 +103,53 @@ WORK_ORDER_TEMPLATES = [
 ]
 
 
+async def check_existing_data() -> bool:
+    """Check if database already has significant data."""
+    async with async_session() as db:
+        # Check if there are any turbines
+        result = await db.execute(select(Turbine).limit(1))
+        if result.scalar_one_or_none() is not None:
+            return True
+        
+        # Check if there are any users
+        result = await db.execute(select(User).limit(1))
+        if result.scalar_one_or_none() is not None:
+            return True
+        
+        return False
+
+
 async def seed():
     """Main seed function."""
     print("=" * 60)
     print("🌱 风调预顺 PHM系统 — 数据库初始化")
     print("=" * 60)
+
+    # Check if offline dataset exists
+    if check_offline_dataset_exists():
+        print("📦 检测到离线数据集，跳过演示数据初始化")
+        print("   离线数据库路径: ", get_offline_database_path())
+        
+        # Still create tables if they don't exist
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("✅ 数据表已创建/验证")
+        
+        # Check if users exist, if not create admin user
+        if not await check_existing_data():
+            print("\n⚠️ 数据库为空，创建默认管理员用户...")
+            await create_default_admin()
+        
+        print("\n" + "=" * 60)
+        print("🎉 数据库配置完成！")
+        print("=" * 60)
+        return
+
+    # Check if database already has data
+    if await check_existing_data():
+        print("⚠️ 数据库中已存在数据，跳过初始化")
+        print("   如果需要重新初始化，请先清空数据库")
+        return
 
     # Create tables
     async with engine.begin() as conn:
@@ -330,6 +382,9 @@ async def seed():
         await db.commit()
         print("   ✅ 数据源配置完成")
 
+    # Seed knowledge base
+    await seed_knowledge_base()
+
     print("\n" + "=" * 60)
     print("🎉 数据库初始化完成！")
     print("=" * 60)
@@ -346,6 +401,75 @@ async def seed():
    管理员: admin / admin123
    技术员: 张工 / tech123
 """)
+
+
+async def create_default_admin():
+    """Create default admin user if no users exist."""
+    async with async_session() as db:
+        now = datetime.now(timezone.utc)
+
+        admin = User(
+            username="admin",
+            email="admin@fengdiao.com",
+            password_hash=hash_password("admin123"),
+            role="admin",
+            is_active=True,
+        )
+        db.add(admin)
+        await db.commit()
+
+        # Create notification config
+        config = NotificationConfig(
+            user_id=admin.id,
+            hi_threshold=70.0,
+            email_enabled=False,
+            email_address="admin@fengdiao.com",
+            wechat_enabled=False,
+        )
+        db.add(config)
+        await db.commit()
+
+        print("   ✅ 创建默认管理员用户")
+        print("   🔑 登录账号: admin / admin123")
+
+
+async def seed_knowledge_base():
+    """Seed fault knowledge base from JSON preset."""
+    import json
+    from pathlib import Path
+    from app.models import FaultKnowledgeNode
+
+    kb_path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "fault-kb.json"
+    if not kb_path.exists():
+        print("   ⚠️  fault-kb.json 不存在, 跳过知识库初始化")
+        return
+
+    data = json.loads(kb_path.read_text(encoding="utf-8"))
+    async with async_session() as db:
+        count = 0
+        for node_data in data.get("nodes", []):
+            existing = await db.execute(
+                select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == node_data["fault_type"])
+            )
+            if existing.scalar_one_or_none():
+                continue
+            node = FaultKnowledgeNode(
+                fault_type=node_data["fault_type"],
+                category=node_data["category"],
+                icon=node_data.get("icon", "⚠️"),
+                severity=node_data.get("severity", "medium"),
+                symptoms=node_data.get("symptoms", []),
+                root_causes=node_data.get("root_causes", []),
+                solutions=node_data.get("solutions", []),
+                related_faults=node_data.get("related_faults", []),
+                spare_parts=node_data.get("spare_parts", []),
+                cases=node_data.get("cases", []),
+            )
+            db.add(node)
+            count += 1
+        await db.commit()
+        if count > 0:
+            print(f"   ✅ 知识库: 导入 {count} 个故障节点")
 
 
 if __name__ == "__main__":

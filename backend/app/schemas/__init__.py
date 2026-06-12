@@ -20,6 +20,7 @@ class UserResponse(BaseModel):
     email: str
     role: str
     api_key: Optional[str] = None
+    api_provider: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -35,14 +36,18 @@ class TokenResponse(BaseModel):
 class TurbineResponse(BaseModel):
     id: int
     name: str
-    model: str
-    power_mw: float
-    lat: float
-    lng: float
-    region: str
+    model: Optional[str] = None
+    power_mw: Optional[float] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    region: Optional[str] = None
     status: str
     hi_value: float
     last_maintenance: Optional[datetime] = None
+    source_dataset: Optional[str] = None
+    source_asset_id: Optional[str] = None
+    asset_scope: str = "field_asset"
+    geo_scope: str = "known"
 
     model_config = {"from_attributes": True}
 
@@ -68,7 +73,21 @@ class FaultResponse(BaseModel):
     id: int
     turbine_id: int
     turbine_name: str = ""
+    turbine_region: str = ""
     detected_at: datetime
+    discovered_at: Optional[datetime] = None
+    processing_started_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    handler: Optional[str] = None
+    processing_status: str = "pending"
+    priority: str = "medium"
+    work_order_id: Optional[int] = None
+    work_order_title: Optional[str] = None
+    last_action_at: Optional[datetime] = None
+    maintenance_cost_estimate: Optional[float] = None
+    maintenance_cost_actual: Optional[float] = None
+    status_note: str = ""
     fault_type: str
     confidence: float
     status: str
@@ -84,19 +103,113 @@ class FaultSignalResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class DiagnosisSignalInsight(BaseModel):
+    sensor_name: str
+    value: str
+    normal_range: str
+    contribution_score: float
+    priority: str
+    finding: str
+
+class TroubleshootingStep(BaseModel):
+    order: int
+    title: str
+    action: str
+    expected_effect: str
+
 class FaultDetailResponse(FaultResponse):
     signals: list[FaultSignalResponse] = []
+    signal_insights: list[DiagnosisSignalInsight] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
+
+class AutoFaultDetectionRequest(BaseModel):
+    turbine_id: int
+    component: str = "gearbox_high_speed"
+    window_hours: int = Field(default=24, ge=1, le=168)
+    data_source: str = "vibration"
+
+class AutoFaultDetectionResponse(BaseModel):
+    turbine_id: int
+    component: str
+    analysis_window_hours: int
+    status: str
+    fault_type: str
+    confidence: float
+    confidence_interval: list[float]
+    algorithm_status: str
+    message: str
+    generated_at: datetime
+    signals: list[DiagnosisSignalInsight] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
+
+class BatchAutoFaultDetectionRequest(BaseModel):
+    turbine_ids: list[int] = []
+    region: Optional[str] = None
+    status: Optional[str] = None
+    component: str = "gearbox_high_speed"
+    window_hours: int = Field(default=24, ge=1, le=168)
+    data_source: str = "vibration"
+
+class BatchAutoFaultRecord(BaseModel):
+    record_id: str
+    turbine_id: int
+    turbine_name: str
+    region: str
+    turbine_status: str
+    component: str
+    analysis_window_hours: int
+    status: str
+    fault_type: str
+    confidence: float
+    confidence_interval: list[float]
+    algorithm_status: str
+    message: str
+    generated_at: datetime
+    group_key: str
+    signals: list[DiagnosisSignalInsight] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
+
+class BatchAutoFaultDetectionResponse(BaseModel):
+    success: bool
+    total: int
+    generated_at: datetime
+    records: list[BatchAutoFaultRecord] = []
+    group_summary: dict[str, int] = {}
+    message: str
+
+class VibrationPreviewResponse(BaseModel):
+    turbine_id: int
+    component: str
+    timestamp: datetime
+    duration_seconds: float
+    sample_rate_hz: int
+    rms: float
+    waveform: list[float]
+    spectrum: list[float]
+    peak_frequencies: list[dict]
+    fault_detected: bool
+    algorithm_status: str
+    message: str
 
 class BladeDiagnosisRequest(BaseModel):
-    turbine_id: int
-    image_path: str
+    turbine_id: int = Field(gt=0)
+    image_path: str = ""
 
 class BladeDiagnosisResponse(BaseModel):
     turbine_id: int
     damage_type: str
-    confidence: float
+    confidence: Optional[float] = None
     damage_bbox: Optional[dict] = None
     image_path: str
+    image_url: Optional[str] = None
+    severity: str = "normal"
+    recommended_action: str = ""
+    evidence: list[str] = []
+    quality: Optional[dict] = None
+    algorithm_status: str = "stub_pending_external_model"
+    message: str = ""
+    damage_regions: list[dict] = []
+    troubleshooting_steps: list[TroubleshootingStep] = []
 
 
 # --- Prediction ---
@@ -113,8 +226,8 @@ class RULListResponse(BaseModel):
     predictions: list[RULResponse]
 
 class CostComparisonRequest(BaseModel):
-    turbine_id: int
-    fault_type: str
+    turbine_id: int = Field(gt=0)
+    fault_type: str = Field(min_length=1, max_length=64)
 
 class CostComparisonResponse(BaseModel):
     immediate_repair_cost: float
@@ -123,13 +236,16 @@ class CostComparisonResponse(BaseModel):
     failure_probability: float
     recommendation: str
     optimal_window_days: int
+    risk_level: str
+    estimated_saving: float
+    cost_drivers: list[str]
 
 
 # --- WorkOrder ---
 class WorkOrderCreate(BaseModel):
-    turbine_id: int
+    turbine_id: int = Field(gt=0)
     fault_id: Optional[int] = None
-    title: str
+    title: str = Field(min_length=1, max_length=128)
     description: Optional[str] = None
     assignee: Optional[str] = None
     assignee_id: Optional[int] = None
@@ -137,7 +253,7 @@ class WorkOrderCreate(BaseModel):
     priority: Optional[str] = "medium"
     fault_type: Optional[str] = None
     due_date: Optional[datetime] = None
-    cost_estimate: float = 0.0
+    cost_estimate: float = Field(default=0.0, ge=0)
 
 class WorkOrderUpdate(BaseModel):
     title: Optional[str] = None
@@ -213,28 +329,37 @@ class DataSourceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 class DataSourceTestRequest(BaseModel):
-    source_type: str
-    connection_params: dict
+    source_type: str = Field(min_length=1, max_length=32)
+    connection_params: dict = Field(default_factory=dict)
 
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
-    model_preference: Optional[str] = None
+    api_provider: Optional[str] = None
+    model_preference: Optional[str] = Field(default=None, max_length=64)
 
     model_config = {"protected_namespaces": ()}
 
 
 # --- AI ---
 class AISummaryRequest(BaseModel):
-    page_type: str
+    page_type: str = Field(min_length=1, max_length=64)
     page_data: dict
 
 class AISummaryResponse(BaseModel):
     conclusions: list[str]
     suggestions: list[str]
+    provider: Optional[str] = None
+    api_provider: Optional[str] = None
+    model: Optional[str] = None
+    label: Optional[str] = None
+    mode: Optional[str] = None
+    billing: Optional[str] = None
+    requires_api_key: Optional[bool] = None
+    has_api_key: Optional[bool] = None
 
 class AIFaultAnalysisRequest(BaseModel):
-    turbine_id: int
-    fault_type: str
+    turbine_id: int = Field(gt=0)
+    fault_type: str = Field(min_length=1, max_length=64)
 
 class AnomalyItem(BaseModel):
     indicator: str
@@ -250,9 +375,10 @@ class AIFaultAnalysisResponse(BaseModel):
     anomalies: list[AnomalyItem]
 
 class AICopilotRequest(BaseModel):
-    messages: list[dict]
+    messages: list[dict] = Field(min_length=1)
     page_context: Optional[dict] = None
     knowledge_results: Optional[list[str]] = None
+    screenshot: Optional[str] = None  # base64-encoded JPEG screenshot of current page
 
 class AICopilotResponse(BaseModel):
     reply: str
@@ -260,16 +386,16 @@ class AICopilotResponse(BaseModel):
 
 # --- Personnel ---
 class PersonnelCreate(BaseModel):
-    name: str
-    email: str
-    skills: list[str] = []
-    region: str = "陕北"
+    name: str = Field(min_length=1, max_length=64)
+    email: str = Field(min_length=3, max_length=128)
+    skills: list[str] = Field(default_factory=list)
+    region: str = Field(default="陕北", max_length=32)
 
 class PersonnelUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=128)
     skills: Optional[list[str]] = None
-    region: Optional[str] = None
+    region: Optional[str] = Field(default=None, max_length=32)
 
 class PersonnelResponse(BaseModel):
     id: int

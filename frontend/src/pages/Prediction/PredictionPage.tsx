@@ -155,6 +155,12 @@ export default function PredictionPage() {
   const [costResult, setCostResult] = useState<CostComparison | null>(null);
   const [costTurbine, setCostTurbine] = useState('');
   const rulChartRef = useRef<HTMLDivElement>(null);
+  const riskLabel = costResult?.risk_level === 'high' ? '高' : costResult?.risk_level === 'medium' ? '中' : '低';
+  const riskClass = costResult?.risk_level === 'high'
+    ? 'text-accent-red bg-accent-red/10 border-accent-red/30'
+    : costResult?.risk_level === 'medium'
+      ? 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/30'
+      : 'text-accent-green bg-accent-green/10 border-accent-green/30';
 
   useEffect(() => {
     api.get('/prediction/rul').then(({ data }) => setPredictions(data.predictions || []));
@@ -239,12 +245,22 @@ export default function PredictionPage() {
           </div>
           {costResult && (
             <div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 lg:grid-cols-6 gap-4">
                 <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">立即检修</p><p className="text-xl font-mono font-bold text-accent-red">¥{costResult.immediate_repair_cost.toLocaleString()}</p></div>
                 <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">延迟检修</p><p className="text-xl font-mono font-bold text-accent-yellow">¥{costResult.delayed_repair_cost.toLocaleString()}</p></div>
                 <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">每日停机损失</p><p className="text-xl font-mono font-bold text-text-primary">¥{costResult.downtime_loss_per_day.toLocaleString()}</p></div>
+                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">故障概率</p><p className="text-xl font-mono font-bold text-text-primary">{(costResult.failure_probability * 100).toFixed(1)}%</p></div>
+                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">风险等级</p><p className={`inline-flex items-center justify-center min-w-12 rounded border px-2 py-1 text-lg font-bold ${riskClass}`}>{riskLabel}</p></div>
+                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">预计节省</p><p className={`text-xl font-mono font-bold ${costResult.estimated_saving >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>¥{costResult.estimated_saving.toLocaleString()}</p></div>
               </div>
               <div className="mt-3 p-3 bg-accent-green/10 border border-accent-green/30 rounded text-xs text-accent-green">{costResult.recommendation}</div>
+              <div className="mt-3 grid grid-cols-2 lg:grid-cols-5 gap-2">
+                {costResult.cost_drivers.map((driver) => (
+                  <div key={driver} className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-xs text-text-secondary">
+                    {driver}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
