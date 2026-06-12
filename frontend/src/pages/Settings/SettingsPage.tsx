@@ -173,8 +173,8 @@ export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [hiThreshold, setHiThreshold] = useState('70');
-  const [emailEnabled, setEmailEnabled] = useState(false);
-  const [emailAddress, setEmailAddress] = useState('');
+  const [emailEnabled, setEmailEnabled] = useState(true);
+  const [emailAddress, setEmailAddress] = useState(user?.email || '');
   const [wechatEnabled, setWechatEnabled] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState(user?.model_preference || 'gpt-4');
@@ -218,10 +218,6 @@ export default function SettingsPage() {
       level: 'info',
     },
   ]);
-  const [emailEnabled, setEmailEnabled] = useState(true);
-  const [emailAddress, setEmailAddress] = useState(user?.email || '');
-  const [wechatEnabled, setWechatEnabled] = useState(false);
-
   useEffect(() => {
     api.get('/settings/thresholds').then(({ data }) => {
       if (data.length > 0) {

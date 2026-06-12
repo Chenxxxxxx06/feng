@@ -29,6 +29,8 @@ export interface SCADAPoint {
   gen_temperature_c: number | null;
   gearbox_temperature_c: number | null;
   pitch_angle_deg: number | null;
+  source_dataset?: string | null;
+  dataset_window?: string | null;
 }
 
 export interface Fault {
@@ -173,6 +175,9 @@ export interface CostComparison {
   failure_probability: number;
   recommendation: string;
   optimal_window_days: number;
+  risk_level: string;
+  estimated_saving: number;
+  cost_drivers: string[];
 }
 
 export interface WorkOrder {
