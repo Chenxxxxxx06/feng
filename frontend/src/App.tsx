@@ -12,6 +12,7 @@ const DiagnosisPage = lazy(() => import('./pages/Diagnosis/DiagnosisPage'));
 const PredictionPage = lazy(() => import('./pages/Prediction/PredictionPage'));
 const WorkOrderPage = lazy(() => import('./pages/WorkOrder/WorkOrderPage'));
 const SettingsPage = lazy(() => import('./pages/Settings/SettingsPage'));
+const KnowledgeBasePage = lazy(() => import('./pages/Knowledge/KnowledgeBasePage'));
 
 function PageLoader() {
   return (
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="diagnosis" element={<Suspense fallback={<PageLoader />}><DiagnosisPage /></Suspense>} />
         <Route path="prediction" element={<Suspense fallback={<PageLoader />}><PredictionPage /></Suspense>} />
         <Route path="workorder" element={<Suspense fallback={<PageLoader />}><WorkOrderPage /></Suspense>} />
+        <Route path="knowledge" element={<Suspense fallback={<PageLoader />}><KnowledgeBasePage /></Suspense>} />
         <Route path="settings" element={<Suspense fallback={<PageLoader />}><SettingsPage /></Suspense>} />
       </Route>
     </Routes>

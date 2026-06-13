@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     role: str
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
+    api_base_url: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -335,9 +336,16 @@ class DataSourceTestRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    model_preference: Optional[str] = Field(default=None, max_length=64)
+    api_base_url: Optional[str] = Field(default=None, max_length=512)
+    model_preference: Optional[str] = Field(default=None, max_length=128)
 
     model_config = {"protected_namespaces": ()}
+
+
+class AITestConnectionRequest(BaseModel):
+    api_key: str
+    model: str
+    base_url: str
 
 
 # --- AI ---
@@ -404,3 +412,31 @@ class PersonnelResponse(BaseModel):
     region: str
     load: int
     email: str
+
+
+# --- Agent Execute ---
+class AgentExecuteRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=512)
+    current_page: Optional[str] = None
+    dry_run: bool = False
+
+class AgentAtomicStep(BaseModel):
+    order: int
+    skill: str
+    params: dict = Field(default_factory=dict)
+    reason: str = ""
+
+class AgentSceneSkill(BaseModel):
+    skill: str
+    params: dict = Field(default_factory=dict)
+
+class AgentExecuteResponse(BaseModel):
+    intent_type: str
+    confidence: float
+    entities: dict = Field(default_factory=dict)
+    scene_skills: list[AgentSceneSkill] = Field(default_factory=list)
+    atomic_steps: list[AgentAtomicStep] = Field(default_factory=list)
+    explanation: str = ""
+    follow_up_analysis: Optional[str] = None
+    requires_clarification: bool = False
+    clarification_question: Optional[str] = None

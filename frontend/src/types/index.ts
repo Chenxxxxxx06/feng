@@ -29,6 +29,8 @@ export interface SCADAPoint {
   gen_temperature_c: number | null;
   gearbox_temperature_c: number | null;
   pitch_angle_deg: number | null;
+  source_dataset?: string | null;
+  dataset_window?: string | null;
 }
 
 export interface Fault {
@@ -173,6 +175,9 @@ export interface CostComparison {
   failure_probability: number;
   recommendation: string;
   optimal_window_days: number;
+  risk_level: string;
+  estimated_saving: number;
+  cost_drivers: string[];
 }
 
 export interface WorkOrder {
@@ -182,11 +187,21 @@ export interface WorkOrder {
   title: string;
   description: string | null;
   status: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  fault_type?: string | null;
+  due_date?: string | null;
+  assignee_id?: number | null;
   assignee: string | null;
+  assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
+  downtime_hours?: number | null;
   created_at: string;
+  updated_at?: string | null;
   completed_at: string | null;
+  cancelled_at?: string | null;
+  deleted_at?: string | null;
+  notification_sent_at?: string | null;
 }
 
 export interface AISummary {
