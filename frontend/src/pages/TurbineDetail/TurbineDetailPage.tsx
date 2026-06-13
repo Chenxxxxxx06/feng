@@ -172,7 +172,7 @@ export default function TurbineDetailPage() {
     <div className="h-full flex">
       <div className="flex-1 overflow-auto p-6 space-y-5">
         <div className="flex items-center gap-3">
-          <Link to="/dashboard" className="text-text-muted hover:text-text-primary text-sm">返回</Link>
+          <Link to="/dashboard" data-action="back" className="text-text-muted hover:text-text-primary text-sm">返回</Link>
           <h2 className="text-lg font-semibold">{turbine.name}</h2>
           <span className={`px-2 py-0.5 rounded text-xs ${turbine.status === 'normal' ? 'bg-accent-green/20 text-accent-green' : turbine.status === 'warning' ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-red/20 text-accent-red'}`}>
             {statusText(turbine.status)}
