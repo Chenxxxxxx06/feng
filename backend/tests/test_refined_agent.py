@@ -8,8 +8,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 from app.services.agents.intent_router import IntentRouterAgent
 from app.api.agent import _resolve_atomic_steps
 
-API_KEY = "sk-ff2da15c673e488cbc41b7535176a61d"
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+import os
+API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
+BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 MODEL = "qwen3.7-max-2026-05-17"
 TURBINE_LIST = "#1 A-001 陕北A风机, #2 A-002 陕北B风机, #3 B-001 关中3号风机"
 
