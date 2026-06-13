@@ -5,10 +5,12 @@ Provides REST API for wind turbine health management.
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 import uvicorn
 
@@ -22,6 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 @asynccontextmanager
@@ -86,6 +89,7 @@ app = FastAPI(
     redoc_url="/api/redoc",
     lifespan=lifespan,
 )
+app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 
 # CORS configuration
 ALLOWED_ORIGINS = [
