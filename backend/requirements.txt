@@ -25,13 +25,13 @@ python-multipart==0.0.12
 
 # Data Processing
 pandas==2.2.3
-numpy==2.1.1
+numpy==1.26.4
 scipy==1.14.1
 
 # ML (optional - uncomment if needed)
 # scikit-learn==1.5.2
 # torch==2.4.1
-# ultralytics==8.2.103  # YOLOv8 for blade detection
+ultralytics==8.2.103  # YOLOv8 for DTU blade inspection detection
 
 # Image Processing
 opencv-python-headless==4.10.0.84
