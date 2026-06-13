@@ -42,17 +42,41 @@ async def lifespan(app: FastAPI):
 async def ensure_runtime_schema(conn):
     """Apply small additive schema fixes for existing local SQLite databases."""
     if settings.DATABASE_URL.startswith("sqlite"):
-        result = await conn.execute(text("PRAGMA table_info(users)"))
-        columns = {row[1] for row in result.fetchall()}
-        if "api_provider" not in columns:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN api_provider VARCHAR(64)"))
-            logger.info("Added users.api_provider column")
-        if "api_base_url" not in columns:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN api_base_url VARCHAR(512)"))
-            logger.info("Added users.api_base_url column")
+        await _ensure_sqlite_column(conn, "users", "api_provider", "VARCHAR(64)")
+        await _ensure_sqlite_column(conn, "users", "api_base_url", "VARCHAR(512)")
+        work_order_columns = {
+            "priority": "VARCHAR(16) DEFAULT 'medium'",
+            "fault_type": "VARCHAR(64)",
+            "due_date": "DATETIME",
+            "assignee_id": "INTEGER",
+            "assignee_email": "VARCHAR(128)",
+            "updated_at": "DATETIME",
+            "cancelled_at": "DATETIME",
+            "deleted_at": "DATETIME",
+            "notification_sent_at": "DATETIME",
+        }
+        for column, definition in work_order_columns.items():
+            await _ensure_sqlite_column(conn, "work_orders", column, definition)
     else:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(512)"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS priority VARCHAR(16) DEFAULT 'medium'"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS fault_type VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS due_date TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS assignee_id INTEGER"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS assignee_email VARCHAR(128)"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMP WITH TIME ZONE"))
+
+
+async def _ensure_sqlite_column(conn, table_name: str, column_name: str, definition: str):
+    result = await conn.execute(text(f"PRAGMA table_info({table_name})"))
+    columns = {row[1] for row in result.fetchall()}
+    if column_name not in columns:
+        await conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"))
+        logger.info("Added %s.%s column", table_name, column_name)
 
 
 app = FastAPI(
