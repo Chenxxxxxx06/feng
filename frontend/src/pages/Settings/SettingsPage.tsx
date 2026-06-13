@@ -53,6 +53,7 @@ interface CurrentUser {
   role: string;
   api_key: string | null;
   api_provider: string | null;
+  api_base_url: string | null;
   model_preference: string;
 }
 
@@ -72,44 +73,17 @@ interface PersonalPreferences {
   autoOpenCopilot: boolean;
 }
 
-interface AIModelOption {
-  value: string;
-  label: string;
-  provider: string;
-  note: string;
-  requiresKey: boolean;
+interface AIPreset {
+  name: string;
+  model: string;
+  baseUrl: string;
 }
 
-const aiModelOptions: AIModelOption[] = [
-  { value: 'qwen-plus', label: '通义千问 qwen-plus', provider: '通义千问 DashScope', note: '中文运维总结，质量/成本均衡', requiresKey: true },
-  { value: 'qwen-turbo', label: '通义千问 qwen-turbo', provider: '通义千问 DashScope', note: '更快更便宜，适合页面摘要', requiresKey: true },
-  { value: 'qwen3.6-flash', label: '通义千问 qwen3.6-flash', provider: '通义千问 DashScope', note: '轻量快速模型', requiresKey: true },
-  { value: 'deepseek-v4-flash', label: 'DeepSeek deepseek-v4-flash', provider: 'DeepSeek', note: '低成本通用对话', requiresKey: true },
-  { value: 'deepseek-chat', label: 'DeepSeek deepseek-chat', provider: 'DeepSeek', note: '历史稳定配置', requiresKey: true },
-  { value: 'deepseek-reasoner', label: 'DeepSeek deepseek-reasoner', provider: 'DeepSeek', note: '推理任务更强', requiresKey: true },
-  { value: 'glm-5-flash', label: '智谱 GLM-5-Flash', provider: '智谱GLM', note: '中文场景低成本', requiresKey: true },
-  { value: 'kimi-k2.6', label: 'Kimi kimi-k2.6', provider: 'Kimi Moonshot', note: '长上下文友好', requiresKey: true },
-  { value: 'gpt-4o-mini', label: 'OpenAI gpt-4o-mini', provider: 'OpenAI', note: '轻量多用途', requiresKey: true },
-  { value: 'gpt-4.1', label: 'OpenAI gpt-4.1', provider: 'OpenAI', note: '高质量通用模型', requiresKey: true },
-  { value: 'gpt-4', label: 'OpenAI gpt-4', provider: 'OpenAI', note: '历史配置', requiresKey: true },
-  { value: 'gpt-3.5-turbo', label: 'OpenAI gpt-3.5-turbo', provider: 'OpenAI', note: '历史配置', requiresKey: true },
-  { value: 'claude-sonnet-4-6', label: 'Claude claude-sonnet-4-6', provider: 'Claude', note: '高质量分析', requiresKey: true },
-  { value: 'claude-haiku-4-5', label: 'Claude claude-haiku-4-5', provider: 'Claude', note: '快速低成本', requiresKey: true },
-  { value: 'gemini-2.5-flash', label: 'Gemini gemini-2.5-flash', provider: 'Google Gemini', note: '免费层友好', requiresKey: true },
-  { value: 'gemini-3.5-flash', label: 'Gemini gemini-3.5-flash', provider: 'Google Gemini', note: '新一代快速模型', requiresKey: true },
-  { value: 'ollama-local', label: 'Ollama qwen2.5', provider: 'Ollama本地模型', note: '本地运行，不需要API Key', requiresKey: false },
+const aiPresets: AIPreset[] = [
+  { name: '通义千问', model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { name: 'DeepSeek', model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com' },
+  { name: '自定义', model: '', baseUrl: '' },
 ];
-
-const getModelOption = (model: string) => aiModelOptions.find((option) => option.value === model);
-const normalizeModelPreference = (model?: string) => {
-  const aliases: Record<string, string> = {
-    'qwen3.5-flash': 'qwen3.6-flash',
-    'deepseek-v3': 'deepseek-chat',
-    'claude-sonnet-4': 'claude-sonnet-4-6',
-    'claude-4': 'claude-sonnet-4-6',
-  };
-  return aliases[model || ''] || model || 'qwen-plus';
-};
 
 const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'overview', label: '总览', desc: '系统状态与最近操作' },
@@ -173,11 +147,12 @@ export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [hiThreshold, setHiThreshold] = useState('70');
-  const [emailEnabled, setEmailEnabled] = useState(false);
-  const [emailAddress, setEmailAddress] = useState('');
+  const [emailEnabled, setEmailEnabled] = useState(true);
+  const [emailAddress, setEmailAddress] = useState(user?.email || '');
   const [wechatEnabled, setWechatEnabled] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState(user?.model_preference || 'gpt-4');
+  const [model, setModel] = useState(user?.model_preference || 'qwen-plus');
+  const [baseUrl, setBaseUrl] = useState(user?.api_base_url || '');
   const [personalForm, setPersonalForm] = useState<PersonalForm>({
     displayName: user?.username || '',
     email: user?.email || '',
@@ -218,8 +193,16 @@ export default function SettingsPage() {
       level: 'info',
     },
   ]);
-
   useEffect(() => {
+    api.get('/settings/thresholds').then(({ data }) => {
+      if (data.length > 0) {
+        const config = data[0] as ThresholdConfig;
+        setHiThreshold(String(config.hi_threshold));
+        setEmailEnabled(config.email_enabled);
+        setEmailAddress(config.email_address || '');
+        setWechatEnabled(config.wechat_enabled);
+      }
+    });
     if (!user) fetchMe();
     loadThresholds();
     refreshPipeline();
@@ -227,7 +210,8 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (user?.model_preference) setModel(normalizeModelPreference(user.model_preference));
+    if (user?.model_preference) setModel(user.model_preference);
+    if (user?.api_base_url) setBaseUrl(user.api_base_url);
     if (user) {
       setPersonalForm((prev) => ({
         ...prev,
@@ -297,14 +281,11 @@ export default function SettingsPage() {
   };
 
   const saveProfile = async () => {
-    const option = getModelOption(model);
-    const payload: { api_key?: string; api_provider?: string; model_preference: string } = {
+    const payload: { api_key?: string; model_preference: string; api_base_url?: string } = {
       model_preference: model,
+      api_base_url: baseUrl.trim() || undefined,
     };
-    if (apiKey.trim()) {
-      payload.api_key = apiKey.trim();
-      payload.api_provider = option?.provider;
-    }
+    if (apiKey.trim()) payload.api_key = apiKey.trim();
 
     try {
       setProfileError('');
@@ -312,12 +293,12 @@ export default function SettingsPage() {
       await fetchMe();
       setApiKey('');
       setProfileSaved(true);
-      addLog('保存AI设置', `默认模型切换为 ${option?.label || model}`);
+      addLog('保存AI设置', `模型: ${model}`);
       setTimeout(() => setProfileSaved(false), 2200);
     } catch (error) {
       const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      setProfileError(detail || 'AI设置保存失败，请检查密钥供应商和模型是否匹配');
-      addLog('保存AI设置', detail || 'AI设置保存失败', 'error');
+      setProfileError(detail || 'AI设置保存失败');
+      addLog('保存AI设置', detail || '保存失败', 'error');
     }
   };
 
@@ -325,27 +306,17 @@ export default function SettingsPage() {
     setAiTestStatus('testing');
     setAiTestMessage('');
     try {
-      const { data } = await api.post('/ai/summary', {
-        page_type: 'settings',
-        page_data: { model, has_api_key: Boolean(apiKey || user?.api_key) },
-      });
-      setAiTestStatus('success');
-      const mode = data.mode;
-      const provider = data.provider || getModelOption(model)?.provider || 'AI服务';
-      const actualModel = data.model || model;
-      const message = mode === 'remote'
-        ? `已连接 ${provider} · ${actualModel}`
-        : mode === 'provider_mismatch'
-          ? `模型与密钥不匹配：当前密钥属于 ${data.api_provider || '其他供应商'}，不能用于 ${provider}`
-          : mode === 'key_unbound'
-            ? '已有密钥未绑定供应商，请重新输入密钥并保存'
-            : `未配置密钥，当前使用本地兜底，不产生AI调用费用`;
-      setAiTestMessage(message);
-      addLog('测试AI连接', message);
+      const key = apiKey.trim() || user?.api_key || '';
+      const mdl = model.trim() || 'qwen-plus';
+      const url = baseUrl.trim() || user?.api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+      const { data } = await api.post('/ai/test-connection', { api_key: key, model: mdl, base_url: url });
+      setAiTestStatus(data.status === 'success' ? 'success' : 'error');
+      setAiTestMessage(data.message);
+      addLog('测试AI连接', data.message);
     } catch {
       setAiTestStatus('error');
-      setAiTestMessage('AI服务请求失败，请确认已保存密钥、模型和网络可用');
-      addLog('测试AI连接', 'AI服务请求失败', 'error');
+      setAiTestMessage('连接测试失败，请检查密钥、模型ID和地址');
+      addLog('测试AI连接', '连接测试失败', 'error');
     }
   };
 
@@ -503,12 +474,14 @@ export default function SettingsPage() {
                 user={user}
                 apiKey={apiKey}
                 model={model}
+                baseUrl={baseUrl}
                 profileSaved={profileSaved}
                 profileError={profileError}
                 aiTestStatus={aiTestStatus}
                 aiTestMessage={aiTestMessage}
                 onApiKeyChange={setApiKey}
                 onModelChange={setModel}
+                onBaseUrlChange={setBaseUrl}
                 onSave={saveProfile}
                 onTestAi={testAiConnection}
               />
@@ -840,89 +813,52 @@ function AISettingsSection({
   user,
   apiKey,
   model,
+  baseUrl,
   profileSaved,
   profileError,
   aiTestStatus,
   aiTestMessage,
   onApiKeyChange,
   onModelChange,
+  onBaseUrlChange,
   onSave,
   onTestAi,
 }: {
   user: CurrentUser | null;
   apiKey: string;
   model: string;
+  baseUrl: string;
   profileSaved: boolean;
   profileError: string;
   aiTestStatus: 'idle' | 'testing' | 'success' | 'error';
   aiTestMessage: string;
   onApiKeyChange: (value: string) => void;
   onModelChange: (value: string) => void;
+  onBaseUrlChange: (value: string) => void;
   onSave: () => void;
   onTestAi: () => void;
 }) {
-  const currentModel = getModelOption(model);
-  const hasTypedKey = Boolean(apiKey.trim());
   const hasSavedKey = Boolean(user?.api_key);
-  const savedProvider = user?.api_provider || '';
-  const selectedProvider = currentModel?.provider || '';
-  const selectedRequiresKey = currentModel?.requiresKey !== false;
-  const hasSavedOrTypedKey = hasSavedKey || hasTypedKey;
-  const savedKeyUnbound = selectedRequiresKey && hasSavedKey && !savedProvider && !hasTypedKey;
-  const providerMismatch = selectedRequiresKey && hasSavedKey && Boolean(savedProvider) && savedProvider !== selectedProvider && !hasTypedKey;
-  const localModelWithTypedKey = !selectedRequiresKey && hasTypedKey;
-  const canSaveAISettings = !savedKeyUnbound && !providerMismatch && !localModelWithTypedKey;
-  const savedModelPreference = normalizeModelPreference(user?.model_preference);
-  const hasUnsavedAIChanges = hasTypedKey || savedModelPreference !== model;
-  const canTestAISettings = canSaveAISettings && !hasUnsavedAIChanges && aiTestStatus !== 'testing';
-  const keyStatusTone = savedKeyUnbound || providerMismatch || localModelWithTypedKey
-    ? 'border-accent-red/30 bg-accent-red/10 text-accent-red'
-    : hasSavedOrTypedKey
-      ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
-      : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow';
-  const keyStatusLabel = !selectedRequiresKey
-    ? (localModelWithTypedKey ? '本地模型无需密钥' : '本地模型')
-    : hasTypedKey
-      ? `将绑定 ${selectedProvider}`
-      : savedKeyUnbound
-        ? '密钥未绑定'
-        : providerMismatch
-          ? '供应商不匹配'
-          : hasSavedKey
-            ? `${savedProvider}密钥`
-            : '本地兜底';
-  const bindingMessage = localModelWithTypedKey
-    ? '当前选择本地模型，不需要输入AI服务密钥；请清空密钥框后保存。'
-    : hasTypedKey
-      ? `保存后，这个新密钥会被绑定为 ${selectedProvider} 密钥，只能用于 ${selectedProvider} 模型。`
-      : savedKeyUnbound
-        ? '已有密钥来自旧版本，未记录供应商。请重新输入该供应商密钥并保存一次。'
-        : providerMismatch
-          ? `当前保存的是 ${savedProvider} 密钥，不能选择 ${selectedProvider} 模型。请切回 ${savedProvider} 模型，或输入 ${selectedProvider} 的新密钥。`
-          : '';
-  const providerRows = [
-    { name: '通义千问 DashScope', model: 'qwen-plus / qwen-turbo / qwen3.6-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'DeepSeek', model: 'deepseek-v4-flash / chat / reasoner', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: '智谱GLM', model: 'glm-5-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Kimi Moonshot', model: 'kimi-k2.6', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Google Gemini', model: 'gemini-2.5-flash / gemini-3.5-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Claude', model: 'claude-sonnet-4-6 / claude-haiku-4-5', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'OpenAI', model: 'gpt-4o-mini / gpt-4.1 / gpt-4', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Ollama本地模型', model: 'qwen / llama / deepseek', cost: '软件免费，消耗本机算力', state: '适合演示兜底' },
-  ];
+  const hasTypedKey = Boolean(apiKey.trim());
+  const canSave = hasTypedKey || (hasSavedKey && (model !== (user?.model_preference || '') || baseUrl !== (user?.api_base_url || '')));
+  const canTest = Boolean((hasTypedKey || hasSavedKey) && model.trim() && baseUrl.trim());
+
+  const handlePreset = (presetName: string) => {
+    const preset = aiPresets.find(p => p.name === presetName);
+    if (preset) {
+      onModelChange(preset.model);
+      onBaseUrlChange(preset.baseUrl);
+    }
+  };
 
   return (
     <SectionShell
       title="AI设置"
-      description="配置智能总结、故障分析和运维助手实际调用的模型；保存后由后端按模型路由到对应供应商。"
+      description="配置 API Key、模型ID和接口地址。预设可快速填充常见供应商。"
       actions={
         <>
           {profileSaved && <span className="text-xs text-accent-green">AI设置已保存</span>}
-          <button
-            onClick={onSave}
-            disabled={!canSaveAISettings}
-            className={`industrial-btn industrial-btn-primary ${!canSaveAISettings ? 'cursor-not-allowed opacity-50' : ''}`}
-          >
+          <button onClick={onSave} className="industrial-btn industrial-btn-primary">
             保存AI设置
           </button>
         </>
@@ -933,14 +869,18 @@ function AISettingsSection({
           <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h4 className="text-sm font-medium">模型与密钥</h4>
-                <p className="mt-1 text-xs text-text-muted">密钥不在前端回显；输入新密钥后会通过后端个人配置接口保存。</p>
+                <h4 className="text-sm font-medium">连接配置</h4>
+                <p className="mt-1 text-xs text-text-muted">密钥不在前端回显；所有字段自由填写，支持任意 OpenAI 兼容接口。</p>
               </div>
-              <span className={`rounded-full border px-2 py-1 text-[10px] ${keyStatusTone}`}>
-                {keyStatusLabel}
+              <span className={`rounded-full border px-2 py-1 text-[10px] ${
+                hasSavedKey ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+                  : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow'
+              }`}>
+                {hasSavedKey ? '已配置' : '未配置'}
               </span>
             </div>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+
+            <div className="mt-4 space-y-3">
               <label className="block">
                 <span className="text-xs text-text-muted">API Key</span>
                 <input
@@ -954,46 +894,44 @@ function AISettingsSection({
               </label>
               <label className="block">
                 <span className="text-xs text-text-muted">默认模型</span>
-                <select value={model} onChange={(e) => onModelChange(e.target.value)} className="industrial-input mt-1 w-full">
-                  {aiModelOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => onModelChange(e.target.value)}
+                  placeholder="qwen-plus"
+                  className="industrial-input mt-1 w-full"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-text-muted">Base URL</span>
+                <input
+                  type="text"
+                  value={baseUrl}
+                  onChange={(e) => onBaseUrlChange(e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                  className="industrial-input mt-1 w-full"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-text-muted">预设</span>
+                <select
+                  onChange={(e) => handlePreset(e.target.value)}
+                  defaultValue=""
+                  className="industrial-input mt-1 w-full"
+                >
+                  <option value="" disabled>选择预设...</option>
+                  {aiPresets.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}{p.baseUrl ? ` — ${p.model}` : ''}</option>
                   ))}
                 </select>
               </label>
             </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-3">
-              <InfoLine label="当前账号" value={user?.username || '-'} />
-              <InfoLine label="实际模型ID" value={currentModel?.value || model} />
-              <InfoLine label="供应商" value={currentModel?.provider || '默认通义千问'} />
-            </div>
-            <div className="mt-3 rounded-md border border-border-default bg-bg-card px-3 py-2 text-xs text-text-secondary">
-              {bindingMessage || (currentModel?.requiresKey === false
-                ? '当前选择本地模型，不需要AI服务密钥；如果本机未启动Ollama，后端会回退到本地规则结果。'
-                : hasSavedOrTypedKey
-                  ? `保存后将使用 ${currentModel?.provider || 'AI供应商'} 的 ${currentModel?.value || model}，调用远程模型可能按供应商规则计费。`
-                  : '当前未配置AI服务密钥，后端不会调用远程收费模型，会使用本地兜底结果，不产生AI调用费用。')}
-            </div>
+
             {profileError && (
               <div className="mt-3 rounded-md border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
                 {profileError}
               </div>
             )}
-            {savedProvider && (
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                <InfoLine label="已保存密钥供应商" value={savedProvider} />
-                <InfoLine label="当前模型供应商" value={selectedProvider || '-'} />
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
-            <h4 className="text-sm font-medium">已接入供应商</h4>
-            <p className="mt-1 text-xs text-text-muted">下列模型值会直接传给对应供应商，页面显示名与后端实际调用模型保持一致。</p>
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {providerRows.map((provider) => (
-                <ProviderRow key={provider.name} {...provider} />
-              ))}
-            </div>
           </div>
         </div>
 
@@ -1001,12 +939,12 @@ function AISettingsSection({
           <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
             <h4 className="text-sm font-medium">AI服务检查</h4>
             <p className="mt-1 text-xs text-text-muted">
-              {hasUnsavedAIChanges ? '当前模型或密钥尚未保存，请先保存AI设置再测试。' : '测试当前已保存的密钥供应商和模型是否匹配并可用。'}
+              用当前表单中的密钥和地址测试连接，无需先保存。
             </p>
             <button
               onClick={onTestAi}
-              className={`industrial-btn mt-4 w-full ${!canTestAISettings ? 'cursor-not-allowed opacity-50' : ''}`}
-              disabled={!canTestAISettings}
+              disabled={!canTest || aiTestStatus === 'testing'}
+              className={`industrial-btn mt-4 w-full ${!canTest ? 'cursor-not-allowed opacity-50' : ''}`}
             >
               {aiTestStatus === 'testing' ? '测试中...' : '测试AI连接'}
             </button>
@@ -1018,12 +956,18 @@ function AISettingsSection({
           </div>
 
           <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
-            <h4 className="text-sm font-medium">接入准备清单</h4>
-            <div className="mt-4 space-y-3">
-              <PlanStep index="1" title="选择供应商" desc="课程演示建议优先通义千问或DeepSeek，国内可访问且成本低。" />
-              <PlanStep index="2" title="后端保存密钥" desc="密钥放在.env或后端加密字段，避免写入前端代码和仓库。" />
-              <PlanStep index="3" title="统一调用适配" desc="把base_url、model、api_key传给OpenAI兼容客户端，页面只调用后端接口。" />
-              <PlanStep index="4" title="增加限流兜底" desc="失败时使用本地规则结果，避免诊断页面因为AI不可用而中断。" />
+            <h4 className="text-sm font-medium">快捷预设</h4>
+            <div className="mt-4 space-y-2">
+              {aiPresets.filter(p => p.name !== '自定义').map(p => (
+                <button
+                  key={p.name}
+                  onClick={() => handlePreset(p.name)}
+                  className="w-full text-left rounded-md border border-border-default bg-bg-card px-3 py-2 hover:border-accent-blue/50 transition-colors"
+                >
+                  <p className="text-xs font-medium text-text-primary">{p.name}</p>
+                  <p className="text-[10px] text-text-muted mt-0.5">{p.model} · {p.baseUrl}</p>
+                </button>
+              ))}
             </div>
           </div>
         </div>

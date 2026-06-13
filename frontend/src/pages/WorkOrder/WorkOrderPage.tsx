@@ -175,12 +175,14 @@ export default function WorkOrderPage() {
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold">维修工单管理</h2>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            data-action="filter-status"
             className="bg-bg-secondary border border-border-default rounded px-2 py-1 text-xs text-text-primary">
             <option value="">全部状态</option>
             {STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
           </select>
         </div>
         <button onClick={() => setShowCreate(true)}
+          data-action="create-workorder"
           className="px-4 py-2 bg-accent-blue text-white rounded text-sm hover:opacity-90">+ 创建工单</button>
       </div>
 
@@ -254,7 +256,11 @@ export default function WorkOrderPage() {
       {loading ? <p className="text-text-muted text-sm">加载中...</p> : (
         <div className="space-y-2">
           {orders.map((o) => (
-            <div key={o.id} className="bg-bg-card border border-border-default rounded-lg p-4 hover:border-border-active transition-colors">
+            <div key={o.id}
+              data-wo-id={o.id}
+              data-wo-assignee={o.assignee || ''}
+              data-wo-title={o.title}
+              className="bg-bg-card border border-border-default rounded-lg p-4 hover:border-border-active transition-colors">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] text-text-muted font-mono">WO-{String(o.id).padStart(4, '0')}</span>
@@ -264,6 +270,9 @@ export default function WorkOrderPage() {
                 <div className="flex items-center gap-2 relative">
                   <button
                     onClick={() => runAIAnalysis(o)}
+                    data-action="preview-workorder"
+                    data-wo-id={o.id}
+                    data-wo-assignee={o.assignee || ''}
                     className="px-3 py-1.5 border border-accent-cyan/50 text-accent-cyan rounded text-xs hover:bg-accent-cyan/10 transition-colors"
                   >
                     📧 预览工单
@@ -323,7 +332,7 @@ export default function WorkOrderPage() {
                 <h3 className="font-medium text-sm">{editingWO ? '编辑工单' : '📧 邮件预览'} — WO-{String(previewWO.id).padStart(4, '0')}</h3>
                 <p className="text-[10px] text-text-muted">Subject: [风调预顺] WO-{String(previewWO.id).padStart(4, '0')} {previewWO.title}</p>
               </div>
-              <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); }} className="text-text-muted hover:text-text-primary text-lg">✕</button>
+              <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); }} data-action="close-preview" className="text-text-muted hover:text-text-primary text-lg">✕</button>
             </div>
 
             {/* Email Body */}

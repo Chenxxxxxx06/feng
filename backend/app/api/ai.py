@@ -4,7 +4,7 @@ Provides AI-powered analysis using Qwen API with fallback to local analysis.
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -14,6 +14,7 @@ from app.schemas import (
     AISummaryRequest, AISummaryResponse,
     AIFaultAnalysisRequest, AIFaultAnalysisResponse,
     AICopilotRequest, AICopilotResponse,
+    AITestConnectionRequest,
 )
 from app.api.auth import get_current_user
 from app.services.qwen_client import summarize_page, diagnose_fault, copilot_chat
@@ -39,6 +40,7 @@ async def generate_summary(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
+            base_url=current_user.api_base_url,
         )
         return AISummaryResponse(**summary)
     except Exception as e:
@@ -120,6 +122,7 @@ async def analyze_fault(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
+            base_url=current_user.api_base_url,
         )
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
@@ -136,6 +139,7 @@ async def analyze_fault(
 @router.post("/copilot", response_model=AICopilotResponse)
 async def copilot_endpoint(
     data: AICopilotRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -172,6 +176,7 @@ async def copilot_endpoint(
                 page_type=page_context.get("page_type", "unknown"),
                 api_key=current_user.api_key,
                 api_provider=current_user.api_provider,
+                base_url=current_user.api_base_url,
             )
             logger.info(f"Screenshot analyzed: {screenshot_description[:100]}...")
         except Exception as e:
@@ -186,13 +191,39 @@ async def copilot_endpoint(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
+            base_url=current_user.api_base_url,
         )
+        # Trigger knowledge extraction in background
+        from app.services.knowledge_extractor import try_extract_knowledge
+        all_messages = data.messages + [{"role": "assistant", "content": reply}]
+        background_tasks.add_task(try_extract_knowledge, all_messages, current_user.api_key, current_user.api_provider, current_user.api_base_url)
+
         return AICopilotResponse(reply=reply)
     except Exception as e:
         logger.error(f"Copilot chat failed: {e}")
         return AICopilotResponse(
             reply="抱歉, AI服务暂时不可用。请稍后重试。"
         )
+
+
+@router.post("/test-connection")
+async def test_ai_connection(data: AITestConnectionRequest):
+    """Test AI connection with ad-hoc credentials (no save required)."""
+    try:
+        from app.services.qwen_client import get_client
+        client = get_client(data.api_key, data.base_url)
+        response = client.chat.completions.create(
+            model=data.model,
+            messages=[{"role": "user", "content": "Respond with exactly one word: ok"}],
+            max_tokens=10,
+            temperature=0,
+        )
+        reply = response.choices[0].message.content.strip().lower()
+        if "ok" in reply:
+            return {"status": "success", "message": f"连接成功，模型 {data.model} 响应正常", "model": data.model}
+        return {"status": "unexpected", "message": f"模型响应异常: {reply[:100]}", "model": data.model}
+    except Exception as e:
+        return {"status": "error", "message": f"连接失败: {str(e)[:200]}", "model": data.model}
 
 
 def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:
