@@ -22,7 +22,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "backend" / "fengdiao_phm.db"
-FEATURES_CSV = ROOT / "reports" / "data_processing" / "vibration_features.csv"
+FEATURES_CSV = ROOT / "docs" / "reports" / "data_processing" / "vibration_features.csv"
 DATA_DIR = ROOT / "backend" / "data"
 OUT_DIR = DATA_DIR / "vibration" / "care_reference_waveforms"
 DATASET_ID = "care_public_vibration_reference"
@@ -30,27 +30,48 @@ COMPONENT = "blade"
 
 
 def read_numeric_series(path: Path) -> tuple[np.ndarray, str, float]:
-    try:
-        frame = pd.read_csv(path)
-    except UnicodeDecodeError:
-        frame = pd.read_csv(path, encoding="latin1")
-    candidates = []
-    for column in frame.columns:
-        numeric = pd.to_numeric(frame[column], errors="coerce")
-        if numeric.notna().sum() > 0:
-            candidates.append((column, numeric))
-    if not candidates:
-        frame = pd.read_csv(path, sep=None, engine="python", header=None)
-        for column in frame.columns:
-            numeric = pd.to_numeric(frame[column], errors="coerce")
-            if numeric.notna().sum() > 0:
-                candidates.append((column, numeric))
+    read_attempts = [
+        {"sep": None},
+        {"sep": ";"},
+        {"sep": ","},
+        {"sep": "\t"},
+    ]
+    encodings = ["utf-8", "latin1"]
+    candidates: list[tuple[int, int, str, pd.Series]] = []
+
+    for options in read_attempts:
+        for encoding in encodings:
+            try:
+                frame = pd.read_csv(path, encoding=encoding, **options)
+            except (UnicodeDecodeError, pd.errors.ParserError, ValueError):
+                continue
+
+            for column in frame.columns:
+                numeric = pd.to_numeric(frame[column], errors="coerce")
+                valid = int(numeric.notna().sum())
+                if valid == 0:
+                    continue
+
+                name = str(column).lower()
+                score = 0
+                if "amplitude" in name or "acc" in name or "vibration" in name:
+                    score += 10
+                if "time" in name or "index" in name:
+                    score -= 10
+                candidates.append((score, valid, str(column), numeric))
+
+            if candidates:
+                break
+        if candidates:
+            break
+
     if not candidates:
         raise ValueError(f"No numeric vibration column found in {path}")
-    column_name, raw = max(candidates, key=lambda item: item[1].notna().sum())
+
+    _, _, column_name, raw = max(candidates, key=lambda item: (item[0], item[1]))
     series = raw.dropna().to_numpy(dtype=float)
     completeness_pct = round(float(series.size / len(raw) * 100), 2) if len(raw) else 0.0
-    return series, str(column_name), completeness_pct
+    return series, column_name, completeness_pct
 
 
 def spectrum(series: np.ndarray, sample_rate: int) -> list[dict]:
