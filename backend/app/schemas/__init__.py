@@ -276,6 +276,37 @@ class WorkOrderEmailRequest(BaseModel):
     content: Optional[str] = None
     use_preview_template: bool = True
 
+class MaintenanceRecordCreate(BaseModel):
+    action_type: str = Field(default="progress", min_length=1, max_length=32)
+    content: Optional[str] = None
+    status: Optional[str] = None
+
+class MaintenanceRecordResponse(BaseModel):
+    id: int
+    work_order_id: int
+    operator_id: Optional[int] = None
+    action_type: str
+    content: Optional[str] = None
+    before_status: Optional[str] = None
+    after_status: Optional[str] = None
+    extra: Optional[dict] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class NotificationLogResponse(BaseModel):
+    id: int
+    work_order_id: Optional[int] = None
+    recipient_email: str
+    subject: Optional[str] = None
+    channel: str
+    status: str
+    error_message: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
 class WorkOrderResponse(BaseModel):
     id: int
     turbine_id: int
@@ -300,6 +331,10 @@ class WorkOrderResponse(BaseModel):
     notification_sent_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+class WorkOrderDetailResponse(WorkOrderResponse):
+    records: list[MaintenanceRecordResponse] = []
+    notification_logs: list[NotificationLogResponse] = []
 
 
 # --- Settings ---

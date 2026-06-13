@@ -151,6 +151,7 @@ Copilot 诊断对话 → QualityGate → Extract (LLM) → Dedup (LLM) → Auto-
 # 1. 后端
 cd backend
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+venv\Scripts\activate.bat
 python -m scripts.seed_data          # 初始化数据库 + 21个知识节点
 python -m app.main                    # 启动 → http://localhost:8000
 
