@@ -412,3 +412,31 @@ class PersonnelResponse(BaseModel):
     region: str
     load: int
     email: str
+
+
+# --- Agent Execute ---
+class AgentExecuteRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=512)
+    current_page: Optional[str] = None
+    dry_run: bool = False
+
+class AgentAtomicStep(BaseModel):
+    order: int
+    skill: str
+    params: dict = Field(default_factory=dict)
+    reason: str = ""
+
+class AgentSceneSkill(BaseModel):
+    skill: str
+    params: dict = Field(default_factory=dict)
+
+class AgentExecuteResponse(BaseModel):
+    intent_type: str
+    confidence: float
+    entities: dict = Field(default_factory=dict)
+    scene_skills: list[AgentSceneSkill] = Field(default_factory=list)
+    atomic_steps: list[AgentAtomicStep] = Field(default_factory=list)
+    explanation: str = ""
+    follow_up_analysis: Optional[str] = None
+    requires_clarification: bool = False
+    clarification_question: Optional[str] = None
