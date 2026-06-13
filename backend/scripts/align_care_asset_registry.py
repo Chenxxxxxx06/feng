@@ -33,7 +33,7 @@ FARM_META = {
         "center": (37.86, 107.73),
         "model": "Envision EN-156/3.3",
         "power_mw": 3.3,
-        "bearing": 0.012,
+        "bearing": 0.011,
     },
     "Wind Farm C": {
         "display": "榆林横山风场C区",
@@ -41,7 +41,7 @@ FARM_META = {
         "center": (37.95, 109.22),
         "model": "Mingyang MySE3.2-156",
         "power_mw": 3.2,
-        "bearing": 0.007,
+        "bearing": 0.010,
     },
 }
 
