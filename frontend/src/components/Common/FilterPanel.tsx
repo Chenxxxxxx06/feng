@@ -9,8 +9,6 @@ interface Props {
 
 type FilterKey = 'region' | 'model' | 'status' | 'hi_min';
 
-const REGIONS = ['', '榆林靖边风场A区', '榆林定边风场B区', '榆林横山风场C区'];
-const MODELS = ['', 'Goldwind GW155-3.3MW', 'Envision EN-156/3.3', 'Mingyang MySE3.2-156'];
 const SELECT_CLASS =
   'bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 cursor-pointer outline-none focus:border-accent-blue';
 const INPUT_CLASS =
@@ -38,6 +36,8 @@ export default function FilterPanel({ filters, onChange }: Props) {
     load();
     return () => { cancelled = true; };
   }, []);
+
+
   const updateFilter = (key: FilterKey, val: string) => {
     const next = { ...filters, [key]: val };
     if (!val) delete next[key];
