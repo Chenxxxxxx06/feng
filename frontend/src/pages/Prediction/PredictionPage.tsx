@@ -6,6 +6,7 @@ import { useECharts, rulColor, hiColor, CHART_COLORS } from '../../hooks/useECha
 import type { RULPrediction, CostComparison, WorkOrder, Turbine } from '../../types';
 import type { PredictionSummary } from '../../services/predictionService';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import MaintenanceCalendar from './MaintenanceCalendar';
 
 // ── Types ──
 interface MaintenanceTask {
@@ -77,64 +78,6 @@ function RefreshRULButton({ onDone }: { onDone: () => void }) {
 }
 
 // ── Calendar ──
-function MaintenanceCalendar({ workOrders, rulItems }: { workOrders: WorkOrder[]; rulItems: RULPrediction[] }) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; date: Date; orders: WorkOrder[]; ruls: RULPrediction[] } | null>(null);
-  const year = currentMonth.getFullYear(); const month = currentMonth.getMonth();
-  const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate(); const today = new Date();
-
-  const rulDates = useMemo(() => { const now = Date.now(); return rulItems.map(p => ({ ...p, estimatedDate: new Date(now + p.remaining_life_days * 86400000) })); }, [rulItems]);
-  const dateLookup = useMemo(() => {
-    const map = new Map<string, { orders: WorkOrder[]; ruls: RULPrediction[] }>();
-    const dk = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    for (const wo of workOrders) { const ref = wo.due_date ? new Date(wo.due_date) : new Date(wo.created_at); const k = dk(ref); const e = map.get(k) || { orders: [], ruls: [] }; e.orders.push(wo); map.set(k, e); }
-    for (const p of rulDates) { const k = dk(p.estimatedDate); const e = map.get(k) || { orders: [], ruls: [] }; e.ruls.push(p); map.set(k, e); }
-    return map;
-  }, [workOrders, rulDates]);
-
-  const getEvents = useCallback((date: Date) => { const k = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`; return dateLookup.get(k) || { orders: [] as WorkOrder[], ruls: [] as RULPrediction[] }; }, [dateLookup]);
-
-  const dayNames = ['一','二','三','四','五','六','日']; const startOffset = firstDay === 0 ? 6 : firstDay - 1;
-
-  return (
-    <div className="bg-bg-card border border-border-default rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-medium">运维日历</h3>
-        <div className="flex items-center gap-2 text-xs">
-          <button onClick={() => setCurrentMonth(new Date(year, month - 1))} className="px-2 py-1 hover:text-accent-blue">◀</button>
-          <span className="font-medium">{year}年{month + 1}月</span>
-          <button onClick={() => setCurrentMonth(new Date(year, month + 1))} className="px-2 py-1 hover:text-accent-blue">▶</button>
-          <button onClick={() => setCurrentMonth(new Date())} className="ml-2 px-2 py-1 border border-border-default rounded text-[10px] hover:border-accent-blue">今天</button>
-        </div>
-      </div>
-      <div className="grid grid-cols-7 text-center text-[10px] text-text-muted mb-1">{dayNames.map(d => <div key={d} className="py-1">{d}</div>)}</div>
-      <div className="grid grid-cols-7 gap-px bg-border-default rounded overflow-hidden">
-        {Array.from({ length: startOffset }).map((_, i) => <div key={`e${i}`} className="bg-bg-secondary p-1.5 min-h-[60px]"/>)}
-        {Array.from({ length: daysInMonth }).map((_, i) => {
-          const date = new Date(year, month, i + 1); const { orders, ruls } = getEvents(date);
-          const isToday = date.toDateString() === today.toDateString(); const eventCount = orders.length + ruls.length;
-          const urgentCount = ruls.filter(r => r.remaining_life_days < 30).length + orders.filter(o => o.status === 'pending').length;
-          return (
-            <div key={i} className={`bg-bg-secondary p-1.5 min-h-[60px] cursor-pointer transition-colors hover:bg-bg-hover relative ${isToday ? 'ring-1 ring-accent-blue' : ''}`}
-              onMouseEnter={e => { if (eventCount > 0) { const rect = (e.target as HTMLElement).getBoundingClientRect(); setTooltip({ x: rect.right + 8, y: rect.top, date, orders, ruls }); }}}
-              onMouseLeave={() => setTooltip(null)}>
-              <span className={`text-[11px] ${isToday ? 'text-accent-blue font-bold' : 'text-text-secondary'}`}>{i + 1}</span>
-              {eventCount > 0 && <div className="flex gap-0.5 mt-0.5 flex-wrap">{urgentCount > 0 && <span className="w-2 h-2 rounded-full bg-accent-red"/>}{orders.length > 0 && <span className="w-2 h-2 rounded-full bg-accent-blue"/>}{ruls.filter(r => r.remaining_life_days >= 90).length > 0 && <span className="w-2 h-2 rounded-full bg-accent-green"/>}</div>}
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex gap-4 mt-2 text-[9px] text-text-muted"><span><span className="inline-block w-2 h-2 rounded-full bg-accent-red mr-1"/>紧急</span><span><span className="inline-block w-2 h-2 rounded-full bg-accent-blue mr-1"/>工单</span><span><span className="inline-block w-2 h-2 rounded-full bg-accent-green mr-1"/>计划</span></div>
-      {tooltip && (
-        <div className="fixed z-50 bg-bg-card border border-border-default rounded-lg shadow-xl p-3 min-w-[260px] max-w-[340px]" style={{ left: tooltip.x, top: tooltip.y, pointerEvents: 'none' }}>
-          <p className="text-xs font-medium mb-1.5 border-b border-border-default pb-1">{tooltip.date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
-          {tooltip.orders.map(wo => <div key={`wo-${wo.id}`} className="text-[10px] mb-1.5 pb-1 border-b border-border-default last:border-0"><div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent-blue flex-shrink-0"/><span className="font-medium">WO-{String(wo.id).padStart(4, '0')} {wo.title}</span></div><p className="text-text-muted mt-0.5 ml-3">风机 #{wo.turbine_id} · {wo.assignee || '未指派'} · {wo.status === 'pending' ? '待处理' : wo.status}{wo.due_date && ` · ${new Date(wo.due_date).toLocaleDateString('zh-CN')}到期`}</p></div>)}
-          {tooltip.ruls.filter(r => r.remaining_life_days < 30).map(r => <div key={`rul-${r.turbine_id}-${r.component}`} className="text-[10px] mb-1 pb-1 border-b border-border-default last:border-0"><div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent-red flex-shrink-0"/><span className="font-medium text-accent-red">{r.turbine_name} {r.component}</span></div><p className="text-text-muted mt-0.5 ml-3">RUL {r.remaining_life_days.toFixed(0)}天 · 紧急维护窗口</p></div>)}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Main ──
 export default function PredictionPage() {
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null);
@@ -143,6 +86,11 @@ export default function PredictionPage() {
   const [maintPlan, setMaintPlan] = useState<MaintenancePlanResponse | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null); const [aiLoading, setAiLoading] = useState(false);
   const [showFullPlan, setShowFullPlan] = useState(false);
+  const [scheduledTasks, setScheduledTasks] = useState<any[]>([]);
+  const [overflowTasks, setOverflowTasks] = useState<any[]>([]);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+  const [scheduling, setScheduling] = useState(false);
+  const [schedulePreview, setSchedulePreview] = useState<any[] | null>(null); // null = no preview, array = show modal
 
   const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('bearing_wear');
   const [costResult, setCostResult] = useState<CostComparison | null>(null); const [costLoading, setCostLoading] = useState(false);
@@ -193,6 +141,30 @@ export default function PredictionPage() {
     const hr = () => chart.resize(); window.addEventListener('resize', hr);
     return () => { window.removeEventListener('resize', hr); chart.dispose(); };
   }, [summary]);
+
+  // ── Schedule handlers ──
+  const handleAutoSchedule = async () => {
+    setScheduling(true);
+    try {
+      const { data } = await api.post('/prediction/schedule', {}, { params: { top_n: 30 } });
+      if (!data.scheduled || data.scheduled.length === 0) {
+        alert('排程结果为空，请先刷新 RUL 预测数据');
+        return;
+      }
+      setSchedulePreview(data.scheduled || []); // show preview, don't apply yet
+      setOverflowTasks(data.overflow || []);
+      setConflicts(data.conflicts || []);
+    } catch (e: any) { alert(e?.response?.data?.detail || '排程失败'); }
+    finally { setScheduling(false); }
+  };
+  const confirmSchedule = (selected: any[]) => {
+    setScheduledTasks(selected);
+    setSchedulePreview(null);
+  };
+  const handleScheduleItem = (task: any, date: Date) => {
+    const dated = { ...task, scheduled_date: date.toISOString().slice(0, 10), time_slot: '08:00-12:00' };
+    setScheduledTasks(prev => [...prev.filter(t => !(t.turbine_id === task.turbine_id && t.component === task.component)), dated]);
+  };
 
   const handleCostCompare = async () => { if (!costTurbineId) return; setCostLoading(true); try { setCostResult(await predictionService.compareCost(costTurbineId, costFaultType)); } catch (e: any) { setCostResult(null); alert(e?.response?.data?.detail || '计算失败'); } finally { setCostLoading(false); } };
   const handleAIAnalysis = async () => { setAiLoading(true); setAiAnalysis(null); try { const { data } = await api.post('/ai/analyze-maintenance-plan'); setAiAnalysis(data); } catch (e: any) { alert(e?.response?.data?.detail || 'AI分析失败'); } finally { setAiLoading(false); } };
@@ -252,7 +224,9 @@ export default function PredictionPage() {
                     <thead><tr className="text-text-muted border-b border-border-default"><th className="text-left py-1">风机</th><th className="text-left py-1">部件</th><th className="text-right py-1">RUL</th><th className="text-right py-1">紧急度</th><th className="text-left py-1">措施</th></tr></thead>
                     <tbody>
                       {maintPlan.plan.slice(0, 8).map((t, i) => (
-                        <tr key={`${t.turbine_id}-${t.component}`} className={`border-b border-border-default hover:bg-bg-hover ${t.priority === 'urgent' ? 'bg-accent-red/5' : t.priority === 'high' ? 'bg-accent-yellow/5' : ''}`}>
+                        <tr key={`${t.turbine_id}-${t.component}`} onClick={() => handleScheduleItem(t, new Date())}
+                          className={`border-b border-border-default hover:bg-bg-hover cursor-pointer ${t.priority === 'urgent' ? 'bg-accent-red/5' : t.priority === 'high' ? 'bg-accent-yellow/5' : ''}`}
+                          title="点击排入今天">
                           <td className="py-1">{t.turbine_name}<span className="text-[8px] text-text-muted ml-0.5">{t.region}</span></td>
                           <td className="py-1">{t.component}</td>
                           <td className="py-1 text-right"><span className="font-mono" style={{ color: rulColor(t.rul_days) }}>{t.rul_days.toFixed(0)}天</span></td>
@@ -283,7 +257,9 @@ export default function PredictionPage() {
 
           {/* Calendar + High Risk */}
           <div className="grid grid-cols-2 gap-4">
-            <MaintenanceCalendar workOrders={workOrders} rulItems={predictions}/>
+            <MaintenanceCalendar workOrders={workOrders} rulItems={predictions} turbines={turbines}
+              scheduledTasks={scheduledTasks} conflicts={conflicts}
+              onAutoSchedule={handleAutoSchedule} onScheduleItem={handleScheduleItem} scheduling={scheduling}/>
             <div className="bg-bg-card border border-border-default rounded-lg p-4"><h3 className="text-sm font-medium mb-3">高风险部件列表</h3>
               <div className="overflow-auto max-h-[280px]">{highRisk.length === 0 ? <p className="text-xs text-text-muted py-8 text-center">暂无高风险部件 ✅</p> : <table className="w-full text-xs"><thead><tr className="text-text-muted border-b border-border-default"><th className="text-left py-2">风机</th><th className="text-left py-2">部件</th><th className="text-right py-2">HI</th><th className="text-right py-2">RUL</th><th className="text-right py-2">置信区间</th><th className="text-right py-2">风险</th></tr></thead>
                 <tbody>{highRisk.slice(0, 12).map((p, i) => { const hi = turbineHiMap.get(p.turbine_id); return <tr key={i} className="border-b border-border-default hover:bg-bg-hover"><td className="py-2">{p.turbine_name}</td><td className="py-2">{p.component}</td><td className="py-2 text-right"><span className="font-mono" style={{ color: hi ? hiColor(hi) : undefined }}>{hi?.toFixed(0) ?? '--'}</span></td><td className="py-2 text-right font-mono">{p.remaining_life_days.toFixed(0)} 天</td><td className="py-2 text-right font-mono text-text-muted">{p.confidence_lower.toFixed(0)}–{p.confidence_upper.toFixed(0)}</td><td className="py-2 text-right"><span className={`px-1.5 py-0.5 rounded text-[10px] ${p.remaining_life_days < 30 ? 'bg-accent-red/20 text-accent-red' : p.remaining_life_days < 90 ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-blue/20 text-accent-blue'}`}>{p.remaining_life_days < 30 ? '紧急' : p.remaining_life_days < 90 ? '近期' : '计划'}</span></td></tr>; })}</tbody></table>}
@@ -316,6 +292,17 @@ export default function PredictionPage() {
         </>)}
       </div>
       <CopilotFAB />
+
+      {/* Schedule Preview Modal */}
+      {schedulePreview !== null && (
+        <SchedulePreviewModal
+          items={schedulePreview}
+          conflicts={conflicts}
+          overflow={overflowTasks}
+          onConfirm={confirmSchedule}
+          onCancel={() => setSchedulePreview(null)}
+        />
+      )}
 
       {/* Full Maintenance Plan Modal */}
       {showFullPlan && maintPlan && (
@@ -350,6 +337,53 @@ export default function PredictionPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Schedule Preview Modal ──
+function SchedulePreviewModal({ items, conflicts, overflow, onConfirm, onCancel }: {
+  items: any[]; conflicts: any[]; overflow: any[]; onConfirm: (selected: any[]) => void; onCancel: () => void;
+}) {
+  const [checked, setChecked] = useState<boolean[]>(() => items.map(() => true));
+
+  const toggle = (i: number) => { const n = [...checked]; n[i] = !n[i]; setChecked(n); };
+  const toggleAll = () => { const allOn = checked.every(Boolean); setChecked(items.map(() => !allOn)); };
+  const count = checked.filter(Boolean).length;
+
+  return (
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60" onClick={onCancel}>
+      <div className="bg-bg-card border border-border-default rounded-xl shadow-2xl w-[95vw] max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border-default flex-shrink-0">
+          <div><h2 className="text-base font-semibold">📋 排程预览</h2><p className="text-[10px] text-text-muted mt-0.5">已选 {count}/{items.length} 项 · 溢出 {overflow.length}</p></div>
+          <div className="flex items-center gap-2">
+            <button onClick={toggleAll} className="px-3 py-1 border border-border-default rounded text-xs hover:text-accent-blue">{count === items.length ? '取消全选' : '全选'}</button>
+            <button onClick={onCancel} className="px-3 py-1 border border-border-default rounded text-xs text-text-muted hover:text-accent-red">取消</button>
+            <button onClick={() => onConfirm(items.filter((_, i) => checked[i]))} disabled={count === 0} className="px-4 py-1.5 bg-accent-blue text-white rounded text-xs hover:opacity-90 disabled:opacity-50">✅ 确认排程 ({count}项)</button>
+          </div>
+        </div>
+        {overflow.length > 0 && <div className="mx-4 mt-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px] text-accent-red">⚠ {overflow.length} 项无法安排：{overflow.slice(0, 5).map((t: any) => `${t.turbine_name} ${t.component}`).join('、')}{overflow.length > 5 ? '等' : ''}</div>}
+        <div className="flex-1 overflow-auto p-4">
+          <table className="w-full text-[10px]">
+            <thead><tr className="text-text-muted border-b border-border-default sticky top-0 bg-bg-card">
+              <th className="text-left py-1.5 w-8"><input type="checkbox" checked={count === items.length && items.length > 0} onChange={toggleAll} className="w-3 h-3"/></th>
+              <th className="text-left py-1.5">日期</th><th className="text-left py-1.5">风机</th><th className="text-left py-1.5">部件</th><th className="text-right py-1.5">RUL</th><th className="text-right py-1.5">工时</th><th className="text-left py-1.5">措施</th><th className="text-right py-1.5">费用</th>
+            </tr></thead>
+            <tbody>{items.map((t, i) => (
+              <tr key={i} className={`border-b border-border-default ${checked[i] ? '' : 'opacity-30'}`}>
+                <td className="py-1"><input type="checkbox" checked={checked[i]} onChange={() => toggle(i)} className="w-3 h-3"/></td>
+                <td className="py-1 font-mono text-[9px]">{t.scheduled_date}</td>
+                <td className="py-1">{t.turbine_name}<span className="text-[8px] text-text-muted ml-0.5">{t.region}</span></td>
+                <td className="py-1">{t.component}</td>
+                <td className="py-1 text-right font-mono">{t.rul_days?.toFixed(0)}天</td>
+                <td className="py-1 text-right font-mono text-text-muted">{t.downtime_hours}h</td>
+                <td className="py-1"><span className="px-1 py-0.5 rounded text-[8px] bg-accent-blue/20 text-accent-blue">{t.action}</span></td>
+                <td className="py-1 text-right font-mono">¥{t.cost_estimate?.toLocaleString()}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
