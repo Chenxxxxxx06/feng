@@ -79,8 +79,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def create_tables() -> None:
     """Create all database tables defined in models.
 
-    Should be called once during application startup.
-    """
+    Should be called once during application startup."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created successfully")
@@ -89,8 +88,7 @@ async def create_tables() -> None:
 async def drop_tables() -> None:
     """Drop all database tables.
 
-    Use with caution - this will delete all data!
-    """
+    Use with caution - this will delete all data!"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     logger.info("Database tables dropped successfully")
