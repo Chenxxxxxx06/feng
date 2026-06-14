@@ -448,6 +448,14 @@ def copilot_chat(
             f"{screenshot_description}\n"
         )
 
+    # Build maintenance plan section if available (injected by copilot endpoint)
+    plan_section = ""
+    if page_context.get("maintenance_plan_summary"):
+        plan_section = (
+            f"\n当前维修计划:\n"
+            f"{page_context['maintenance_plan_summary']}\n"
+        )
+
     task_prompt = (
         f"当前页面上下文:\n"
         f"- 页面: {page_context.get('page_type', 'unknown')}\n"
@@ -455,6 +463,7 @@ def copilot_chat(
         f"- 预警风机: {page_context.get('warning_count', 0)}\n"
         f"- 故障风机: {page_context.get('fault_count', 0)}\n"
         f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
+        f"{plan_section}"
         f"{screenshot_section}"
         f"\n"
         f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
@@ -464,7 +473,8 @@ def copilot_chat(
         f'2. 涉及安全决策时提醒"建议人工复核"\n'
         f"3. 回复简洁, 关键数据用数字\n"
         f"4. 如果上下文信息不足, 诚实说明\n"
-        f"5. 如果有页面截图描述, 优先参考截图中的实时数据"
+        f"5. 如果有页面截图描述, 优先参考截图中的实时数据\n"
+        f"6. 如果当前页面有维修计划数据, 优先基于维修计划回答运维排程问题"
     )
     system_prompt = _build_system_prompt(task_prompt)
 
