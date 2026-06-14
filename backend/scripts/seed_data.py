@@ -139,7 +139,9 @@ async def seed():
         if not await check_existing_data():
             print("\n⚠️ 数据库为空，创建默认管理员用户...")
             await create_default_admin()
-        
+
+        await seed_knowledge_base()
+
         print("\n" + "=" * 60)
         print("🎉 数据库配置完成！")
         print("=" * 60)
@@ -147,8 +149,11 @@ async def seed():
 
     # Check if database already has data
     if await check_existing_data():
-        print("⚠️ 数据库中已存在数据，跳过初始化")
-        print("   如果需要重新初始化，请先清空数据库")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await seed_knowledge_base()
+        print("⚠️ 数据库中已存在数据，跳过演示数据初始化")
+        print("   已补充知识库数据（如有新增）")
         return
 
     # Create tables

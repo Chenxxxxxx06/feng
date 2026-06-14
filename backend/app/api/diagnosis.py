@@ -16,6 +16,8 @@ from app.models import BladeImage, Fault, FaultSignal, Turbine, VibrationData
 from app.schemas import (
     FaultResponse, FaultDetailResponse, FaultSignalResponse,
     BladeDiagnosisRequest, BladeDiagnosisResponse,
+    AutoFaultDetectionRequest, AutoFaultDetectionResponse,
+    BatchAutoFaultDetectionRequest, BatchAutoFaultDetectionResponse,
 )
 from app.api.auth import get_current_user
 from app.services.blade_yolo_service import BladeModelUnavailable, blade_yolo_service
@@ -203,7 +205,7 @@ async def list_faults(
     status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Fault, Turbine.name).join(Turbine, Turbine.id == Fault.turbine_id)
+    q = select(Fault, Turbine.name, Turbine.region).join(Turbine, Turbine.id == Fault.turbine_id)
     if turbine_id:
         q = q.where(Fault.turbine_id == turbine_id)
     if status:
@@ -214,28 +216,42 @@ async def list_faults(
         FaultResponse(
             id=fault.id,
             turbine_id=fault.turbine_id,
-            turbine_name=turbine_name,
+            turbine_name=turbine_name or "",
+            turbine_region=turbine_region or "",
             detected_at=fault.detected_at,
+            discovered_at=fault.discovered_at,
+            processing_started_at=fault.processing_started_at,
+            closed_at=fault.closed_at,
+            failed_at=fault.failed_at,
+            handler=fault.handler,
+            processing_status=fault.processing_status or "pending",
+            priority=fault.priority or "medium",
+            work_order_id=fault.work_order_id,
+            work_order_title=fault.work_order_title,
+            last_action_at=fault.last_action_at,
+            maintenance_cost_estimate=fault.maintenance_cost_estimate,
+            maintenance_cost_actual=fault.maintenance_cost_actual,
+            status_note=fault.status_note or "",
             fault_type=fault.fault_type,
             confidence=fault.confidence,
             status=fault.status,
             details=fault.details,
         )
-        for fault, turbine_name in result.all()
+        for fault, turbine_name, turbine_region in result.all()
     ]
 
 
 @router.get("/faults/{fault_id}", response_model=FaultDetailResponse)
 async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Fault, Turbine.name)
+        select(Fault, Turbine.name, Turbine.region)
         .join(Turbine, Turbine.id == Fault.turbine_id)
         .where(Fault.id == fault_id)
     )
     row = result.one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Fault not found")
-    fault, turbine_name = row
+    fault, turbine_name, turbine_region = row
     if not fault:
         raise HTTPException(status_code=404, detail="Fault not found")
 
@@ -247,8 +263,22 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
     return FaultDetailResponse(
         id=fault.id,
         turbine_id=fault.turbine_id,
-        turbine_name=turbine_name,
+        turbine_name=turbine_name or "",
+        turbine_region=turbine_region or "",
         detected_at=fault.detected_at,
+        discovered_at=fault.discovered_at,
+        processing_started_at=fault.processing_started_at,
+        closed_at=fault.closed_at,
+        failed_at=fault.failed_at,
+        handler=fault.handler,
+        processing_status=fault.processing_status or "pending",
+        priority=fault.priority or "medium",
+        work_order_id=fault.work_order_id,
+        work_order_title=fault.work_order_title,
+        last_action_at=fault.last_action_at,
+        maintenance_cost_estimate=fault.maintenance_cost_estimate,
+        maintenance_cost_actual=fault.maintenance_cost_actual,
+        status_note=fault.status_note or "",
         fault_type=fault.fault_type,
         confidence=fault.confidence,
         status=fault.status,
@@ -413,3 +443,46 @@ async def list_blade_images(
         }
         for image in images
     ]
+
+
+@router.get("/vibration-preview")
+async def vibration_preview(
+    turbine_id: int = Query(...),
+    component: str = Query("gearbox_high_speed"),
+    fault_type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
+    from app.services.data_pipeline.vibration_loader import vibration_loader, RealVibrationDatasetRequired
+    try:
+        return vibration_loader.generate_waveform(
+            turbine_id=turbine_id,
+            component=component,
+            fault_type=fault_type,
+        )
+    except RealVibrationDatasetRequired:
+        raise HTTPException(
+            status_code=503,
+            detail="振动数据集未导入，请先导入真实振动数据后再使用此功能",
+        )
+
+
+@router.post("/auto-detect", response_model=AutoFaultDetectionResponse)
+async def auto_detect(
+    request: AutoFaultDetectionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.diagnosis_orchestrator import run_auto_fault_identification
+    return await run_auto_fault_identification(db, request)
+
+
+@router.post("/auto-detect/batch", response_model=BatchAutoFaultDetectionResponse)
+async def auto_detect_batch(
+    request: BatchAutoFaultDetectionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.diagnosis_orchestrator import run_batch_auto_fault_identification
+    return await run_batch_auto_fault_identification(db, request)
