@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import RULPrediction, Turbine
 from app.schemas import RULResponse, RULListResponse, CostComparisonRequest, CostComparisonResponse
 from app.api.auth import get_current_user
+from app.services.prediction_service import calculate_cost_comparison
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -15,20 +16,26 @@ async def get_rul_predictions(
     turbine_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(RULPrediction)
+    if turbine_id is not None:
+        turbine = await db.get(Turbine, turbine_id)
+        if not turbine:
+            raise HTTPException(status_code=404, detail="Turbine not found")
+
+    q = (
+        select(RULPrediction, Turbine.name)
+        .join(Turbine, Turbine.id == RULPrediction.turbine_id)
+        .order_by(RULPrediction.remaining_life_days.asc(), RULPrediction.predicted_at.desc())
+    )
     if turbine_id:
         q = q.where(RULPrediction.turbine_id == turbine_id)
-    q = q.order_by(RULPrediction.predicted_at.desc())
+
     result = await db.execute(q)
-    predictions = result.scalars().all()
 
     items = []
-    for p in predictions:
-        t_result = await db.execute(select(Turbine).where(Turbine.id == p.turbine_id))
-        t = t_result.scalar_one_or_none()
+    for p, turbine_name in result.all():
         items.append(RULResponse(
             turbine_id=p.turbine_id,
-            turbine_name=t.name if t else "",
+            turbine_name=turbine_name,
             component=p.component,
             remaining_life_days=p.remaining_life_days,
             confidence_lower=p.confidence_lower,
@@ -39,13 +46,13 @@ async def get_rul_predictions(
 
 
 @router.post("/cost-comparison", response_model=CostComparisonResponse)
-async def compare_cost(data: CostComparisonRequest):
-    """Placeholder - will integrate cost model in Stage 6"""
-    return CostComparisonResponse(
-        immediate_repair_cost=85000.0,
-        delayed_repair_cost=135000.0,
-        downtime_loss_per_day=12000.0,
-        failure_probability=0.35,
-        recommendation="建议在7天内安排检修，预期可节省维修成本约5万元",
-        optimal_window_days=7,
-    )
+async def compare_cost(
+    data: CostComparisonRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare immediate repair cost with delayed maintenance risk cost."""
+    turbine = await db.get(Turbine, data.turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
+    return await calculate_cost_comparison(data=data, turbine=turbine, db=db)
