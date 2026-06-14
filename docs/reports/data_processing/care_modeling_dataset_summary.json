@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-06-10T17:06:24.964676+00:00",
+  "dataset_id": "care_to_compare_v6",
+  "normalized_root": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\backend\\data\\modeling\\care_to_compare_v6\\normalized_events",
+  "event_window_rows": 95,
+  "normalized_event_files": 95,
+  "total_normalized_rows": 5242948,
+  "ready_for_scada_indicator_files": 95,
+  "ready_for_hi_input_files": 95,
+  "ready_for_rul_window_files": 95,
+  "outputs": {
+    "care_standard_field_mapping": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_standard_field_mapping.csv",
+    "care_event_windows_normalized": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_event_windows_normalized.csv",
+    "care_normalized_event_manifest": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_normalized_event_manifest.csv",
+    "care_status_type_distribution": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\care_status_type_distribution.csv",
+    "care_modeling_import_plan": "C:\\Users\\ASUS\\Desktop\\fengdiao-pHM\\reports\\data_processing\\CARE_MODELING_IMPORT_PLAN.md"
+  },
+  "notes": [
+    "Normalized event CSV files are generated from real CARE SCADA only.",
+    "No coordinates, turbine models, business costs, work orders, or cross-dataset asset links were generated.",
+    "Large normalized CSV files are under backend/data/modeling and are ignored by Git."
+  ]
+}

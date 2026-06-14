@@ -4,11 +4,13 @@ All sensitive values are loaded from environment variables.
 See .env.example for required variables.
 """
 
-import os
-import secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
 
 
 class Settings(BaseSettings):
@@ -33,6 +35,11 @@ class Settings(BaseSettings):
     DB_PRIORITY: str = "sqlite"
     
     # PostgreSQL connection pool settings (used when DATABASE_URL starts with postgresql)
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE: int = 3600
+
+    # PostgreSQL specific settings (used when DATABASE_URL starts with postgresql)
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_RECYCLE: int = 3600
@@ -63,7 +70,7 @@ class Settings(BaseSettings):
     WEIXIN_WEBHOOK_URL: str = ""
 
     class Config:
-        env_file = ".env"
+        env_file = (ROOT_DIR / ".env", BACKEND_DIR / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = True
 
@@ -83,16 +90,16 @@ def get_project_root() -> Path:
 def get_offline_dataset_path() -> Path | None:
     """
     Get the path to offline dataset folder.
-    
+
     The offline dataset folder should be placed at the same level as backend/ and frontend/.
     Expected name: fengdiao_dataset_db_handoff_20260611
-    
+
     Returns:
         Path to offline dataset folder if exists, None otherwise.
     """
     project_root = get_project_root()
     dataset_folder = project_root / "fengdiao_dataset_db_handoff_20260611"
-    
+
     if dataset_folder.exists() and dataset_folder.is_dir():
         return dataset_folder
     return None
@@ -101,7 +108,7 @@ def get_offline_dataset_path() -> Path | None:
 def get_offline_database_path() -> Path | None:
     """
     Get the path to the SQLite database in the offline dataset folder.
-    
+
     Returns:
         Path to the SQLite database file if exists, None otherwise.
     """
