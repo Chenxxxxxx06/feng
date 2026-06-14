@@ -70,7 +70,7 @@ async def list_turbines(
     hi_min: float | None = Query(None, description="HI最小值"),
     hi_max: float | None = Query(None, description="HI最大值"),
     status: str | None = Query(None, description="状态"),
-    source_dataset: str | None = Query("care_to_compare_v6", description="数据集ID"),
+    source_dataset: str | None = Query(None, description="数据集ID"),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Turbine)
