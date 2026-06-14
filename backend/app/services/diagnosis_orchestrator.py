@@ -7,7 +7,7 @@ algorithm adapters when those interfaces are available.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Fault, FaultSignal, Turbine
@@ -238,6 +238,12 @@ async def run_batch_auto_fault_identification(
     request: BatchAutoFaultDetectionRequest,
 ) -> BatchAutoFaultDetectionResponse:
     q = select(Turbine)
+    # Exclude demo turbines when real dataset is present
+    care_exists = await db.execute(
+        select(func.count(Turbine.id)).where(Turbine.source_dataset.isnot(None))
+    )
+    if care_exists.scalar() > 0:
+        q = q.where(Turbine.source_dataset.isnot(None))
     if request.turbine_ids:
         q = q.where(Turbine.id.in_(request.turbine_ids))
     if request.region:
