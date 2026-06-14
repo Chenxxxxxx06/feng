@@ -51,6 +51,7 @@ createdb fengdiao_phm
 # 2. 初始化数据
 cd backend
 python scripts/seed_data.py
+venv\Scripts\activate.bat
 
 # 3. 启动后端
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

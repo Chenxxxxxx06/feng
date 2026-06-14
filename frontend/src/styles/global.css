@@ -52,6 +52,30 @@ body {
 
 /* ── Leaflet dark ── */
 .leaflet-container { background: #0c1525 !important; }
+.leaflet-tile-container { will-change: transform; }
+.leaflet-fade-anim .leaflet-tile { transition: opacity 0.12s linear; }
+.leaflet-pane { z-index: auto; }
+.leaflet-tile-pane { z-index: 100; }
+.leaflet-overlay-pane { z-index: 200; }
+.leaflet-shadow-pane { z-index: 300; }
+.leaflet-marker-pane { z-index: 400; }
+.leaflet-tooltip-pane { z-index: 450; }
+.leaflet-popup-pane { z-index: 460; }
+.leaflet-control-container { position: relative; z-index: 500; }
+.turbine-marker {
+  background: transparent !important;
+  border: 0 !important;
+}
+.turbine-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+@keyframes turbineSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .leaflet-control-zoom a {
   background: var(--bg-card) !important;
   color: var(--text-primary) !important;
@@ -105,6 +129,14 @@ body {
   background: rgba(13,19,30,0.85);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(56,139,253,0.15);
+}
+.glass-panel select {
+  background-color: rgba(17, 24, 39, 0.92);
+  color: var(--text-primary);
+}
+.glass-panel select option {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
 }
 
 /* ── Sidebar styles ── */
@@ -160,3 +192,79 @@ body {
   font-weight: 500;
 }
 .industrial-btn-primary:hover { filter: brightness(1.15); }
+
+/* ── Copilot Markdown ── */
+.copilot-markdown h1, .copilot-markdown h2, .copilot-markdown h3 {
+  font-weight: 600;
+  margin: 0.75em 0 0.35em;
+  line-height: 1.35;
+}
+.copilot-markdown h1 { font-size: 1.1em; }
+.copilot-markdown h2 { font-size: 1em; }
+.copilot-markdown h3 { font-size: 0.9em; }
+.copilot-markdown h2:first-child, .copilot-markdown h3:first-child { margin-top: 0; }
+
+.copilot-markdown p { margin: 0.35em 0; line-height: 1.6; }
+.copilot-markdown p:first-child { margin-top: 0; }
+.copilot-markdown p:last-child { margin-bottom: 0; }
+
+.copilot-markdown strong { color: #f0f3f8; font-weight: 600; }
+.copilot-markdown em { color: #b0bec5; }
+
+.copilot-markdown ul, .copilot-markdown ol {
+  padding-left: 1.2em;
+  margin: 0.35em 0;
+}
+.copilot-markdown li { margin: 0.15em 0; line-height: 1.5; }
+
+.copilot-markdown code {
+  background: rgba(56,139,253,0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+.copilot-markdown pre {
+  background: rgba(8,12,18,0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+.copilot-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.copilot-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.85em;
+}
+.copilot-markdown th {
+  background: rgba(56,139,253,0.1);
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+.copilot-markdown td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(56,139,253,0.06);
+}
+
+.copilot-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 0.6em 0;
+}
+
+.copilot-markdown blockquote {
+  border-left: 2px solid var(--accent-blue);
+  padding-left: 10px;
+  margin: 0.4em 0;
+  color: var(--text-secondary);
+}

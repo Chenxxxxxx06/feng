@@ -5,8 +5,11 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models import Turbine
 from app.schemas import TurbineResponse, TurbineListResponse
-from app.services.data_pipeline.scada_loader import scada_loader
 from app.services.data_pipeline.era5_loader import era5_loader
+from app.services.data_pipeline.open_meteo_loader import (
+    OpenMeteoWeatherError,
+    open_meteo_loader,
+)
 from app.services.data_pipeline.geo_loader import geo_loader
 from app.api.auth import get_current_user
 from app.models import User as UserModel
@@ -21,9 +24,12 @@ async def list_turbines(
     hi_min: float | None = Query(None, description="HI最小值"),
     hi_max: float | None = Query(None, description="HI最大值"),
     status: str | None = Query(None, description="状态"),
+    source_dataset: str | None = Query("care_to_compare_v6", description="数据集ID"),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Turbine)
+    if source_dataset:
+        q = q.where(Turbine.source_dataset == source_dataset)
     if model:
         q = q.where(Turbine.model == model)
     if region:
@@ -84,7 +90,7 @@ async def get_scada_data(
     hours: int = Query(24, ge=1, le=720),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get SCADA data — uses DB first, falls back to physics simulation."""
+    """Get SCADA data from imported database records."""
     from datetime import datetime, timedelta, timezone
     from app.models import SCADARecord
 
@@ -93,7 +99,9 @@ async def get_scada_data(
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
 
-    # Try DB first
+    # Try recent records first. Imported public datasets are often historical,
+    # so if no recent records exist, return the latest real dataset window and
+    # mark it explicitly in the response.
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     db_result = await db.execute(
         select(SCADARecord)
@@ -102,33 +110,48 @@ async def get_scada_data(
         .limit(hours * 6)
     )
     db_records = db_result.scalars().all()
+    dataset_window = "recent"
+
+    if not db_records:
+        latest_result = await db.execute(
+            select(SCADARecord)
+            .where(SCADARecord.turbine_id == turbine_id)
+            .order_by(SCADARecord.timestamp.desc())
+            .limit(hours * 6)
+        )
+        db_records = latest_result.scalars().all()
+        dataset_window = "historical_latest"
 
     if db_records:
         return [
-            {
-                "timestamp": r.timestamp.isoformat(),
-                "power_kw": r.power_kw,
-                "wind_speed_ms": r.wind_speed_ms,
-                "rotor_rpm": r.rotor_rpm,
-                "gen_temperature_c": r.gen_temperature_c,
-                "gearbox_temperature_c": r.gearbox_temperature_c,
-                "bearing_temperature_c": r.bearing_temperature_c,
-                "pitch_angle_deg": r.pitch_angle_deg,
-                "nacelle_direction_deg": r.nacelle_direction_deg,
-                "grid_frequency_hz": r.grid_frequency_hz,
-                "ambient_temp_c": r.ambient_temp_c,
-                "data_source": "database",
-            }
-            for r in db_records
+            _scada_response(r, dataset_window)
+            for r in reversed(db_records)
         ]
 
-    # Fall back to simulation
-    return scada_loader.generate_turbine_scada(
-        turbine_id=turbine.id,
-        turbine_mw=turbine.power_mw,
-        hours=hours,
-        resolution_min=10,
-    )
+    return []
+
+
+def _scada_response(record, dataset_window: str) -> dict:
+    extra = dict(record.extra or {})
+    return {
+        "timestamp": record.timestamp.isoformat(),
+        "power_kw": record.power_kw,
+        "wind_speed_ms": record.wind_speed_ms,
+        "rotor_rpm": record.rotor_rpm,
+        "gen_temperature_c": record.gen_temperature_c,
+        "gearbox_temperature_c": record.gearbox_temperature_c,
+        "bearing_temperature_c": record.bearing_temperature_c,
+        "pitch_angle_deg": record.pitch_angle_deg,
+        "nacelle_direction_deg": record.nacelle_direction_deg,
+        "grid_frequency_hz": record.grid_frequency_hz,
+        "ambient_temp_c": record.ambient_temp_c,
+        "data_source": "real_dataset",
+        "dataset_window": dataset_window,
+        "source_dataset": extra.get("source_dataset"),
+        "source_file": extra.get("source_file"),
+        "source_row": extra.get("source_row"),
+        "source_turbine_id": extra.get("source_turbine_id"),
+    }
 
 
 @router.get("/{turbine_id}/health")
@@ -191,6 +214,19 @@ async def get_turbine_wind(
     turbine = result.scalar_one_or_none()
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
+    if turbine.lat is None or turbine.lng is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This asset has no real geographic coordinates; weather lookup is unavailable.",
+        )
 
-    wind = era5_loader.get_wind_at(turbine.lat, turbine.lng)
-    return wind
+    try:
+        return await open_meteo_loader.get_current_weather(turbine.lat, turbine.lng)
+    except OpenMeteoWeatherError:
+        try:
+            return era5_loader.get_wind_at(turbine.lat, turbine.lng)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Open-Meteo weather lookup failed and no local weather dataset is available.",
+            ) from exc
