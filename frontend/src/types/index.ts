@@ -228,7 +228,7 @@ export interface WorkOrder {
   title: string;
   description: string | null;
   status: string;
-  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  priority?: string | null;
   fault_type?: string | null;
   due_date?: string | null;
   assignee_id?: number | null;
