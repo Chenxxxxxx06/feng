@@ -508,3 +508,4 @@ async def auto_detect_batch(
 ):
     from app.services.diagnosis_orchestrator import run_batch_auto_fault_identification
     return await run_batch_auto_fault_identification(db, request)
+
