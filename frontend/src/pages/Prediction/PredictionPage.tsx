@@ -24,6 +24,42 @@ interface MaintenancePlanResponse {
 }
 interface AIAnalysisResult { analysis: string; plan: MaintenanceTask[]; total_plan_items: number; }
 
+// ── Maintenance plan types ──
+interface MaintenanceTask {
+  turbine_id: number;
+  turbine_name: string;
+  region: string;
+  component: string;
+  rul_days: number;
+  hi_value: number;
+  status: string;
+  urgency_score: number;
+  priority: 'urgent' | 'high' | 'medium' | 'low';
+  action: string;
+  downtime_hours: number;
+  crew_size: number;
+  parts_needed: string[];
+  cost_estimate: number;
+  active_faults: { type: string; confidence: number }[];
+  existing_work_orders: { id: number; title: string; status: string }[];
+  confidence_interval: [number, number];
+}
+
+interface MaintenancePlanResponse {
+  plan: MaintenanceTask[];
+  total: number;
+  urgent_count: number;
+  high_count: number;
+  total_cost_estimate: number;
+}
+
+interface AIAnalysisResult {
+  analysis: string;
+  plan: MaintenanceTask[];
+  total_plan_items: number;
+}
+
+// ── Shared constants ──
 const FAULT_TYPES = [
   { value: 'bearing_wear', label: '轴承磨损' }, { value: 'gearbox_failure', label: '齿轮箱故障' },
   { value: 'blade_damage', label: '叶片损伤' }, { value: 'generator_failure', label: '发电机故障' },
@@ -145,8 +181,17 @@ export default function PredictionPage() {
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null); const [aiLoading, setAiLoading] = useState(false);
   const [showFullPlan, setShowFullPlan] = useState(false);
 
-  const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('bearing_wear');
-  const [costResult, setCostResult] = useState<CostComparison | null>(null); const [costLoading, setCostLoading] = useState(false);
+  // Maintenance plan + AI
+  const [maintPlan, setMaintPlan] = useState<MaintenancePlanResponse | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [planTopN, setPlanTopN] = useState(15);
+
+  // Cost comparison
+  const [costTurbineId, setCostTurbineId] = useState<number | null>(null);
+  const [costFaultType, setCostFaultType] = useState<string>('bearing_wear');
+  const [costResult, setCostResult] = useState<CostComparison | null>(null);
+  const [costLoading, setCostLoading] = useState(false);
 
   const [sortKey, setSortKey] = useState<SortKey>('rul_asc'); const [chartLimit, setChartLimit] = useState(20);
   const rulChartRef = useRef<HTMLDivElement>(null); const regionChartRef = useRef<HTMLDivElement>(null);
@@ -155,14 +200,26 @@ export default function PredictionPage() {
     setError(null);
     try {
       const [rulData, woRes, turbData, sumData, planRes] = await Promise.all([
-        predictionService.getRUL(), api.get('/workorders/'), predictionService.getTurbines(),
-        predictionService.getSummary(), api.get('/prediction/maintenance-plan', { params: { top_n: 50 } }),
+        predictionService.getRUL(),
+        api.get('/workorders/'),
+        predictionService.getTurbines(),
+        predictionService.getSummary(),
+        api.get('/prediction/maintenance-plan', { params: { top_n: planTopN } }),
       ]);
-      setPredictions(rulData); const d = woRes.data; setWorkOrders(Array.isArray(d) ? d : d.workorders || []);
-      setTurbines(turbData); setSummary(sumData); setMaintPlan(planRes.data);
-      if (turbData.length > 0 && !costTurbineId) setCostTurbineId(turbData[0].id);
-    } catch (err: any) { setError(err?.response?.data?.detail || err?.message || '加载失败'); }
-    finally { setLoading(false); }
+      setPredictions(rulData);
+      const woData = woRes.data;
+      setWorkOrders(Array.isArray(woData) ? woData : woData.workorders || []);
+      setTurbines(turbData);
+      setSummary(sumData);
+      setMaintPlan(planRes.data);
+      if (turbData.length > 0 && !costTurbineId) {
+        setCostTurbineId(turbData[0].id);
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || err?.message || '加载数据失败');
+    } finally {
+      setLoading(false);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -195,8 +252,34 @@ export default function PredictionPage() {
     return () => { window.removeEventListener('resize', hr); chart.dispose(); };
   }, [summary]);
 
-  const handleCostCompare = async () => { if (!costTurbineId) return; setCostLoading(true); try { setCostResult(await predictionService.compareCost(costTurbineId, costFaultType)); } catch (e: any) { setCostResult(null); alert(e?.response?.data?.detail || '计算失败'); } finally { setCostLoading(false); } };
-  const handleAIAnalysis = async () => { setAiLoading(true); setAiAnalysis(null); try { const { data } = await api.post('/ai/analyze-maintenance-plan'); setAiAnalysis(data); } catch (e: any) { alert(e?.response?.data?.detail || 'AI分析失败'); } finally { setAiLoading(false); } };
+  // ── AI maintenance analysis ──
+  const handleAIAnalysis = async () => {
+    setAiLoading(true);
+    setAiAnalysis(null);
+    try {
+      const { data } = await api.post('/ai/analyze-maintenance-plan');
+      setAiAnalysis(data);
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'AI分析失败，请确认已配置API Key');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // ── Cost comparison ──
+  const handleCostCompare = async () => {
+    if (!costTurbineId) return;
+    setCostLoading(true);
+    try {
+      const data = await predictionService.compareCost(costTurbineId, costFaultType);
+      setCostResult(data);
+    } catch (err: any) {
+      setCostResult(null);
+      alert(err?.response?.data?.detail || '成本计算失败');
+    } finally {
+      setCostLoading(false);
+    }
+  };
 
   const selectedTurbine = useMemo(() => turbines.find(t => t.id === costTurbineId), [turbines, costTurbineId]);
   const highRisk = useMemo(() => predictions.filter(p => p.remaining_life_days < 180).sort((a, b) => a.remaining_life_days - b.remaining_life_days), [predictions]);
@@ -299,22 +382,154 @@ export default function PredictionPage() {
               <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue">{FAULT_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
               <button onClick={handleCostCompare} disabled={!costTurbineId || costLoading} className="px-4 py-2 bg-accent-blue text-white rounded text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{costLoading ? '计算中...' : '计算对比'}</button>
             </div>
-            {selectedTurbine && <p className="text-[11px] text-text-muted -mt-2 mb-3">当前: {selectedTurbine.name} · {selectedTurbine.power_mw}MW · HI {selectedTurbine.hi_value}</p>}
-            {costResult && <div>
-              <div className="grid grid-cols-3 lg:grid-cols-6 gap-4">
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">立即检修</p><p className="text-xl font-mono font-bold text-accent-red">¥{costResult.immediate_repair_cost.toLocaleString()}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">延迟检修</p><p className="text-xl font-mono font-bold text-accent-yellow">¥{costResult.delayed_repair_cost.toLocaleString()}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">每日停机损失</p><p className="text-xl font-mono font-bold text-text-primary">¥{costResult.downtime_loss_per_day.toLocaleString()}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">故障概率</p><p className="text-xl font-mono font-bold text-text-primary">{(costResult.failure_probability * 100).toFixed(1)}%</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">风险等级</p><p className={`inline-flex items-center justify-center min-w-12 rounded border px-2 py-1 text-lg font-bold ${riskClass(costResult)}`}>{riskLabel(costResult)}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">预计节省</p><p className={`text-xl font-mono font-bold ${costResult.estimated_saving >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>¥{costResult.estimated_saving.toLocaleString()}</p></div>
-              </div>
-              <p className="mt-3 p-3 bg-accent-green/10 border border-accent-green/30 rounded text-xs text-accent-green">{costResult.recommendation}</p>
-              <div className="mt-3 grid grid-cols-2 lg:grid-cols-5 gap-2">{costResult.cost_drivers.map(d => <div key={d} className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-xs text-text-secondary">{d}</div>)}</div>
-            </div>}
-          </div>
 
-        </>)}
+            {/* ── Maintenance Plan Table ── */}
+            {maintPlan && maintPlan.plan.length > 0 && (
+              <div className="bg-bg-card border border-border-default rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-sm font-medium">维修计划</h3>
+                    <span className="text-[10px] text-text-muted">
+                      {maintPlan.total}项 · 紧急 {maintPlan.urgent_count} · 高优先 {maintPlan.high_count} · 总预估 ¥{maintPlan.total_cost_estimate.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={planTopN}
+                      onChange={(e) => { setPlanTopN(Number(e.target.value)); loadData(); }}
+                      className="bg-bg-secondary border border-border-default rounded px-2 py-1 text-[10px] text-text-secondary focus:outline-none"
+                    >
+                      <option value={10}>显示10项</option>
+                      <option value={15}>显示15项</option>
+                      <option value={30}>显示30项</option>
+                      <option value={50}>全部</option>
+                    </select>
+                    <button
+                      onClick={handleAIAnalysis}
+                      disabled={aiLoading}
+                      className="px-3 py-1 bg-accent-purple/20 border border-accent-purple/40 rounded text-xs text-accent-purple hover:bg-accent-purple/30 disabled:opacity-50"
+                    >
+                      {aiLoading ? '🤖 AI分析中...' : '🤖 AI 分析维修计划'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* AI Analysis Result */}
+                {aiAnalysis && (
+                  <div className="mb-4 p-4 bg-accent-purple/5 border border-accent-purple/20 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm">🤖</span>
+                      <span className="text-xs font-medium text-accent-purple">AI 运维分析</span>
+                      <span className="text-[9px] text-text-muted">
+                        (基于 {aiAnalysis.total_plan_items} 项维修数据)
+                      </span>
+                      <button
+                        onClick={() => setAiAnalysis(null)}
+                        className="ml-auto text-[10px] text-text-muted hover:text-accent-red"
+                      >
+                        收起
+                      </button>
+                    </div>
+                    <p className="text-xs text-text-secondary whitespace-pre-line leading-relaxed">
+                      {aiAnalysis.analysis}
+                    </p>
+                  </div>
+                )}
+
+                {/* Table */}
+                <div className="overflow-auto max-h-[500px]">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-text-muted border-b border-border-default sticky top-0 bg-bg-card">
+                        <th className="text-left py-2 w-8">#</th>
+                        <th className="text-left py-2">风机</th>
+                        <th className="text-left py-2">部件</th>
+                        <th className="text-right py-2">RUL</th>
+                        <th className="text-right py-2">HI</th>
+                        <th className="text-right py-2">紧急度</th>
+                        <th className="text-left py-2">建议措施</th>
+                        <th className="text-right py-2">停机(h)</th>
+                        <th className="text-right py-2">预估费用</th>
+                        <th className="text-left py-2">所需备件</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {maintPlan.plan.map((t, i) => (
+                        <tr
+                          key={`${t.turbine_id}-${t.component}`}
+                          className={`border-b border-border-default hover:bg-bg-hover ${
+                            t.priority === 'urgent' ? 'bg-accent-red/5' :
+                            t.priority === 'high' ? 'bg-accent-yellow/5' : ''
+                          }`}
+                        >
+                          <td className="py-2 text-text-muted">{i + 1}</td>
+                          <td className="py-2">
+                            <span className="font-medium">{t.turbine_name}</span>
+                            <span className="text-[9px] text-text-muted ml-1">{t.region}</span>
+                          </td>
+                          <td className="py-2">{t.component}</td>
+                          <td className="py-2 text-right">
+                            <span className="font-mono" style={{ color: rulColor(t.rul_days) }}>
+                              {t.rul_days.toFixed(0)}天
+                            </span>
+                          </td>
+                          <td className="py-2 text-right">
+                            <span className="font-mono" style={{ color: hiColor(t.hi_value) }}>
+                              {t.hi_value.toFixed(0)}
+                            </span>
+                          </td>
+                          <td className="py-2 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* urgency bar */}
+                              <div className="w-10 h-1.5 bg-bg-hover rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${t.urgency_score}%`,
+                                    backgroundColor: t.urgency_score >= 70 ? '#f85149' :
+                                      t.urgency_score >= 45 ? '#d29922' : t.urgency_score >= 25 ? '#58a6ff' : '#3fb950',
+                                  }}
+                                />
+                              </div>
+                              <span className="font-mono text-[10px]">{t.urgency_score.toFixed(0)}</span>
+                            </div>
+                          </td>
+                          <td className="py-2">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                              t.priority === 'urgent' ? 'bg-accent-red/20 text-accent-red' :
+                              t.priority === 'high' ? 'bg-accent-yellow/20 text-accent-yellow' :
+                              t.priority === 'medium' ? 'bg-accent-blue/20 text-accent-blue' :
+                              'bg-accent-green/20 text-accent-green'
+                            }`}>
+                              {t.action}
+                            </span>
+                            {t.active_faults.length > 0 && (
+                              <span className="text-[9px] text-accent-red ml-1">⚠故障</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-right font-mono text-text-muted">{t.downtime_hours}h</td>
+                          <td className="py-2 text-right font-mono">¥{t.cost_estimate.toLocaleString()}</td>
+                          <td className="py-2">
+                            <div className="flex flex-wrap gap-0.5">
+                              {t.parts_needed.slice(0, 2).map((p) => (
+                                <span key={p} className="px-1 py-0.5 bg-bg-hover rounded text-[9px] text-text-muted">
+                                  {p}
+                                </span>
+                              ))}
+                              {t.parts_needed.length > 2 && (
+                                <span className="text-[9px] text-text-muted">+{t.parts_needed.length - 2}</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
       <CopilotFAB />
 

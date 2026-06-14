@@ -26,27 +26,27 @@ logger = logging.getLogger(__name__)
 COMPONENT_CONFIG = {
     "齿轮箱": {
         "actions": {30: "立即停机更换齿轮箱", 90: "安排齿轮箱大修", 180: "齿轮箱专项检查", 999: "纳入常规巡检"},
-        "downtime_hours": 8, "crew_size": 3,
+        "downtime_hours": 72, "crew_size": 4,
         "parts": ["齿轮箱总成", "润滑油", "密封件"],
     },
     "发电机": {
         "actions": {30: "立即更换发电机轴承", 90: "安排发电机检修", 180: "发电机温度监测加强", 999: "常规巡检"},
-        "downtime_hours": 6, "crew_size": 2,
+        "downtime_hours": 48, "crew_size": 3,
         "parts": ["发电机轴承", "冷却风扇", "绝缘材料"],
     },
     "主轴承": {
         "actions": {30: "立即更换主轴承", 90: "安排主轴对中校正", 180: "加强振动监测", 999: "常规巡检"},
-        "downtime_hours": 8, "crew_size": 2,
+        "downtime_hours": 56, "crew_size": 3,
         "parts": ["主轴承", "润滑脂", "密封圈"],
     },
     "叶片": {
         "actions": {30: "立即停机修复叶片", 90: "安排叶片检修", 180: "叶片无人机巡检", 999: "常规巡检"},
-        "downtime_hours": 8, "crew_size": 3,
+        "downtime_hours": 40, "crew_size": 4,
         "parts": ["修复材料", "涂层", "平衡配重"],
     },
     "变桨系统": {
         "actions": {30: "立即修复变桨系统", 90: "安排变桨校准", 180: "变桨角度检查", 999: "常规巡检"},
-        "downtime_hours": 4, "crew_size": 2,
+        "downtime_hours": 24, "crew_size": 2,
         "parts": ["变桨电机", "控制器", "传感器"],
     },
 }
