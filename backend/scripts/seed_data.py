@@ -343,6 +343,7 @@ async def seed():
                 assignee=random.choice(tech_objs).username if random.random() > 0.3 else None,
                 cost_estimate=template["cost"],
                 cost_actual=template["cost"] * random.uniform(0.8, 1.2) if random.random() > 0.5 else None,
+                due_date=now + timedelta(days=random.randint(1, 90)),
             )
             db.add(wo)
             wo_count += 1
