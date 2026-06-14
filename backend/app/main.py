@@ -63,6 +63,23 @@ async def ensure_runtime_schema(conn):
         }
         for column, definition in work_order_columns.items():
             await _ensure_sqlite_column(conn, "work_orders", column, definition)
+        fault_columns = {
+            "processing_status": "VARCHAR(16) DEFAULT 'pending'",
+            "priority": "VARCHAR(16) DEFAULT 'medium'",
+            "handler": "VARCHAR(64)",
+            "discovered_at": "DATETIME",
+            "processing_started_at": "DATETIME",
+            "closed_at": "DATETIME",
+            "failed_at": "DATETIME",
+            "last_action_at": "DATETIME",
+            "work_order_id": "INTEGER",
+            "work_order_title": "VARCHAR(128)",
+            "maintenance_cost_estimate": "FLOAT",
+            "maintenance_cost_actual": "FLOAT",
+            "status_note": "TEXT",
+        }
+        for column, definition in fault_columns.items():
+            await _ensure_sqlite_column(conn, "faults", column, definition)
     else:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(512)"))
@@ -75,6 +92,19 @@ async def ensure_runtime_schema(conn):
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS processing_status VARCHAR(16) DEFAULT 'pending'"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS priority VARCHAR(16) DEFAULT 'medium'"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS handler VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS discovered_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS failed_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS last_action_at TIMESTAMP WITH TIME ZONE"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS work_order_id INTEGER"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS work_order_title VARCHAR(128)"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS maintenance_cost_estimate FLOAT"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS maintenance_cost_actual FLOAT"))
+        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS status_note TEXT"))
 
 
 async def _ensure_sqlite_column(conn, table_name: str, column_name: str, definition: str):
