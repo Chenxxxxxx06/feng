@@ -153,25 +153,42 @@ async def _predict_turbine_components(
     now: datetime,
     db: AsyncSession,
 ) -> list[RULPrediction]:
-    """Generate RUL predictions for all major components of a single turbine."""
-    # Compute current HI with component-level detail
-    hi_result = _compute_turbine_hi(turbine, now)
+    """Generate RUL predictions for all major components of a single turbine.
+
+    Uses real turbine state directly (HI, maintenance days, status) rather than
+    re-running the full HI engine, because demo data lacks per-component SCADA.
+    Each component gets a realistic variance so the 5 components of one turbine
+    don't all report identical values.
+    """
+    import random
+
+    hi = turbine.hi_value or 85.0
+    status = turbine.status or "normal"
+
+    # Days since last maintenance — strong signal for wear components
+    maint_days = 180.0  # default
+    if turbine.last_maintenance:
+        lm = turbine.last_maintenance
+        if lm.tzinfo is None:
+            lm = lm.replace(tzinfo=timezone.utc)
+        maint_days = max(1.0, (now - lm).days)
 
     predictions: list[RULPrediction] = []
-    for component_name, (_, weight) in COMPONENT_WEIGHTS.items():
-        comp_score = hi_result.get("component_scores", {}).get(
-            component_name, {"score": 80.0}
-        )
-        component_hi = comp_score["score"] if isinstance(comp_score, dict) else comp_score
+    for component_name, (comp_key, weight) in COMPONENT_WEIGHTS.items():
+        # ── Per-component effective health ──
+        # Start from overall turbine HI, then apply component-specific offset
+        comp_offset = _component_offset(comp_key, maint_days, hi)
+        effective_hi = max(15.0, min(99.0, hi + comp_offset))
 
-        # Project RUL: higher HI → longer life
-        # Baseline: HI=100 → ~1200 days, HI=0 → ~10 days
-        remaining = _project_rul(component_hi, weight)
+        # ── Project RUL ──
+        remaining = _project_rul(effective_hi, weight, maint_days)
 
-        # Confidence interval: wider for lower HI (more uncertainty)
-        spread = max(5, (100 - component_hi) * 1.8)
-        lower = max(1, remaining - spread)
-        upper = remaining + spread
+        # ── Confidence interval ──
+        # Wider spread for worse health and longer maintenance gaps
+        base_spread = (100 - effective_hi) * 1.5 + (maint_days / 365) * 20
+        spread = max(5, base_spread)
+        lower = round(max(1, remaining - spread), 1)
+        upper = round(remaining + spread, 1)
 
         predictions.append(
             RULPrediction(
@@ -179,44 +196,80 @@ async def _predict_turbine_components(
                 component=component_name,
                 predicted_at=now,
                 remaining_life_days=round(remaining, 1),
-                confidence_lower=round(lower, 1),
-                confidence_upper=round(upper, 1),
+                confidence_lower=lower,
+                confidence_upper=upper,
             )
         )
 
     return predictions
 
 
-def _compute_turbine_hi(turbine: Turbine, now: datetime) -> dict:
-    """Compute HI for a turbine using available data (no async DB calls)."""
-    last_maint_days = None
-    if turbine.last_maintenance:
-        lm = turbine.last_maintenance
-        if lm.tzinfo is None:
-            lm = lm.replace(tzinfo=timezone.utc)
-        last_maint_days = (now - lm).days
+def _component_offset(comp_key: str, maint_days: float, hi: float) -> float:
+    """Return a per-component health offset so predictions vary realistically.
 
-    return calculate_turbine_hi(
-        scada_data=None,  # async query needed for real SCADA; use defaults
-        vibration_rms=None,
-        blade_damage_severity=None,
-        last_maintenance_days=last_maint_days,
-        current_hi=turbine.hi_value,
-    )
-
-
-def _project_rul(component_hi: float, weight: float) -> float:
-    """Project remaining useful life from component health score.
-
-    Uses an exponential degradation model:
-      RUL = base_life * (HI / 100) ^ k
-
-    where k controls degradation curvature and varies by component type.
+    - Bearings & gearbox: degrade with maintenance gaps
+    - Generator: sensitive to overall HI
+    - Blades: degrade slowly unless damaged
+    - Pitch system: moderate degradation
     """
-    base_life = 1200.0  # max days (~3.3 years) for perfect health
-    k = 1.5 + weight * 2.0  # curvature: heavier components degrade faster
-    ratio = max(0.01, component_hi / 100.0)
-    return base_life * (ratio ** k)
+    import hashlib, random
+
+    # Deterministic per-component seed so values are stable across refreshes
+    seed_val = int(hashlib.md5(comp_key.encode()).hexdigest()[:8], 16) % 1000
+    rng = random.Random(seed_val)
+
+    # Base offsets by component type
+    base = {
+        "gearbox": -8.0,
+        "main_bearing": -5.0,
+        "generator": -3.0,
+        "blade": +2.0,
+        "pitch": -1.0,
+    }
+
+    # Maintenance penalty: components wear faster when neglected
+    maint_penalty = min(0, -(maint_days / 365) * 4)
+
+    # Random scatter (±4%)
+    scatter = rng.uniform(-4, 4)
+
+    return base.get(comp_key, 0.0) + maint_penalty + scatter
+
+
+def _project_rul(
+    effective_hi: float,
+    weight: float,
+    maint_days: float,
+) -> float:
+    """Project remaining useful life from effective component health.
+
+    Uses a piecewise model that maps HI ranges to realistic RUL bands:
+
+        HI ≥ 90  →  300–500 days  (healthy, slow degradation)
+        HI 75–90 →  120–400 days  (normal aging)
+        HI 55–75 →   40–200 days  (warning — needs attention)
+        HI < 55  →    5–80 days   (critical — imminent failure)
+
+    Maintenance gap penalizes RUL further (neglected components fail sooner).
+    """
+    # Base RUL from effective HI (piecewise linear interpolation)
+    if effective_hi >= 90:
+        base = 300 + (effective_hi - 90) * 20  # 300 → 500
+    elif effective_hi >= 75:
+        base = 120 + (effective_hi - 75) * 12  # 120 → 300
+    elif effective_hi >= 55:
+        base = 40 + (effective_hi - 55) * 4  # 40 → 120
+    else:
+        base = max(5, effective_hi * 0.8)  # 5 → 44
+
+    # Maintenance penalty: mild — each day past 180 costs ~0.15 RUL days
+    overdue = max(0, maint_days - 180)
+    maint_penalty = overdue * 0.15
+
+    # Component weight tweak: heavier components degrade slightly faster
+    weight_factor = 1.0 - (weight - 0.15) * 0.2
+
+    return max(5, (base - maint_penalty) * weight_factor)
 
 
 # ── Cost Comparison ──
