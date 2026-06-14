@@ -3,11 +3,15 @@ interface Props {
   onChange: (f: Record<string, string>) => void;
 }
 
+type FilterKey = 'region' | 'model' | 'status' | 'hi_min';
+
 const REGIONS = ['', '榆林靖边风场A区', '榆林定边风场B区', '榆林横山风场C区'];
 const MODELS = ['', 'Goldwind GW155-3.3MW', 'Envision EN-156/3.3', 'Mingyang MySE3.2-156'];
+const SELECT_CLASS = 'bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 cursor-pointer outline-none focus:border-accent-blue';
+const INPUT_CLASS = 'w-16 bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 outline-none focus:border-accent-blue';
 
 export default function FilterPanel({ filters, onChange }: Props) {
-  const on = (key: string, val: string) => {
+  const updateFilter = (key: FilterKey, val: string) => {
     const next = { ...filters, [key]: val };
     if (!val) delete next[key];
     onChange(next);
@@ -17,8 +21,8 @@ export default function FilterPanel({ filters, onChange }: Props) {
     <div className="absolute top-3 left-3 z-[500] flex gap-1.5 glass-panel rounded-lg px-2.5 py-1.5 text-[11px]">
       <select
         value={filters.region || ''}
-        onChange={(e) => on('region', e.target.value)}
-        className="bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 cursor-pointer outline-none focus:border-accent-blue"
+        onChange={(e) => updateFilter('region', e.target.value)}
+        className={SELECT_CLASS}
       >
         {REGIONS.map((r) => (
           <option key={r} value={r} className="bg-bg-card">
@@ -28,8 +32,8 @@ export default function FilterPanel({ filters, onChange }: Props) {
       </select>
       <select
         value={filters.model || ''}
-        onChange={(e) => on('model', e.target.value)}
-        className="bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 cursor-pointer outline-none focus:border-accent-blue"
+        onChange={(e) => updateFilter('model', e.target.value)}
+        className={SELECT_CLASS}
       >
         {MODELS.map((m) => (
           <option key={m} value={m} className="bg-bg-card">
@@ -39,8 +43,8 @@ export default function FilterPanel({ filters, onChange }: Props) {
       </select>
       <select
         value={filters.status || ''}
-        onChange={(e) => on('status', e.target.value)}
-        className="bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 cursor-pointer outline-none focus:border-accent-blue"
+        onChange={(e) => updateFilter('status', e.target.value)}
+        className={SELECT_CLASS}
       >
         <option value="">全部状态</option>
         <option value="normal">正常</option>
@@ -51,8 +55,8 @@ export default function FilterPanel({ filters, onChange }: Props) {
         type="number"
         placeholder="HI >="
         value={filters.hi_min || ''}
-        onChange={(e) => on('hi_min', e.target.value)}
-        className="w-16 bg-transparent text-text-primary border border-border-subtle rounded-md px-2 py-1 outline-none focus:border-accent-blue"
+        onChange={(e) => updateFilter('hi_min', e.target.value)}
+        className={INPUT_CLASS}
       />
       {Object.keys(filters).length > 0 && (
         <button
