@@ -176,7 +176,25 @@ class BatchAutoFaultDetectionResponse(BaseModel):
     generated_at: datetime
     records: list[BatchAutoFaultRecord] = []
     group_summary: dict[str, int] = {}
-    message: str
+
+
+class FaultKnowledgeResponse(BaseModel):
+    id: int
+    fault_type: str
+    category: str
+    icon: str = "⚠️"
+    severity: str = "medium"
+    symptoms: list = []
+    root_causes: list = []
+    solutions: list = []
+    related_faults: list = []
+    spare_parts: list = []
+    cases: list = []
+    source: str = "manual"
+    confidence: float = 1.0
+    verified: bool = True
+
+    model_config = {"from_attributes": True}
 
 class VibrationPreviewResponse(BaseModel):
     turbine_id: int
