@@ -203,9 +203,12 @@ def _raw_blade_inspection_images(turbine_id: int) -> list[dict]:
 async def list_faults(
     turbine_id: int | None = Query(None),
     status: str | None = Query(None),
+    source_dataset: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Fault, Turbine.name, Turbine.region).join(Turbine, Turbine.id == Fault.turbine_id)
+    if source_dataset:
+        q = q.where(Turbine.source_dataset == source_dataset)
     if turbine_id:
         q = q.where(Fault.turbine_id == turbine_id)
     if status:
@@ -456,18 +459,37 @@ async def vibration_preview(
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
 
-    from app.services.data_pipeline.vibration_loader import vibration_loader, RealVibrationDatasetRequired
-    try:
-        return vibration_loader.generate_waveform(
-            turbine_id=turbine_id,
-            component=component,
-            fault_type=fault_type,
-        )
-    except RealVibrationDatasetRequired:
-        raise HTTPException(
-            status_code=503,
-            detail="振动数据集未导入，请先导入真实振动数据后再使用此功能",
-        )
+    q = select(VibrationData).where(VibrationData.turbine_id == turbine_id)
+    q = q.order_by(VibrationData.timestamp.desc())
+    result = await db.execute(q)
+    record = result.scalars().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="No imported vibration data for this turbine")
+
+    payload = {}
+    if record.waveform_path:
+        path = DATA_DIR / record.waveform_path
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+    return {
+        "turbine_id": turbine_id,
+        "component": record.component,
+        "timestamp": record.timestamp.isoformat(),
+        "duration_seconds": payload.get("duration_seconds"),
+        "sample_rate_hz": payload.get("sample_rate_hz"),
+        "sample_count": payload.get("sample_count"),
+        "rms": payload.get("rms", record.rms),
+        "waveform": payload.get("waveform", []),
+        "peak_frequencies": payload.get("peak_frequencies", []),
+        "fault_detected": payload.get("fault_detected", False),
+        "fault_info": payload.get("fault_info"),
+        "quality": {"display_mode": "wall_clock_24h_loop"} if payload else None,
+        "source_dataset": _resolve_vibration_source_dataset(payload, record),
+        "data_source": payload.get("data_source", "imported_dataset"),
+        "waveform_path": record.waveform_path,
+        "peak_freq_hz": record.peak_freq_hz,
+    }
 
 
 @router.post("/auto-detect", response_model=AutoFaultDetectionResponse)
