@@ -15,7 +15,8 @@ class User(Base):
     api_key = Column(String(256), nullable=True)
     api_provider = Column(String(64), nullable=True)
     api_base_url = Column(String(512), nullable=True)
-    model_preference = Column(String(128), default="qwen-plus")
+    model_preference = Column(String(64), default="gpt-4")
+    preferences = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=func.now())
 
@@ -99,19 +100,6 @@ class Fault(Base):
     fault_type = Column(String(64), nullable=False)
     confidence = Column(Float, nullable=False)
     status = Column(String(16), default="open")
-    processing_status = Column(String(16), default="pending")
-    priority = Column(String(16), default="medium")
-    handler = Column(String(64), nullable=True)
-    discovered_at = Column(DateTime(timezone=True), nullable=True)
-    processing_started_at = Column(DateTime(timezone=True), nullable=True)
-    closed_at = Column(DateTime(timezone=True), nullable=True)
-    failed_at = Column(DateTime(timezone=True), nullable=True)
-    last_action_at = Column(DateTime(timezone=True), nullable=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=True)
-    work_order_title = Column(String(128), nullable=True)
-    maintenance_cost_estimate = Column(Float, nullable=True)
-    maintenance_cost_actual = Column(Float, nullable=True)
-    status_note = Column(Text, nullable=True)
     details = Column(JSON, nullable=True)
 
     turbine = relationship("Turbine", back_populates="faults")
@@ -152,59 +140,19 @@ class WorkOrder(Base):
     status = Column(String(16), default="pending")
     priority = Column(String(16), default="medium")
     fault_type = Column(String(64), nullable=True)
-    due_date = Column(DateTime(timezone=True), nullable=True)
-    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     assignee = Column(String(64), nullable=True)
+    assignee_id = Column(Integer, nullable=True)
     assignee_email = Column(String(128), nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True)
     cost_estimate = Column(Float, default=0.0)
     cost_actual = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     notification_sent_at = Column(DateTime(timezone=True), nullable=True)
     downtime_hours = Column(Float, nullable=True)
-
-
-class MaintenanceRecord(Base):
-    __tablename__ = "maintenance_records"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
-    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action_type = Column(String(32), nullable=False)
-    content = Column(Text, nullable=True)
-    before_status = Column(String(16), nullable=True)
-    after_status = Column(String(16), nullable=True)
-    extra = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
-class NotificationLog(Base):
-    __tablename__ = "notification_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=True, index=True)
-    recipient_email = Column(String(128), nullable=False)
-    subject = Column(String(256), nullable=True)
-    channel = Column(String(32), default="email")
-    status = Column(String(16), nullable=False)
-    error_message = Column(Text, nullable=True)
-    sent_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
-class MaintenancePersonnel(Base):
-    __tablename__ = "maintenance_personnel"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    name = Column(String(64), nullable=False)
-    email = Column(String(128), nullable=True)
-    skills = Column(JSON, default=list)
-    region = Column(String(32), nullable=True)
-    is_available = Column(Boolean, default=True)
-    max_load = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
 
 class NotificationConfig(Base):
@@ -247,6 +195,32 @@ class DataImportBatch(Base):
     rows_skipped = Column(Integer)
     anonymous_assets = Column(Integer)
     summary = Column(JSON)
+
+
+class NotificationLog(Base):
+    __tablename__ = "notification_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
+    recipient_email = Column(String(128), nullable=False)
+    subject = Column(String(256), nullable=True)
+    channel = Column(String(32), default="email")
+    status = Column(String(16), default="sent")
+    sent_at = Column(DateTime(timezone=True), default=func.now())
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+
+
+class MaintenanceRecord(Base):
+    __tablename__ = "maintenance_records"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action_type = Column(String(32), nullable=False)
+    content = Column(Text, nullable=True)
+    before_status = Column(String(16), nullable=True)
+    after_status = Column(String(16), nullable=True)
+    extra = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
 
 
 class FaultKnowledgeNode(Base):

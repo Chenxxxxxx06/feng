@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 import uvicorn
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -32,12 +33,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
     # Startup
     logger.info("Starting up PHM system...")
-    
+
     # Check for offline database
     offline_db = get_offline_database_path()
     if offline_db and is_sqlite_url(settings.DATABASE_URL):
         logger.info(f"📦 Using offline dataset database: {offline_db}")
-    
+
     from app.database import engine, Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -53,6 +54,7 @@ async def ensure_runtime_schema(conn):
     if settings.DATABASE_URL.startswith("sqlite"):
         await _ensure_sqlite_column(conn, "users", "api_provider", "VARCHAR(64)")
         await _ensure_sqlite_column(conn, "users", "api_base_url", "VARCHAR(512)")
+        await _ensure_sqlite_column(conn, "users", "preferences", "JSON")
         work_order_columns = {
             "priority": "VARCHAR(16) DEFAULT 'medium'",
             "fault_type": "VARCHAR(64)",
@@ -180,6 +182,25 @@ app.include_router(agent.router, prefix="/api", tags=["AI诊断"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["系统设置"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
 app.include_router(personnel.router, prefix="/api/personnel", tags=["人员管理"])
+
+
+# --- Frontend SPA serving (production) ---
+if FRONTEND_DIST.exists():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend_assets")
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_index():
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_spa_fallback(full_path: str):
+        requested_file = (FRONTEND_DIST / full_path).resolve()
+        frontend_root = FRONTEND_DIST.resolve()
+        if requested_file.is_relative_to(frontend_root) and requested_file.is_file():
+            return FileResponse(requested_file)
+        return FileResponse(FRONTEND_DIST / "index.html")
 
 
 if __name__ == "__main__":

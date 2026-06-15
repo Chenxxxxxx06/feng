@@ -176,25 +176,7 @@ class BatchAutoFaultDetectionResponse(BaseModel):
     generated_at: datetime
     records: list[BatchAutoFaultRecord] = []
     group_summary: dict[str, int] = {}
-
-
-class FaultKnowledgeResponse(BaseModel):
-    id: int
-    fault_type: str
-    category: str
-    icon: str = "⚠️"
-    severity: str = "medium"
-    symptoms: list = []
-    root_causes: list = []
-    solutions: list = []
-    related_faults: list = []
-    spare_parts: list = []
-    cases: list = []
-    source: str = "manual"
-    confidence: float = 1.0
-    verified: bool = True
-
-    model_config = {"from_attributes": True}
+    message: str
 
 class VibrationPreviewResponse(BaseModel):
     turbine_id: int
@@ -202,11 +184,17 @@ class VibrationPreviewResponse(BaseModel):
     timestamp: datetime
     duration_seconds: float
     sample_rate_hz: int
+    sample_count: Optional[int] = None
     rms: float
     waveform: list[float]
     spectrum: list[float]
     peak_frequencies: list[dict]
     fault_detected: bool
+    quality: Optional[dict] = None
+    source_dataset: Optional[str] = None
+    data_source: Optional[str] = None
+    waveform_path: Optional[str] = None
+    peak_freq_hz: Optional[float] = None
     algorithm_status: str
     message: str
 

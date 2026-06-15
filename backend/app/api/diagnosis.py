@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
+import math
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -12,15 +13,18 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import BladeImage, Fault, FaultSignal, Turbine, VibrationData
+from app.models import BladeImage, Fault, FaultKnowledgeNode, FaultSignal, SCADARecord, Turbine, VibrationData, WorkOrder
 from app.schemas import (
     FaultResponse, FaultDetailResponse, FaultSignalResponse,
     BladeDiagnosisRequest, BladeDiagnosisResponse,
     AutoFaultDetectionRequest, AutoFaultDetectionResponse,
-    BatchAutoFaultDetectionRequest, BatchAutoFaultDetectionResponse,
+    BatchAutoFaultDetectionRequest, BatchAutoFaultDetectionResponse, BatchAutoFaultRecord,
+    DiagnosisSignalInsight, TroubleshootingStep, VibrationPreviewResponse,
 )
 from app.api.auth import get_current_user
 from app.services.blade_yolo_service import BladeModelUnavailable, blade_yolo_service
+from app.services.care_monitoring_metrics import ANOMALY_STATUS_IDS, CARE_DATASET_ID
+from app.services.diagnosis_orchestrator import build_signal_insights, build_troubleshooting_steps
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -69,11 +73,11 @@ def _resolve_vibration_source_dataset(payload: dict, record: VibrationData) -> s
     if "nrel" in source_file or "gearbox" in source_file:
         return "nrel_gearbox_vibration"
     if "care_reference_waveforms" in waveform_path:
-        return "mendeley_blade_vibration_faults"
+        return "care_reference_waveforms"
 
     source_dataset = quality.get("source_dataset")
     if source_dataset == "care_public_vibration_reference":
-        return "mendeley_blade_vibration_faults"
+        return "care_reference_waveforms"
     return source_dataset
 
 
@@ -199,53 +203,478 @@ def _raw_blade_inspection_images(turbine_id: int) -> list[dict]:
         images.append(item)
     return images
 
+
+def _parse_extra(extra) -> dict:
+    if isinstance(extra, dict):
+        return extra
+    if isinstance(extra, str) and extra:
+        try:
+            parsed = json.loads(extra)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _parse_dt(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _confidence_interval(confidence: float) -> list[float]:
+    return [round(max(0.0, confidence - 0.06), 2), round(min(1.0, confidence + 0.04), 2)]
+
+
+def _severity_from_priority(priority: str) -> str:
+    if priority == "high":
+        return "high"
+    if priority == "low":
+        return "low"
+    return "medium"
+
+
+def _processing_status(fault: Fault, work_order: WorkOrder | None) -> str:
+    if work_order:
+        if work_order.status in {"completed", "closed"}:
+            return "closed"
+        if work_order.status == "cancelled":
+            return "failed"
+        if work_order.status in {"in_progress", "review"}:
+            return "processing"
+        if work_order.status == "assigned":
+            return "assigned"
+        return "pending"
+    if fault.status in {"closed", "resolved"}:
+        return "closed"
+    return "pending"
+
+
+def _priority_from_fault(fault: Fault, work_order: WorkOrder | None) -> str:
+    if work_order and work_order.priority:
+        return work_order.priority
+    if fault.confidence >= 0.9:
+        return "urgent"
+    if fault.confidence >= 0.8:
+        return "high"
+    if fault.confidence < 0.6:
+        return "low"
+    return "medium"
+
+
+def _fault_status_note(work_order: WorkOrder | None) -> str:
+    if not work_order:
+        return "未关联工单"
+    if work_order.status == "cancelled":
+        return "关联工单已取消"
+    if work_order.status in {"completed", "closed"}:
+        return "关联工单已完成"
+    return "已关联工单"
+
+
+def _care_fault_type(turbine: Turbine, vibration_payload: dict | None = None) -> str:
+    fault_info = (vibration_payload or {}).get("fault_info") or {}
+    source_type = str(fault_info.get("type") or "").strip().lower()
+    if source_type:
+        return source_type
+    if turbine.status in {"fault", "warning"}:
+        return "care_scada_anomaly"
+    return "no_fault_detected"
+
+
+def _spectrum_from_waveform(waveform: list[float], sample_rate_hz: int, max_bins: int = 120) -> list[float]:
+    if not waveform:
+        return []
+
+    n = len(waveform)
+    usable_bins = min(max_bins, max(1, n // 2))
+    mean_value = sum(waveform) / n
+    centered = [float(value) - mean_value for value in waveform]
+    spectrum: list[float] = []
+    for k in range(1, usable_bins + 1):
+        real = 0.0
+        imag = 0.0
+        for index, value in enumerate(centered):
+            angle = 2.0 * math.pi * k * index / n
+            real += value * math.cos(angle)
+            imag -= value * math.sin(angle)
+        spectrum.append(round((real * real + imag * imag) ** 0.5 / n, 8))
+    return spectrum
+
+
+def _load_vibration_payload(record: VibrationData) -> dict:
+    if not record.waveform_path:
+        return {}
+    path = DATA_DIR / record.waveform_path
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _public_quality_fields(quality: dict | None) -> dict | None:
+    if not quality:
+        return None
+    allowed = {
+        "source_dataset",
+        "source_file",
+        "source_channel",
+        "source_label",
+        "label_source",
+        "completeness_pct",
+    }
+    return {key: value for key, value in quality.items() if key in allowed}
+
+
+async def _select_vibration_record(
+    db: AsyncSession,
+    turbine_id: int,
+    component: str | None,
+) -> VibrationData | None:
+    q = select(VibrationData).where(VibrationData.turbine_id == turbine_id)
+    if component:
+        exact = await db.execute(q.where(VibrationData.component == component).order_by(VibrationData.timestamp.desc()))
+        record = exact.scalars().first()
+        if record:
+            return record
+    result = await db.execute(q.order_by(VibrationData.timestamp.desc()))
+    return result.scalars().first()
+
+
+async def _latest_scada_window(db: AsyncSession, turbine_id: int, limit: int = 144) -> list[SCADARecord]:
+    result = await db.execute(
+        select(SCADARecord)
+        .where(SCADARecord.turbine_id == turbine_id)
+        .order_by(SCADARecord.timestamp.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+def _scada_anomaly_summary(rows: list[SCADARecord]) -> dict:
+    if not rows:
+        return {"total": 0, "anomaly": 0, "ratio": 0.0, "latest": None}
+
+    anomaly = 0
+    for row in rows:
+        extra = _parse_extra(row.extra)
+        label = str(extra.get("event_label") or "").lower()
+        status_type_id = str(extra.get("status_type_id") or "")
+        if label == "anomaly" or status_type_id in ANOMALY_STATUS_IDS:
+            anomaly += 1
+    latest = rows[0]
+    return {
+        "total": len(rows),
+        "anomaly": anomaly,
+        "ratio": anomaly / max(len(rows), 1),
+        "latest": latest,
+    }
+
+
+async def _rms_percentile_reference(db: AsyncSession, component: str, percentile: float = 0.75) -> float | None:
+    result = await db.execute(select(VibrationData.rms).where(VibrationData.component == component))
+    values = sorted(float(value) for value in result.scalars().all() if value is not None)
+    if not values:
+        return None
+    index = min(len(values) - 1, max(0, int(round((len(values) - 1) * percentile))))
+    return values[index]
+
+
+async def _build_vibration_preview(
+    db: AsyncSession,
+    turbine_id: int,
+    component: str,
+    fault_type: str | None = None,
+) -> dict:
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
+    record = await _select_vibration_record(db, turbine_id, component)
+    if not record:
+        raise HTTPException(status_code=404, detail="No imported vibration data for this turbine")
+
+    payload = _load_vibration_payload(record)
+    waveform = [float(value) for value in payload.get("waveform", [])]
+    sample_rate_hz = int(payload.get("sample_rate_hz") or 1000)
+    spectrum = payload.get("spectrum") or _spectrum_from_waveform(waveform, sample_rate_hz)
+    timestamp = _parse_dt(payload.get("timestamp")) or record.timestamp
+    source_dataset = _resolve_vibration_source_dataset(payload, record)
+    quality = _public_quality_fields(payload.get("quality") if isinstance(payload.get("quality"), dict) else None)
+
+    return {
+        "turbine_id": turbine_id,
+        "component": record.component,
+        "timestamp": timestamp,
+        "duration_seconds": float(payload.get("duration_seconds") or (len(waveform) / max(sample_rate_hz, 1))),
+        "sample_rate_hz": sample_rate_hz,
+        "sample_count": int(payload.get("sample_count") or len(waveform)),
+        "rms": float(payload.get("rms", record.rms or 0.0)),
+        "waveform": waveform,
+        "spectrum": spectrum,
+        "peak_frequencies": payload.get("peak_frequencies", []),
+        "fault_detected": bool(payload.get("fault_detected", False)),
+        "quality": quality,
+        "source_dataset": source_dataset,
+        "data_source": payload.get("data_source", "imported_dataset"),
+        "waveform_path": record.waveform_path,
+        "peak_freq_hz": record.peak_freq_hz,
+        "algorithm_status": "imported_vibration_dataset",
+        "message": f"振动波形来自 {source_dataset or 'imported vibration dataset'}，频谱由当前波形窗口计算。",
+    }
+
+
+async def _diagnosis_steps(db: AsyncSession, fault_type: str, signals: list) -> list[TroubleshootingStep]:
+    """Get troubleshooting steps from fault knowledge base, with fallback."""
+    if fault_type == "no_fault_detected":
+        return [
+            TroubleshootingStep(order=1, title="保持监测", action="继续观察CARE SCADA与振动窗口的变化。", expected_effect="确认当前窗口是否稳定。"),
+        ]
+    # Query DB knowledge base
+    from app.services.diagnosis_orchestrator import build_troubleshooting_steps
+    return await build_troubleshooting_steps(db, fault_type, signals)
+
+
+async def _build_dataset_detection(db: AsyncSession, turbine: Turbine, component: str, window_hours: int) -> dict:
+    vibration = None
+    vibration_payload = None
+    try:
+        vibration = await _build_vibration_preview(db, turbine.id, component)
+        record = await _select_vibration_record(db, turbine.id, component)
+        vibration_payload = _load_vibration_payload(record) if record else None
+    except HTTPException:
+        vibration = None
+
+    scada_rows = await _latest_scada_window(db, turbine.id, max(1, int(window_hours * 6)))
+    scada_summary = _scada_anomaly_summary(scada_rows)
+    source_dataset = (vibration or {}).get("source_dataset") or turbine.source_dataset
+    fault_type = _care_fault_type(turbine, vibration_payload)
+    has_fault = (
+        bool((vibration or {}).get("fault_detected"))
+        or turbine.status in {"warning", "fault"}
+        or scada_summary["anomaly"] > 0
+    )
+
+    if has_fault:
+        status = "suspected_fault"
+        confidence = 0.55
+        if vibration and vibration.get("fault_detected"):
+            confidence += 0.18
+        if turbine.status == "warning":
+            confidence += 0.08
+        if turbine.status == "fault":
+            confidence += 0.16
+        confidence += min(0.12, scada_summary["ratio"] * 0.4)
+        confidence = round(min(0.94, confidence), 2)
+    else:
+        status = "no_fault_detected"
+        confidence = round(0.72 if turbine.hi_value >= 85 else 0.62, 2)
+
+    signals: list[DiagnosisSignalInsight] = []
+    if vibration:
+        rms_ref = await _rms_percentile_reference(db, vibration["component"])
+        rms_range = f"同批P75 {rms_ref:.6f}" if rms_ref is not None else "同批样本待补充"
+        signals.append(DiagnosisSignalInsight(
+            sensor_name="振动RMS",
+            value=f"{vibration['rms']:.6f}",
+            normal_range=rms_range,
+            contribution_score=0.82 if vibration.get("fault_detected") else 0.42,
+            priority="high" if vibration.get("fault_detected") else "medium",
+            finding=f"来自 {source_dataset or 'imported vibration dataset'} 的振动窗口。",
+        ))
+        peaks = vibration.get("peak_frequencies") or []
+        if peaks:
+            first_peak = peaks[0]
+            signals.append(DiagnosisSignalInsight(
+                sensor_name="主频峰值",
+                value=f"{float(first_peak.get('frequency_hz', 0.0)):.1f} Hz",
+                normal_range="按导入波形频谱计算",
+                contribution_score=0.68,
+                priority="medium",
+                finding="主频来自当前振动波形窗口的频谱结果。",
+            ))
+
+    signals.append(DiagnosisSignalInsight(
+        sensor_name="HI健康指数",
+        value=f"{float(turbine.hi_value or 0.0):.1f}",
+        normal_range=f">=80正常, 60-79预警, <60故障 (异常标记: {', '.join(sorted(ANOMALY_STATUS_IDS))})",
+        contribution_score=0.9 if turbine.status == "fault" else 0.65 if turbine.status == "warning" else 0.28,
+        priority="high" if turbine.status == "fault" else "medium" if turbine.status == "warning" else "low",
+        finding=f"HI来自CARE SCADA窗口4维罚分计算; 状态={turbine.status}",
+    ))
+    signals.append(DiagnosisSignalInsight(
+        sensor_name="SCADA异常窗口",
+        value=f"{scada_summary['anomaly']}/{scada_summary['total']} (占比{scada_summary['ratio']:.1%})",
+        normal_range=f"异常标记status_type_id∈{{{','.join(sorted(ANOMALY_STATUS_IDS))}}}时应为0",
+        contribution_score=round(min(0.9, 0.25 + scada_summary["ratio"]), 3),
+        priority="high" if scada_summary["ratio"] > 0.3 else "medium" if scada_summary["anomaly"] else "low",
+        finding=f"CARE SCADA event_label/status_type_id最近{scada_summary['total']}窗口异常统计。",
+    ))
+
+    return {
+        "turbine_id": turbine.id,
+        "component": vibration["component"] if vibration else component,
+        "analysis_window_hours": window_hours,
+        "status": status,
+        "fault_type": fault_type if has_fault else "no_fault_detected",
+        "confidence": confidence,
+        "confidence_interval": _confidence_interval(confidence),
+        "algorithm_status": "dataset_rule_vibration_scada",
+        "message": f"诊断结果基于已导入数据：{turbine.source_dataset or CARE_DATASET_ID}；{source_dataset or 'imported vibration dataset'}。",
+        "generated_at": datetime.now(timezone.utc),
+        "signals": signals,
+        "troubleshooting_steps": await _diagnosis_steps(db, fault_type if has_fault else "no_fault_detected", signals),
+    }
+
+
+async def _care_fault_response_for_turbine(db: AsyncSession, turbine: Turbine) -> FaultResponse:
+    scada_rows = await _latest_scada_window(db, turbine.id, 144)
+    latest_anomaly = next(
+        (
+            row for row in scada_rows
+            if str(_parse_extra(row.extra).get("event_label") or "").lower() == "anomaly"
+            or str(_parse_extra(row.extra).get("status_type_id") or "") in ANOMALY_STATUS_IDS
+        ),
+        scada_rows[0] if scada_rows else None,
+    )
+    detection = await _build_dataset_detection(db, turbine, "blade", 24)
+    return FaultResponse(
+        id=-int(turbine.id),
+        turbine_id=turbine.id,
+        turbine_name=turbine.name,
+        turbine_region=turbine.region or "",
+        detected_at=(latest_anomaly.timestamp if latest_anomaly else datetime.now(timezone.utc)),
+        discovered_at=(latest_anomaly.timestamp if latest_anomaly else None),
+        fault_type=detection["fault_type"],
+        confidence=detection["confidence"],
+        status="open",
+        priority="high" if turbine.status == "fault" else "medium",
+        processing_status="pending",
+        status_note=f"来自 {turbine.source_dataset or CARE_DATASET_ID} 的状态/异常窗口。",
+        details={
+            "source_dataset": turbine.source_dataset,
+            "source_asset_id": turbine.source_asset_id,
+            "turbine_status": turbine.status,
+            "hi_value": turbine.hi_value,
+        },
+    )
+
+
+async def _care_fault_detail(db: AsyncSession, fault_id: int) -> FaultDetailResponse:
+    turbine = await db.get(Turbine, abs(fault_id))
+    if not turbine or turbine.source_dataset != CARE_DATASET_ID:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    response = await _care_fault_response_for_turbine(db, turbine)
+    detection = await _build_dataset_detection(db, turbine, "blade", 24)
+    return FaultDetailResponse(
+        **response.model_dump(),
+        signals=[],
+        signal_insights=detection["signals"],
+        troubleshooting_steps=detection["troubleshooting_steps"],
+    )
+
+
+def _fault_response(
+    fault: Fault,
+    turbine_name: str,
+    turbine_region: str | None,
+    work_order: WorkOrder | None,
+) -> FaultResponse:
+    processing_status = _processing_status(fault, work_order)
+    processing_started_at = None
+    closed_at = None
+    failed_at = None
+    if work_order:
+        if work_order.status in {"assigned", "in_progress", "review", "completed", "closed"}:
+            processing_started_at = work_order.created_at
+        if work_order.status in {"completed", "closed"}:
+            closed_at = work_order.completed_at or work_order.updated_at
+        if work_order.status == "cancelled":
+            failed_at = work_order.cancelled_at or work_order.updated_at
+
+    return FaultResponse(
+        id=fault.id,
+        turbine_id=fault.turbine_id,
+        turbine_name=turbine_name,
+        turbine_region=turbine_region or "",
+        detected_at=fault.detected_at,
+        discovered_at=fault.detected_at,
+        processing_started_at=processing_started_at,
+        closed_at=closed_at,
+        failed_at=failed_at,
+        handler=work_order.assignee if work_order else None,
+        processing_status=processing_status,
+        priority=_priority_from_fault(fault, work_order),
+        work_order_id=work_order.id if work_order else None,
+        work_order_title=work_order.title if work_order else None,
+        last_action_at=work_order.updated_at if work_order else fault.detected_at,
+        maintenance_cost_estimate=work_order.cost_estimate if work_order else None,
+        maintenance_cost_actual=work_order.cost_actual if work_order else None,
+        status_note=_fault_status_note(work_order),
+        fault_type=fault.fault_type,
+        confidence=fault.confidence,
+        status=fault.status,
+        details=fault.details,
+    )
+
+
+async def _latest_workorders_by_fault(db: AsyncSession, fault_ids: list[int]) -> dict[int, WorkOrder]:
+    if not fault_ids:
+        return {}
+    result = await db.execute(
+        select(WorkOrder)
+        .where(WorkOrder.fault_id.in_(fault_ids))
+        .order_by(WorkOrder.fault_id.asc(), WorkOrder.created_at.desc())
+    )
+    mapping: dict[int, WorkOrder] = {}
+    for work_order in result.scalars().all():
+        if work_order.fault_id is not None and work_order.fault_id not in mapping:
+            mapping[work_order.fault_id] = work_order
+    return mapping
+
+
 @router.get("/faults", response_model=list[FaultResponse])
 async def list_faults(
     turbine_id: int | None = Query(None),
     status: str | None = Query(None),
-    source_dataset: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Fault, Turbine.name, Turbine.region).join(Turbine, Turbine.id == Fault.turbine_id)
-    if source_dataset:
-        q = q.where(Turbine.source_dataset == source_dataset)
+    care_q = select(Turbine).where(Turbine.source_dataset == CARE_DATASET_ID)
+    if turbine_id:
+        care_q = care_q.where(Turbine.id == turbine_id)
+    care_q = care_q.where(Turbine.status.in_(["warning", "fault"])).order_by(Turbine.status.desc(), Turbine.hi_value.asc())
+    care_result = await db.execute(care_q)
+    care_items = []
+    if not status or status == "open":
+        for turbine in care_result.scalars().all():
+            care_items.append(await _care_fault_response_for_turbine(db, turbine))
+
+    q = select(Fault, Turbine.name, Turbine.region, Turbine.source_dataset).join(Turbine, Turbine.id == Fault.turbine_id)
     if turbine_id:
         q = q.where(Fault.turbine_id == turbine_id)
     if status:
         q = q.where(Fault.status == status)
+    q = q.where(Turbine.source_dataset.is_not(None))
     q = q.order_by(Fault.detected_at.desc())
     result = await db.execute(q)
-    return [
-        FaultResponse(
-            id=fault.id,
-            turbine_id=fault.turbine_id,
-            turbine_name=turbine_name or "",
-            turbine_region=turbine_region or "",
-            detected_at=fault.detected_at,
-            discovered_at=fault.discovered_at,
-            processing_started_at=fault.processing_started_at,
-            closed_at=fault.closed_at,
-            failed_at=fault.failed_at,
-            handler=fault.handler,
-            processing_status=fault.processing_status or "pending",
-            priority=fault.priority or "medium",
-            work_order_id=fault.work_order_id,
-            work_order_title=fault.work_order_title,
-            last_action_at=fault.last_action_at,
-            maintenance_cost_estimate=fault.maintenance_cost_estimate,
-            maintenance_cost_actual=fault.maintenance_cost_actual,
-            status_note=fault.status_note or "",
-            fault_type=fault.fault_type,
-            confidence=fault.confidence,
-            status=fault.status,
-            details=fault.details,
-        )
-        for fault, turbine_name, turbine_region in result.all()
+    rows = result.all()
+    workorders = await _latest_workorders_by_fault(db, [fault.id for fault, _, _, _ in rows])
+    db_items = [
+        _fault_response(fault, turbine_name, region, workorders.get(fault.id))
+        for fault, turbine_name, region, source_dataset in rows
     ]
+    return care_items + db_items
 
 
 @router.get("/faults/{fault_id}", response_model=FaultDetailResponse)
 async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
+    if fault_id < 0:
+        return await _care_fault_detail(db, fault_id)
+
     result = await db.execute(
         select(Fault, Turbine.name, Turbine.region)
         .join(Turbine, Turbine.id == Fault.turbine_id)
@@ -262,31 +691,226 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
         select(FaultSignal).where(FaultSignal.fault_id == fault_id).order_by(FaultSignal.contribution_score.desc())
     )
     signals = sig_result.scalars().all()
+    workorders = await _latest_workorders_by_fault(db, [fault.id])
+    signal_insights = build_signal_insights(signals, fault.fault_type, fault.turbine_id)
+    troubleshooting_steps = await build_troubleshooting_steps(db, fault.fault_type, signal_insights)
 
+    base = _fault_response(fault, turbine_name, turbine_region, workorders.get(fault.id))
     return FaultDetailResponse(
-        id=fault.id,
-        turbine_id=fault.turbine_id,
-        turbine_name=turbine_name or "",
-        turbine_region=turbine_region or "",
-        detected_at=fault.detected_at,
-        discovered_at=fault.discovered_at,
-        processing_started_at=fault.processing_started_at,
-        closed_at=fault.closed_at,
-        failed_at=fault.failed_at,
-        handler=fault.handler,
-        processing_status=fault.processing_status or "pending",
-        priority=fault.priority or "medium",
-        work_order_id=fault.work_order_id,
-        work_order_title=fault.work_order_title,
-        last_action_at=fault.last_action_at,
-        maintenance_cost_estimate=fault.maintenance_cost_estimate,
-        maintenance_cost_actual=fault.maintenance_cost_actual,
-        status_note=fault.status_note or "",
-        fault_type=fault.fault_type,
-        confidence=fault.confidence,
-        status=fault.status,
-        details=fault.details,
+        **base.model_dump(),
         signals=[FaultSignalResponse.model_validate(s) for s in signals],
+        signal_insights=signal_insights,
+        troubleshooting_steps=troubleshooting_steps,
+    )
+
+
+@router.post("/faults", response_model=FaultResponse, status_code=201)
+async def create_fault(
+    turbine_id: int = Query(...),
+    fault_type: str = Query(...),
+    confidence: float = Query(0.5, ge=0, le=1),
+    priority: str = Query("medium"),
+    details: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new fault record."""
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+    now = datetime.now(timezone.utc)
+    fault = Fault(
+        turbine_id=turbine_id,
+        fault_type=fault_type,
+        confidence=confidence,
+        status="open",
+    )
+    if details:
+        fault.details = json.loads(details)
+    fault.priority = priority
+    fault.processing_status = "pending"
+    fault.discovered_at = now
+    db.add(fault)
+    await db.commit()
+    await db.refresh(fault)
+    return FaultResponse(
+        id=fault.id, turbine_id=fault.turbine_id,
+        turbine_name=turbine.name, turbine_region=turbine.region or "",
+        detected_at=fault.detected_at or now, fault_type=fault.fault_type,
+        confidence=fault.confidence or 0, status=fault.status or "open",
+        processing_status=getattr(fault, 'processing_status', None) or "pending",
+        priority=fault.priority or "medium", details=fault.details,
+    )
+
+
+@router.put("/faults/{fault_id}", response_model=FaultResponse)
+async def update_fault(
+    fault_id: int,
+    fault_type: str | None = Query(None),
+    confidence: float | None = Query(None, ge=0, le=1),
+    priority: str | None = Query(None),
+    handler: str | None = Query(None),
+    status_note: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update fault record fields."""
+    if fault_id < 0:
+        raise HTTPException(status_code=400, detail="Cannot update CARE-synthetic faults")
+    fault = await db.get(Fault, fault_id)
+    if not fault:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    if fault_type:
+        fault.fault_type = fault_type
+    if confidence is not None:
+        fault.confidence = confidence
+    if priority:
+        fault.priority = priority
+    if handler:
+        fault.handler = handler
+    if status_note:
+        fault.status_note = status_note
+    fault.last_action_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(fault)
+    return _fault_dict(fault)
+
+
+@router.delete("/faults/{fault_id}")
+async def delete_fault(fault_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a fault and its signals."""
+    if fault_id < 0:
+        raise HTTPException(status_code=400, detail="Cannot delete CARE-synthetic faults")
+    fault = await db.get(Fault, fault_id)
+    if not fault:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    signals = (await db.execute(
+        select(FaultSignal).where(FaultSignal.fault_id == fault_id)
+    )).scalars().all()
+    for s in signals:
+        await db.delete(s)
+    await db.delete(fault)
+    await db.commit()
+    return {"success": True, "message": f"Fault #{fault_id} deleted"}
+
+
+@router.patch("/faults/{fault_id}/status")
+async def update_fault_status(
+    fault_id: int,
+    processing_status: str = Query(...),
+    handler: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update fault processing_status: pending→assigned→processing→closed."""
+    valid = {"pending", "assigned", "processing", "closed", "failed"}
+    if processing_status not in valid:
+        raise HTTPException(status_code=422, detail=f"Invalid status. Must be: {valid}")
+    if fault_id < 0:
+        raise HTTPException(status_code=400, detail="Cannot update CARE-synthetic faults")
+    fault = await db.get(Fault, fault_id)
+    if not fault:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    fault.processing_status = processing_status
+    if handler:
+        fault.handler = handler
+    now = datetime.now(timezone.utc)
+    fault.last_action_at = now
+    if processing_status == "closed":
+        fault.closed_at = now
+        fault.status = "closed"
+    elif processing_status == "failed":
+        fault.failed_at = now
+    elif processing_status == "processing":
+        fault.processing_started_at = now
+    await db.commit()
+    return {"success": True, "fault_id": fault_id, "processing_status": processing_status}
+
+
+def _fault_dict(f: Fault) -> dict:
+    return FaultResponse(
+        id=f.id, turbine_id=f.turbine_id,
+        turbine_name="", turbine_region="",
+        detected_at=f.detected_at or datetime.now(timezone.utc),
+        fault_type=f.fault_type, confidence=f.confidence or 0,
+        status=f.status or "open",
+        processing_status=f.processing_status or "pending",
+        priority=f.priority or "medium", details=f.details,
+    ).model_dump()
+
+
+@router.get("/vibration-preview", response_model=VibrationPreviewResponse)
+async def get_vibration_preview(
+    turbine_id: int = Query(...),
+    component: str = Query("gearbox_high_speed"),
+    fault_type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return imported vibration data in the shape expected by the diagnosis page."""
+    return await _build_vibration_preview(db, turbine_id, component, fault_type)
+
+
+@router.post("/auto-detect", response_model=AutoFaultDetectionResponse)
+async def auto_detect_fault(
+    data: AutoFaultDetectionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    turbine = await db.get(Turbine, data.turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+    return await _build_dataset_detection(db, turbine, data.component, data.window_hours)
+
+
+@router.post("/auto-detect/batch", response_model=BatchAutoFaultDetectionResponse)
+async def batch_auto_detect_faults(
+    data: BatchAutoFaultDetectionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(Turbine).where(Turbine.source_dataset == CARE_DATASET_ID)
+    if data.turbine_ids:
+        q = q.where(Turbine.id.in_(data.turbine_ids))
+    if data.region:
+        q = q.where(Turbine.region == data.region)
+    if data.status:
+        q = q.where(Turbine.status == data.status)
+    q = q.order_by(Turbine.region.asc(), Turbine.name.asc())
+
+    result = await db.execute(q)
+    turbines = result.scalars().all()
+    generated_at = datetime.now(timezone.utc)
+    records: list[BatchAutoFaultRecord] = []
+    group_summary: dict[str, int] = {}
+
+    for turbine in turbines:
+        detection = await _build_dataset_detection(db, turbine, data.component, data.window_hours)
+        group_key = turbine.region or "未分组"
+        group_summary[group_key] = group_summary.get(group_key, 0) + 1
+        records.append(
+            BatchAutoFaultRecord(
+                record_id=f"{turbine.id}-{generated_at.strftime('%Y%m%d%H%M%S')}",
+                turbine_id=turbine.id,
+                turbine_name=turbine.name,
+                region=group_key,
+                turbine_status=turbine.status,
+                component=detection["component"],
+                analysis_window_hours=data.window_hours,
+                status=detection["status"],
+                fault_type=detection["fault_type"],
+                confidence=detection["confidence"],
+                confidence_interval=detection["confidence_interval"],
+                algorithm_status=detection["algorithm_status"],
+                message=detection["message"],
+                generated_at=detection["generated_at"],
+                group_key=group_key,
+                signals=detection["signals"],
+                troubleshooting_steps=detection["troubleshooting_steps"],
+            )
+        )
+
+    return BatchAutoFaultDetectionResponse(
+        success=bool(records),
+        total=len(records),
+        generated_at=generated_at,
+        records=records,
+        group_summary=group_summary,
+        message=f"已基于 {CARE_DATASET_ID} 与已导入振动数据完成分组诊断。" if records else "没有符合条件的风机。",
     )
 
 
@@ -350,12 +974,7 @@ async def get_vibration_data(
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
 
-    q = select(VibrationData).where(VibrationData.turbine_id == turbine_id)
-    if component:
-        q = q.where(VibrationData.component == component)
-    q = q.order_by(VibrationData.timestamp.desc())
-    result = await db.execute(q)
-    record = result.scalars().first()
+    record = await _select_vibration_record(db, turbine_id, component)
     if not record:
         raise HTTPException(status_code=404, detail="No imported vibration data for this turbine")
 
@@ -365,21 +984,29 @@ async def get_vibration_data(
         if path.exists():
             payload = json.loads(path.read_text(encoding="utf-8"))
 
+    waveform = payload.get("waveform", [])
+    spectrum = payload.get("spectrum", [])
+    sample_rate = payload.get("sample_rate_hz", 1000)
+    # Compute spectrum if not in payload
+    if waveform and not spectrum:
+        spectrum = _spectrum_from_waveform(waveform, sample_rate)
+
     return {
         "turbine_id": turbine_id,
         "component": record.component,
         "timestamp": record.timestamp.isoformat(),
         "duration_seconds": payload.get("duration_seconds"),
-        "sample_rate_hz": payload.get("sample_rate_hz"),
-        "sample_count": payload.get("sample_count"),
+        "sample_rate_hz": sample_rate,
+        "sample_count": payload.get("sample_count", len(waveform)),
         "rms": payload.get("rms", record.rms),
-        "waveform": payload.get("waveform", []),
+        "waveform": waveform,
+        "spectrum": spectrum,
         "peak_frequencies": payload.get("peak_frequencies", []),
         "fault_detected": payload.get("fault_detected", False),
         "fault_info": payload.get("fault_info"),
         "quality": {"display_mode": "wall_clock_24h_loop"} if payload else None,
         "source_dataset": _resolve_vibration_source_dataset(payload, record),
-        "data_source": payload.get("data_source", "imported_dataset"),
+        "algorithm_status": payload.get("algorithm_status", "imported_vibration_dataset"),
         "waveform_path": record.waveform_path,
         "peak_freq_hz": record.peak_freq_hz,
     }
@@ -448,64 +1075,170 @@ async def list_blade_images(
     ]
 
 
-@router.get("/vibration-preview")
-async def vibration_preview(
-    turbine_id: int = Query(...),
-    component: str = Query("gearbox_high_speed"),
-    fault_type: str | None = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    turbine = await db.get(Turbine, turbine_id)
-    if not turbine:
-        raise HTTPException(status_code=404, detail="Turbine not found")
+@router.post("/refresh-faults-from-events")
+async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
+    """Sync faults from CARE event CSV files. Replaces seed_data demo faults.
 
-    q = select(VibrationData).where(VibrationData.turbine_id == turbine_id)
-    q = q.order_by(VibrationData.timestamp.desc())
-    result = await db.execute(q)
-    record = result.scalars().first()
-    if not record:
-        raise HTTPException(status_code=404, detail="No imported vibration data for this turbine")
+    Reads 95 CARE normalized event CSVs, extracts anomaly events (status_type_id in {3,4}
+    or event_label='anomaly'), matches to turbines by source_asset_id + wind_farm,
+    and creates/updates Fault records with real dataset provenance.
+    """
+    from app.services.care_monitoring_metrics import (
+        _load_care_event_windows_from_files, ANOMALY_STATUS_IDS, CARE_REGION_LABELS,
+    )
 
-    payload = {}
-    if record.waveform_path:
-        path = DATA_DIR / record.waveform_path
-        if path.exists():
-            payload = json.loads(path.read_text(encoding="utf-8"))
+    windows = _load_care_event_windows_from_files()
+    if not windows:
+        raise HTTPException(status_code=404, detail="CARE event files not found in data/modeling/")
 
+    # Delete all existing faults (replace seed_data demo with CARE events)
+    from sqlalchemy import delete as sqldelete
+    await db.execute(sqldelete(FaultSignal))
+    await db.execute(sqldelete(Fault))
+    await db.commit()
+
+    # Map wind farm names back from Chinese labels
+    FARM_REVERSE = {v: k for k, v in CARE_REGION_LABELS.items()}
+
+    # Pre-load all CARE turbines indexed by source_asset_id
+    all_turbines = (await db.execute(
+        select(Turbine).where(Turbine.source_dataset == CARE_DATASET_ID)
+    )).scalars().all()
+    turbine_by_asset: dict[str, Turbine] = {
+        t.source_asset_id: t for t in all_turbines if t.source_asset_id
+    }
+
+    created = 0
+    for window in windows:
+        labels = str(window.get("event_label") or "").lower()
+        status_id = str(window.get("status_type_id") or "")
+        if labels != "anomaly" and status_id not in ANOMALY_STATUS_IDS:
+            continue
+
+        region_label = window.get("region")
+        wind_farm = FARM_REVERSE.get(region_label, region_label)
+        source_file = window.get("source_file", "")
+
+        # Match turbine by wind farm — find first matching source_asset_id
+        matched = None
+        for asset_id, turbine in turbine_by_asset.items():
+            if wind_farm in asset_id:
+                matched = turbine
+                break
+        if not matched:
+            continue
+
+        # Derive fault type from event component category (from CSV)
+        component = str(window.get("event_component_category") or "bearing")
+        fault_type_map = {
+            "bearing": "bearing_inner_race_wear",
+            "gearbox": "gearbox_tooth_pitting",
+            "generator": "generator_overheat",
+            "blade": "blade_leading_edge_erosion",
+            "pitch": "pitch_system_fault",
+            "main_shaft": "main_shaft_misalignment",
+            "cooling": "cooling_system_fault",
+            "electrical": "electrical_connection",
+        }
+        fault_type = fault_type_map.get(component, "bearing_inner_race_wear")
+
+        # Check for existing fault for this event
+        existing = await db.execute(
+            select(Fault).where(
+                Fault.turbine_id == matched.id,
+                Fault.fault_type == fault_type,
+                Fault.details.contains(source_file),
+            )
+        )
+        if existing.scalar_one_or_none():
+            continue
+
+        event_start = window.get("event_start") or datetime.now(timezone.utc).isoformat()
+        confidence = 0.75 if status_id == "4" else 0.62 if status_id == "3" else 0.55
+
+        fault = Fault(
+            turbine_id=matched.id,
+            detected_at=datetime.now(timezone.utc),
+            fault_type=fault_type,
+            confidence=confidence,
+            status="open",
+            details={
+                "source_dataset": CARE_DATASET_ID,
+                "source_file": source_file,
+                "wind_farm": wind_farm,
+                "event_label": window.get("event_label"),
+                "event_start": event_start,
+                "event_end": window.get("event_end"),
+                "component": component,
+                "method": "care_event_csv_sync",
+            },
+            processing_status="pending",
+            discovered_at=datetime.now(timezone.utc),
+        )
+        db.add(fault)
+        created += 1
+
+    await db.commit()
     return {
-        "turbine_id": turbine_id,
-        "component": record.component,
-        "timestamp": record.timestamp.isoformat(),
-        "duration_seconds": payload.get("duration_seconds"),
-        "sample_rate_hz": payload.get("sample_rate_hz"),
-        "sample_count": payload.get("sample_count"),
-        "rms": payload.get("rms", record.rms),
-        "waveform": payload.get("waveform", []),
-        "peak_frequencies": payload.get("peak_frequencies", []),
-        "fault_detected": payload.get("fault_detected", False),
-        "fault_info": payload.get("fault_info"),
-        "quality": {"display_mode": "wall_clock_24h_loop"} if payload else None,
-        "source_dataset": _resolve_vibration_source_dataset(payload, record),
-        "data_source": payload.get("data_source", "imported_dataset"),
-        "waveform_path": record.waveform_path,
-        "peak_freq_hz": record.peak_freq_hz,
+        "success": True,
+        "message": f"Synced {created} faults from CARE event files",
+        "total_events_checked": len(windows),
+        "faults_created": created,
     }
 
 
-@router.post("/auto-detect", response_model=AutoFaultDetectionResponse)
-async def auto_detect(
-    request: AutoFaultDetectionRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    from app.services.diagnosis_orchestrator import run_auto_fault_identification
-    return await run_auto_fault_identification(db, request)
+@router.post("/seed-knowledge")
+async def seed_knowledge_base(db: AsyncSession = Depends(get_db)):
+    """Import fault knowledge base from frontend/src/data/fault-kb.json into DB.
 
+    Reads the structured fault knowledge JSON (symptoms, root_causes, solutions,
+    spare_parts, related_faults) and inserts into fault_knowledge table.
+    Skips existing entries by fault_type.
+    """
+    import json as _json
+    kb_path = Path(__file__).resolve().parents[3] / "frontend" / "src" / "data" / "fault-kb.json"
+    if not kb_path.exists():
+        raise HTTPException(status_code=404, detail=f"Knowledge base file not found: {kb_path}")
 
-@router.post("/auto-detect/batch", response_model=BatchAutoFaultDetectionResponse)
-async def auto_detect_batch(
-    request: BatchAutoFaultDetectionRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    from app.services.diagnosis_orchestrator import run_batch_auto_fault_identification
-    return await run_batch_auto_fault_identification(db, request)
+    data = _json.loads(kb_path.read_text(encoding="utf-8"))
+    nodes = data.get("nodes", [])
+    if not nodes:
+        raise HTTPException(status_code=400, detail="No nodes found in fault-kb.json")
 
+    created = 0
+    skipped = 0
+    for node in nodes:
+        ft = node.get("fault_type", "")
+        if not ft:
+            continue
+        # Check duplicate
+        existing = (await db.execute(
+            select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == ft)
+        )).scalar_one_or_none()
+        if existing:
+            skipped += 1
+            continue
+
+        fk = FaultKnowledgeNode(
+            fault_type=ft,
+            category=node.get("category", "other"),
+            icon=node.get("icon", "⚠️"),
+            severity=node.get("severity", "medium"),
+            symptoms=node.get("symptoms", []),
+            root_causes=node.get("root_causes", []),
+            solutions=node.get("solutions", []),
+            related_faults=node.get("related_faults", []),
+            spare_parts=node.get("spare_parts", []),
+            cases=node.get("cases", []),
+            source="manual",
+            confidence=1.0,
+            verified=True,
+        )
+        db.add(fk)
+        created += 1
+
+    await db.commit()
+    return {
+        "success": True,
+        "message": f"Seeded {created} knowledge nodes, skipped {skipped} existing",
+    }
