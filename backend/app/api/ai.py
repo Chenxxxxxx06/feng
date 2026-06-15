@@ -212,7 +212,8 @@ async def test_ai_connection(data: AITestConnectionRequest):
     """Test AI connection with ad-hoc credentials (no save required)."""
     try:
         from app.services.qwen_client import get_client
-        client = get_client(data.api_key, data.base_url)
+        base_url = data.base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        client = get_client(data.api_key, base_url)
         response = client.chat.completions.create(
             model=data.model,
             messages=[{"role": "user", "content": "Respond with exactly one word: ok"}],
