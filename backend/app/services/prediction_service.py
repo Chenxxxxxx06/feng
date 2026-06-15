@@ -586,6 +586,7 @@ async def get_prediction_summary(db: AsyncSession) -> dict:
     }
 
     # MTBF — prefer CARE event-based (from monitoring-metrics), fallback to formula
+    fault_count = fault_result.scalar() or 0
     from app.services.care_monitoring_metrics import calculate_care_reliability_metrics
     try:
         care_metrics = await calculate_care_reliability_metrics(db)
@@ -593,7 +594,6 @@ async def get_prediction_summary(db: AsyncSession) -> dict:
     except Exception:
         mtbf_hours = None
     if mtbf_hours is None:
-        fault_count = fault_result.scalar() or 0
         if fault_count > 0:
             mtbf_hours = (total * 24 * 365) / fault_count
         else:
@@ -603,7 +603,6 @@ async def get_prediction_summary(db: AsyncSession) -> dict:
     mttr_result = await db.execute(
         select(func.avg(WorkOrder.downtime_hours)).where(
             WorkOrder.status.in_(["completed", "closed"]),
-            WorkOrder.downtime_hours > 0,
         )
     )
     actual_mttr = mttr_result.scalar()
