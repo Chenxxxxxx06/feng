@@ -8,7 +8,6 @@ interface User {
   role: string;
   api_key: string | null;
   api_provider: string | null;
-  api_base_url: string | null;
   model_preference: string;
 }
 

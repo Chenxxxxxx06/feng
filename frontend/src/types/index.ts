@@ -177,11 +177,6 @@ export interface VibrationPreview {
   spectrum: number[];
   peak_frequencies: { frequency_hz: number; amplitude: number }[];
   fault_detected: boolean;
-  quality?: Record<string, any> | null;
-  source_dataset?: string | null;
-  data_source?: string | null;
-  waveform_path?: string | null;
-  peak_freq_hz?: number | null;
   algorithm_status: string;
   message: string;
 }
@@ -192,7 +187,6 @@ export interface BladeDiagnosisResult {
   confidence: number;
   damage_bbox: { x: number; y: number; w: number; h: number } | null;
   image_path: string;
-  image_url?: string | null;
   algorithm_status: string;
   message: string;
   damage_regions: { label: string; bbox: { x: number; y: number; w: number; h: number }; confidence: number }[];
@@ -228,21 +222,11 @@ export interface WorkOrder {
   title: string;
   description: string | null;
   status: string;
-  priority?: string | null;
-  fault_type?: string | null;
-  due_date?: string | null;
-  assignee_id?: number | null;
   assignee: string | null;
-  assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
-  downtime_hours?: number | null;
   created_at: string;
-  updated_at?: string | null;
   completed_at: string | null;
-  cancelled_at?: string | null;
-  deleted_at?: string | null;
-  notification_sent_at?: string | null;
 }
 
 export interface AISummary {

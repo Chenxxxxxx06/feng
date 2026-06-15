@@ -21,7 +21,6 @@ class UserResponse(BaseModel):
     role: str
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    api_base_url: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -176,25 +175,7 @@ class BatchAutoFaultDetectionResponse(BaseModel):
     generated_at: datetime
     records: list[BatchAutoFaultRecord] = []
     group_summary: dict[str, int] = {}
-
-
-class FaultKnowledgeResponse(BaseModel):
-    id: int
-    fault_type: str
-    category: str
-    icon: str = "⚠️"
-    severity: str = "medium"
-    symptoms: list = []
-    root_causes: list = []
-    solutions: list = []
-    related_faults: list = []
-    spare_parts: list = []
-    cases: list = []
-    source: str = "manual"
-    confidence: float = 1.0
-    verified: bool = True
-
-    model_config = {"from_attributes": True}
+    message: str
 
 class VibrationPreviewResponse(BaseModel):
     turbine_id: int
@@ -389,8 +370,7 @@ class DataSourceTestRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    api_base_url: Optional[str] = Field(default=None, max_length=512)
-    model_preference: Optional[str] = Field(default=None, max_length=128)
+    model_preference: Optional[str] = Field(default=None, max_length=64)
 
     model_config = {"protected_namespaces": ()}
 

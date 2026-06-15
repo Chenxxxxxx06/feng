@@ -384,6 +384,13 @@ function SchedulePreviewModal({ items, conflicts, overflow, onConfirm, onCancel 
           </table>
         </div>
       </div>
+      <CopilotFAB pageContext={{
+        total_predictions: predictions.length,
+        high_risk_count: predictions.filter(p => p.remaining_life_days < 180).length,
+        critical_count: predictions.filter(p => p.remaining_life_days < 90).length,
+        high_risk_components: predictions.filter(p => p.remaining_life_days < 180).slice(0, 5).map(p => `${p.turbine_name} ${p.component}(${p.remaining_life_days.toFixed(0)}天)`),
+        cost_analysis: costResult ? { risk_level: costResult.risk_level, recommendation: costResult.recommendation } : undefined,
+      }} />
     </div>
   );
 }

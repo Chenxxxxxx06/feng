@@ -37,8 +37,8 @@ DATA_AGENT_PROMPT = """
 
 
 class DataAgent(AgentBase):
-    def __init__(self, model: str = "qwen-max", api_key: str | None = None, api_provider: str | None = None, api_base_url: str | None = None):
-        super().__init__(name="data_agent", system_prompt=DATA_AGENT_PROMPT, model=model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
+    def __init__(self, model: str = "qwen-max", api_key: str | None = None, api_provider: str | None = None):
+        super().__init__(name="data_agent", system_prompt=DATA_AGENT_PROMPT, model=model, api_key=api_key, api_provider=api_provider)
 
     async def gather_context(self, turbine_id: int | None, db: AsyncSession) -> dict:
         """Gather real-time data from DB for the agent to analyze."""

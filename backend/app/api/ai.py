@@ -40,7 +40,6 @@ async def generate_summary(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
         )
         return AISummaryResponse(**summary)
     except Exception as e:
@@ -122,7 +121,6 @@ async def analyze_fault(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
         )
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
@@ -197,7 +195,6 @@ async def copilot_endpoint(
                 page_type=page_context.get("page_type", "unknown"),
                 api_key=current_user.api_key,
                 api_provider=current_user.api_provider,
-                base_url=current_user.api_base_url,
             )
             logger.info(f"Screenshot analyzed: {screenshot_description[:100]}...")
         except Exception as e:
@@ -212,12 +209,11 @@ async def copilot_endpoint(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
         )
         # Trigger knowledge extraction in background
         from app.services.knowledge_extractor import try_extract_knowledge
         all_messages = data.messages + [{"role": "assistant", "content": reply}]
-        background_tasks.add_task(try_extract_knowledge, all_messages, current_user.api_key, current_user.api_provider, current_user.api_base_url)
+        background_tasks.add_task(try_extract_knowledge, all_messages, current_user.api_key, current_user.api_provider)
 
         return AICopilotResponse(reply=reply)
     except Exception as e:

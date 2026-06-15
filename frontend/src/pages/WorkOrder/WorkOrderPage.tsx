@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import type { WorkOrder } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
@@ -132,6 +133,7 @@ function WorkOrderStepper({ status }: { status: string }) {
 }
 
 export default function WorkOrderPage() {
+  const [searchParams] = useSearchParams();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,6 +191,15 @@ export default function WorkOrderPage() {
       { label: '紧急工单', value: orders.filter((o) => o.priority === 'urgent' && !isTerminal(o.status)).length, tone: 'text-accent-red', hint: '高风险优先' },
     ];
   }, [orders]);
+
+  // Auto-open work order from URL param (used by Agent navigation)
+  useEffect(() => {
+    const previewId = searchParams.get('preview');
+    if (previewId && orders.length > 0) {
+      const wo = orders.find(o => o.id === Number(previewId));
+      if (wo) setPreviewWO(wo);
+    }
+  }, [orders, searchParams]);
 
   const handleCreate = async () => {
     await api.post('/workorders/', {
@@ -688,8 +699,17 @@ export default function WorkOrderPage() {
           </div>
         )}
 
-        <CopilotFAB />
-      </div>
+      <CopilotFAB pageContext={{
+        total_orders: orders.length,
+        pending: orders.filter(o => o.status === 'pending').length,
+        in_progress: orders.filter(o => o.status === 'in_progress').length,
+        preview_wo_id: previewWO?.id,
+        preview_wo_title: previewWO?.title,
+        preview_turbine_id: previewWO?.turbine_id,
+        ai_analysis_fault_type: aiAnalysis?.fault_type,
+        status_filter: statusFilter || undefined,
+        available_personnel: personnel.length,
+      }} />
     </div>
   );
 }

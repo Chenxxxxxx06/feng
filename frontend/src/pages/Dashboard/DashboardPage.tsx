@@ -5,6 +5,7 @@ import api from '../../services/api';
 import TurbineMap from '../../components/Map/TurbineMap';
 import FilterPanel from '../../components/Common/FilterPanel';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import AIPanel from '../../components/AIAssistant/AIPanel';
 import type { TurbineSummary, TurbineDetail } from '../../types';
 
 const EMPTY_SUMMARY: TurbineSummary = {
@@ -240,14 +241,22 @@ export default function DashboardPage() {
 
       {/* ── Bottom Charts ── */}
       <div className="flex-shrink-0 px-6 pb-4">
-        <div className="grid grid-cols-3 gap-3" style={{ height: '180px' }}>
-          <QuickList turbines={scopedTurbines} selectedId={selectedId} onSelect={handleSelectTurbine} />
-          <HIChartPanel turbines={scopedTurbines} />
-          <HealthPiePanel healthy={stats.healthy} warning={stats.warning} faulty={stats.faulty} />
+        <div className="grid grid-cols-4 gap-3" style={{ height: '180px' }}>
+          <QuickList turbines={summary.turbines} selectedId={selectedId} onSelect={setSelectedId} />
+          <HIChartPanel turbines={summary.turbines} />
+          <HealthPiePanel healthy={healthy} warning={warning} faulty={faulty} />
+          <div className="rounded-xl border border-border-default bg-bg-card overflow-hidden">
+            <AIPanel pageType="dashboard" />
+          </div>
         </div>
       </div>
 
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        turbine_id: selectedId ?? undefined,
+        turbine_name: detail?.name,
+        total_turbines: summary.total,
+        healthy, warning, faulty,
+      }} />
     </div>
   );
 }
