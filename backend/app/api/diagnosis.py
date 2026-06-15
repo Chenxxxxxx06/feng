@@ -428,17 +428,15 @@ async def _build_vibration_preview(
     }
 
 
-def _diagnosis_steps(fault_type: str, source_dataset: str | None) -> list[TroubleshootingStep]:
+async def _diagnosis_steps(db: AsyncSession, fault_type: str, signals: list) -> list[TroubleshootingStep]:
+    """Get troubleshooting steps from fault knowledge base, with fallback."""
     if fault_type == "no_fault_detected":
         return [
-            TroubleshootingStep(order=1, title="保持监测", action="继续观察 CARE SCADA 与振动窗口的变化。", expected_effect="确认当前窗口是否稳定。"),
-            TroubleshootingStep(order=2, title="复核数据源", action=f"检查 {source_dataset or '当前数据集'} 的采样时间、通道和缺失情况。", expected_effect="排除数据质量导致的误判。"),
+            TroubleshootingStep(order=1, title="保持监测", action="继续观察CARE SCADA与振动窗口的变化。", expected_effect="确认当前窗口是否稳定。"),
         ]
-    return [
-        TroubleshootingStep(order=1, title="复核数据窗口", action="分别核对振动波形、主频、RMS 与 CARE SCADA 异常窗口的来源和采样时间。", expected_effect="确认诊断输入来自已导入数据。"),
-        TroubleshootingStep(order=2, title="现场复测", action="对同一部件重新采集振动或巡检图像，并与当前数据集样本对比。", expected_effect="判断异常是否持续存在。"),
-        TroubleshootingStep(order=3, title="生成工单", action="如果复测仍异常，再进入工单流程并记录维修开始、完成和恢复运行时间。", expected_effect="形成可追溯的维修闭环数据。"),
-    ]
+    # Query DB knowledge base
+    from app.services.diagnosis_orchestrator import build_troubleshooting_steps
+    return await build_troubleshooting_steps(db, fault_type, signals)
 
 
 async def _build_dataset_detection(db: AsyncSession, turbine: Turbine, component: str, window_hours: int) -> dict:
@@ -529,7 +527,7 @@ async def _build_dataset_detection(db: AsyncSession, turbine: Turbine, component
         "message": f"诊断结果基于已导入数据：{turbine.source_dataset or CARE_DATASET_ID}；{source_dataset or 'imported vibration dataset'}。",
         "generated_at": datetime.now(timezone.utc),
         "signals": signals,
-        "troubleshooting_steps": _diagnosis_steps(fault_type if has_fault else "no_fault_detected", source_dataset),
+        "troubleshooting_steps": await _diagnosis_steps(db, fault_type if has_fault else "no_fault_detected", signals),
     }
 
 
