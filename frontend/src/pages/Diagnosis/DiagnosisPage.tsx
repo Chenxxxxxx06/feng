@@ -250,14 +250,18 @@ function bboxToStyle(bbox: { x: number; y: number; w: number; h: number }) {
 
 function DiagnosisTopology({
   turbine,
+  turbines,
   causes,
   faults,
   onFaultSelect,
+  onTurbineChange,
 }: {
   turbine: Turbine | null;
+  turbines: Turbine[];
   causes: TopologyCauseNode[];
   faults: TopologyFaultNode[];
   onFaultSelect: (id: number) => void;
+  onTurbineChange: (id: number) => void;
 }) {
   const [hoveredFaultId, setHoveredFaultId] = useState<number | null>(null);
   const [hoveredCauseId, setHoveredCauseId] = useState<string | null>(null);
@@ -292,10 +296,25 @@ function DiagnosisTopology({
           <h3 className="text-sm font-medium">风机故障拓扑</h3>
           <p className="mt-1 text-[10px] text-text-muted">{turbine?.name || '未选择风机'} · {turbine?.region || '未分组'} · {turbineStatus}</p>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-right text-[10px]">
+        <div className="flex items-center gap-3">
+          <select
+            value={turbine?.id || ''}
+            onChange={(e) => {
+              const tid = e.target.value ? Number(e.target.value) : null;
+              if (tid && onTurbineChange) onTurbineChange(tid);
+            }}
+            className="bg-bg-secondary border border-border-default rounded px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-accent-blue min-w-[160px]"
+          >
+            <option value="">选择风机...</option>
+            {turbines?.map((t: any) => (
+              <option key={t.id} value={t.id}>{t.name} · {t.region}</option>
+            )) || null}
+          </select>
+          <div className="grid grid-cols-3 gap-2 text-right text-[10px]">
           <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">原因 {causes.length}</span>
           <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">故障 {faults.length}</span>
           <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">部件 {activeComponents.size}</span>
+        </div>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -934,9 +953,11 @@ export default function DiagnosisPage() {
       <div className="flex-1 overflow-auto p-5 space-y-4">
         <DiagnosisTopology
           turbine={selectedTurbine}
+          turbines={turbines}
           causes={topologyCauses}
           faults={topologyFaults}
           onFaultSelect={viewDetail}
+          onTurbineChange={setSelectedTurbineId}
         />
 
         <div className="grid grid-cols-[1.35fr_1fr] gap-4">

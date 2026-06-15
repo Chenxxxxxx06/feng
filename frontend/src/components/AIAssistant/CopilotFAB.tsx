@@ -231,18 +231,17 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
       let reply: string;
 
       if (mode === 'agent') {
-        // Agent 任务模式 — 规划 → 执行 → 总结
-        const { data } = await api.post('/agent/task', { messages: allMsgs, page_context: baseContext }, { timeout: 90000 });
-        reply = data.report || data.message || JSON.stringify(data);
-
-        // Execute frontend actions (e.g. navigate to another page)
-        const actions: Array<{ type: string; url: string }> = data.actions || [];
-        for (const action of actions) {
-          if (action.type === 'navigate' && action.url) {
-            // Use navigate for smooth SPA transition, close the panel
-            setTimeout(() => { setOpen(false); navigate(action.url); }, 300);
-          }
-        }
+        // Agent 任务模式 → 多Agent流水线: Orchestrator→Data+Knowledge→Synthesizer
+        const payload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
+        if (screenshot) payload.screenshot = screenshot;
+        const { data } = await api.post('/agent/diagnose', payload, { timeout: 120000 });
+        // Format multi-agent report
+        const parts: string[] = [];
+        if (data.intent) parts.push(`**意图**: ${data.intent.intent_type} (${(data.intent.confidence*100).toFixed(0)}%)`);
+        if (data.data_summary) parts.push(`**数据摘要**: ${data.data_summary}`);
+        if (data.knowledge_matches) parts.push(`**知识匹配**: ${data.knowledge_matches}`);
+        if (data.report) parts.push(data.report);
+        reply = parts.join('\n\n') || JSON.stringify(data);
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
         const payload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
