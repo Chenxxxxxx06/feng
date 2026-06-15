@@ -52,9 +52,16 @@ KNOWLEDGE_ALIASES = {
     "generator_overheat": ["发电机过热", "发电机"],
     "blade_leading_edge_erosion": ["叶片前缘腐蚀", "叶片"],
     "pitch_system_fault": ["变桨系统故障", "变桨"],
-    "main_shaft_misalignment": ["轴对中不良", "主轴不对中"],
+    "main_shaft_misalignment": ["轴对中不良", "主轴不对中", "不对中"],
     "cooling_system_fault": ["冷却系统故障", "冷却"],
     "electrical_connection": ["电气连接异常", "电气"],
+    # auto-detect fault types from CARE vibration data
+    "unbalance": ["不平衡", "转子不平衡", "轴承", "转子"],
+    "misalignment": ["不对中", "轴对中不良", "主轴不对中"],
+    "looseness": ["松动", "轴承松动", "紧固"],
+    "resonance": ["共振", "轴承", "齿轮箱"],
+    "bearing_fault": ["轴承磨损", "轴承内圈故障", "轴承"],
+    "gearbox_fault": ["齿轮箱点蚀", "齿轮箱"],
 }
 
 SIGNAL_DEFAULTS = {
