@@ -501,18 +501,18 @@ async def _build_dataset_detection(db: AsyncSession, turbine: Turbine, component
     signals.append(DiagnosisSignalInsight(
         sensor_name="HI健康指数",
         value=f"{float(turbine.hi_value or 0.0):.1f}",
-        normal_range=">=80 正常，60-79 预警，<60 故障",
+        normal_range=f">=80正常, 60-79预警, <60故障 (异常标记: {', '.join(sorted(ANOMALY_STATUS_IDS))})",
         contribution_score=0.9 if turbine.status == "fault" else 0.65 if turbine.status == "warning" else 0.28,
         priority="high" if turbine.status == "fault" else "medium" if turbine.status == "warning" else "low",
-        finding=f"来自 {turbine.source_dataset or 'turbine table'} 的风机健康状态。",
+        finding=f"HI来自CARE SCADA窗口4维罚分计算; 状态={turbine.status}",
     ))
     signals.append(DiagnosisSignalInsight(
         sensor_name="SCADA异常窗口",
-        value=f"{scada_summary['anomaly']}/{scada_summary['total']}",
-        normal_range="最近窗口内异常标记为0",
+        value=f"{scada_summary['anomaly']}/{scada_summary['total']} (占比{scada_summary['ratio']:.1%})",
+        normal_range=f"异常标记status_type_id∈{{{','.join(sorted(ANOMALY_STATUS_IDS))}}}时应为0",
         contribution_score=round(min(0.9, 0.25 + scada_summary["ratio"]), 3),
         priority="high" if scada_summary["ratio"] > 0.3 else "medium" if scada_summary["anomaly"] else "low",
-        finding="按 CARE SCADA event_label/status_type_id 统计最近窗口异常占比。",
+        finding=f"CARE SCADA event_label/status_type_id最近{scada_summary['total']}窗口异常统计。",
     ))
 
     return {
