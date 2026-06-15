@@ -433,14 +433,16 @@ def copilot_chat(
     system_prompt = _build_system_prompt(task_prompt)
 
     try:
+        eff_key = api_key or settings.DASHSCOPE_API_KEY or None
+        eff_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if eff_key else None)
         return chat(
             [
                 {"role": "system", "content": system_prompt},
                 *messages,
             ],
             model=model or QWEN_CONFIG["default_model"],
-            api_key=api_key,
-            api_provider=api_provider if not base_url else None,
+            api_key=eff_key,
+            api_provider=eff_provider if not base_url else None,
             base_url=base_url,
             temperature=0.5,
             max_tokens=1024,
