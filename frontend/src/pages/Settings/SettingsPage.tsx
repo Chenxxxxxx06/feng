@@ -118,7 +118,7 @@ const statusTone = (status: string) => {
     case 'error':
       return 'border-accent-red/40 bg-accent-red/10 text-accent-red';
     default:
-      return 'border-border-default bg-bg-secondary text-text-muted';
+      return 'border-border-default bg-navy-900 text-text-muted';
   }
 };
 
@@ -595,7 +595,7 @@ function OverviewSection({
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-sm font-medium">告警区间</h4>
@@ -615,7 +615,7 @@ function OverviewSection({
           </div>
         </div>
 
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium">最近操作</h4>
             <button onClick={() => onNavigate('logs')} className="text-xs text-accent-blue hover:underline">查看全部</button>
@@ -639,7 +639,7 @@ function OverviewTile({ label, value, hint, tone }: { label: string; value: stri
     blue: 'bg-accent-blue',
   }[tone];
   return (
-    <div className="rounded-lg border border-border-default bg-bg-secondary/70 p-4">
+    <div className="rounded-lg border border-border-default bg-navy-900/70 p-4">
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${dot}`} />
         <span className="text-xs text-text-muted">{label}</span>
@@ -680,7 +680,7 @@ function PersonalSettingsSection({
     >
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h4 className="text-sm font-medium">账号资料</h4>
@@ -731,7 +731,7 @@ function PersonalSettingsSection({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">工作台偏好</h4>
             <p className="mt-1 text-xs text-text-muted">决定进入系统后的默认视图和日常摘要节奏。</p>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -785,7 +785,7 @@ function PersonalSettingsSection({
         </div>
 
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">账号状态</h4>
             <div className="mt-4 grid gap-3">
               <InfoLine label="账号ID" value={user?.id ? String(user.id) : '-'} />
@@ -794,7 +794,7 @@ function PersonalSettingsSection({
               <InfoLine label="权限角色" value={user?.role || '-'} />
             </div>
           </div>
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">本次偏好预览</h4>
             <div className="mt-4 space-y-3 text-xs text-text-secondary">
               <p>默认进入：{landingPageLabel(form.landingPage)}</p>
@@ -866,7 +866,7 @@ function AISettingsSection({
     >
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h4 className="text-sm font-medium">连接配置</h4>
@@ -936,7 +936,7 @@ function AISettingsSection({
         </div>
 
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">AI服务检查</h4>
             <p className="mt-1 text-xs text-text-muted">
               用当前表单中的密钥和地址测试连接，无需先保存。
@@ -955,7 +955,7 @@ function AISettingsSection({
             )}
           </div>
 
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">快捷预设</h4>
             <div className="mt-4 space-y-2">
               {aiPresets.filter(p => p.name !== '自定义').map(p => (
@@ -978,7 +978,7 @@ function AISettingsSection({
 
 function ToggleRow({ title, desc, checked, onChange }: { title: string; desc: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="flex items-start justify-between gap-4 rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+    <label className="flex items-start justify-between gap-4 rounded-lg border border-border-default bg-navy-900/60 p-4">
       <span>
         <span className="block text-sm font-medium text-text-primary">{title}</span>
         <span className="mt-1 block text-xs text-text-muted">{desc}</span>
@@ -1071,7 +1071,7 @@ function AlertSection({
       }
     >
       <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h4 className="text-sm font-medium">健康指数阈值</h4>
@@ -1111,7 +1111,7 @@ function AlertSection({
           </p>
         </div>
 
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <h4 className="text-sm font-medium">通知方式</h4>
           <p className="mt-1 text-xs text-text-muted">保存后由后端记录邮件和企业微信通知开关。</p>
           <div className="mt-4 space-y-3">
@@ -1167,7 +1167,7 @@ function PipelineSection({
     >
       <div className="grid gap-3 xl:grid-cols-2">
         {pipeline?.sources.map((source) => (
-          <div key={source.type} className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div key={source.type} className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-md border border-border-default bg-bg-card text-xs font-semibold text-accent-blue">
@@ -1271,7 +1271,7 @@ function PersonnelSection({
       }
     >
       {!unlocked ? (
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <p className="text-sm font-medium">需要管理员校验</p>
           <p className="mt-1 text-xs text-text-muted">当前角色：{userRole || '-'}，请输入管理员密码后编辑人员信息。</p>
           <div className="mt-4 flex max-w-md gap-2">
@@ -1289,7 +1289,7 @@ function PersonnelSection({
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">{editingId ? '编辑人员' : '新增人员'}</h4>
             <div className="mt-4 space-y-3">
               <input placeholder="姓名" value={personForm.name} onChange={(e) => onFormChange({ ...personForm, name: e.target.value })} className="industrial-input w-full" />
@@ -1308,7 +1308,7 @@ function PersonnelSection({
             {personnelError && <p className="mt-3 text-xs text-accent-red">{personnelError}</p>}
           </div>
 
-          <div className="min-w-0 rounded-lg border border-border-default bg-bg-secondary/60">
+          <div className="min-w-0 rounded-lg border border-border-default bg-navy-900/60">
             <div className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
               <span>姓名</span>
               <span>技能</span>
@@ -1350,7 +1350,7 @@ function PersonnelSection({
 function LogsSection({ logs }: { logs: ActivityLog[] }) {
   return (
     <SectionShell title="操作日志" description="展示本次进入系统设置后的配置变更、连接测试和人员维护记录。">
-      <div className="rounded-lg border border-border-default bg-bg-secondary/60">
+      <div className="rounded-lg border border-border-default bg-navy-900/60">
         {logs.map((log) => <LogRow key={log.id} log={log} />)}
       </div>
     </SectionShell>

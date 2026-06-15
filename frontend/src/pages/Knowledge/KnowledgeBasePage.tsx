@@ -43,16 +43,16 @@ const SEVERITY_COLOR: Record<string, string> = { low: 'bg-accent-green/20 text-a
 const DIFFICULTY: Record<string, string> = { easy: '简单', medium: '中等', hard: '困难' };
 
 const CAT_COLORS: Record<string, string> = {
-  fault: '#388bfd', symptom: '#f0883e', root_cause: '#da3633', solution: '#3fb950',
-  spare_part: '#a371f7', turbine: '#58a6ff', fault_record: '#db6d28', workorder: '#f7b73c',
-  personnel: '#79c0ff', case_record: '#8b949e',
+  fault: '#3B82F6', symptom: '#F97316', root_cause: '#EF4444', solution: '#10B981',
+  spare_part: '#8B5CF6', turbine: '#3B82F6', fault_record: '#F97316', workorder: '#F59E0B',
+  personnel: '#94A3B8', case_record: '#94A3B8',
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  normal: '#3fb950', warning: '#f0883e', fault: '#da3633', maintenance: '#58a6ff',
-  open: '#da3633', diagnosing: '#f0883e', confirmed: '#db6d28', resolved: '#3fb950',
-  pending: '#f0883e', in_progress: '#388bfd', completed: '#3fb950', cancelled: '#8b949e',
-  low: '#3fb950', medium: '#f0883e', high: '#da3633', critical: '#ff4444',
+  normal: '#10B981', warning: '#F97316', fault: '#EF4444', maintenance: '#3B82F6',
+  open: '#EF4444', diagnosing: '#F97316', confirmed: '#F97316', resolved: '#10B981',
+  pending: '#F97316', in_progress: '#3B82F6', completed: '#10B981', cancelled: '#94A3B8',
+  low: '#10B981', medium: '#F97316', high: '#EF4444', critical: '#EF4444',
 };
 
 const CATEGORIES = ['全部', ...Array.from(new Set((kbData.nodes as FaultNode[]).map(n => n.category)))];
@@ -140,7 +140,7 @@ export default function KnowledgeBasePage() {
     const cats = [...new Set(data.nodes.map(n => n.category))];
 
     const nodeData = data.nodes.map(n => {
-      let color = CAT_COLORS[n.category] || '#8b949e';
+      let color = CAT_COLORS[n.category] || '#94A3B8';
       let borderColor = 'transparent';
       let borderW = 0;
       let shadow = 0;
@@ -154,7 +154,7 @@ export default function KnowledgeBasePage() {
         }
         // Fault record: red if active, grey if resolved
         if (n.category === 'fault_record') {
-          color = n.active ? '#da3633' : '#484f58';
+          color = n.active ? '#EF4444' : '#484f58';
           if (n.active) { borderColor = '#ff6b6b'; borderW = 1; }
         }
         // Work order: color by WO status
@@ -204,7 +204,7 @@ export default function KnowledgeBasePage() {
       },
       legend: [{
         data: legendCats.map(c => ({ name: c, icon: 'circle' })),
-        bottom: 0, textStyle: { color: '#8b949e', fontSize: 10 },
+        bottom: 0, textStyle: { color: '#94A3B8', fontSize: 10 },
       }],
       series: [{
         type: 'graph', layout: 'force', roam: true, draggable: true,
@@ -216,12 +216,12 @@ export default function KnowledgeBasePage() {
         data: nodeData,
         links: data.edges.map(e => ({
           source: e.source, target: e.target,
-          label: { show: true, formatter: e.label, fontSize: 9, color: '#8b949e' },
+          label: { show: true, formatter: e.label, fontSize: 9, color: '#94A3B8' },
         })),
-        categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#8b949e' } })),
+        categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#94A3B8' } })),
         lineStyle: { color: '#30363d', curveness: isTopo ? 0.05 : 0.25, opacity: 0.5 },
         label: { show: true, fontSize: isTopo ? 11 : 10, color: '#c9d1d9' },
-        emphasis: { focus: 'adjacency', lineStyle: { width: 3, color: '#58a6ff' } },
+        emphasis: { focus: 'adjacency', lineStyle: { width: 3, color: '#3B82F6' } },
       }],
     };
   }, [graphView]);
@@ -488,7 +488,7 @@ export default function KnowledgeBasePage() {
                 </div>
               </section>
             )}
-            <button onClick={() => handleAskAI(detail)} className="w-full py-3 rounded-xl text-sm font-medium transition-all" style={{ background: 'linear-gradient(135deg, rgba(56,139,253,0.15), rgba(57,210,192,0.1))' }}>🤖 AI 诊断此故障</button>
+            <button onClick={() => handleAskAI(detail)} className="w-full py-3 rounded-xl text-sm font-medium transition-all" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.20), rgba(148,163,184,0.10))' }}>🤖 AI 诊断此故障</button>
           </div>
         </div>
       )}
@@ -499,7 +499,7 @@ export default function KnowledgeBasePage() {
 
 // ─── Node Info Panel (right side of graph) ───
 function NodeInfoPanel({ node, view, onViewKnowledge, onClose }: { node: GraphNode; view: string; onViewKnowledge: (ft: string) => void; onClose: () => void }) {
-  const color = CAT_COLORS[node.category] || '#8b949e';
+  const color = CAT_COLORS[node.category] || '#94A3B8';
   return (
     <div className="w-56 flex-shrink-0 border-l border-border-subtle bg-bg-card/95 p-4 text-xs overflow-auto">
       <div className="flex items-center gap-2 mb-3">

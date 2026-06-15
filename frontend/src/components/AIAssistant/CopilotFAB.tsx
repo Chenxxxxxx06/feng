@@ -111,7 +111,7 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
         allowTaint: true,
         scale: 0.5,
         ignoreElements: (el) => el.closest('[data-copilot-ignore]') !== null,
-        backgroundColor: '#080c12',
+        backgroundColor: '#071A35',
       });
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);

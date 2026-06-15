@@ -50,11 +50,11 @@ function regionPaddingRatio(region: string): number {
 }
 
 function healthColor(hi: number): string {
-  if (hi >= 90) return '#2ee59d';
-  if (hi >= 80) return '#3fb950';
-  if (hi >= 70) return '#d29922';
-  if (hi >= 60) return '#ff9f1c';
-  return '#f85149';
+  if (hi >= 90) return '#22D3EE';
+  if (hi >= 80) return '#10B981';
+  if (hi >= 70) return '#F59E0B';
+  if (hi >= 60) return '#F97316';
+  return '#EF4444';
 }
 
 function hasValidCoordinates(turbine: Turbine): turbine is MappedTurbine {
@@ -151,7 +151,7 @@ function resolveMarkerLayout(map: L.Map, points: MappedTurbine[]): DisplayLayout
 }
 
 function markerHtml(status: string, hi: number, isSelected: boolean): string {
-  const color = status === 'fault' ? '#f85149' : healthColor(hi);
+  const color = status === 'fault' ? '#EF4444' : healthColor(hi);
   const size = isSelected ? 100 : 92;
   const imageSize = status === 'fault'
     ? (isSelected ? 68 : 62)
@@ -202,7 +202,7 @@ function createTurbineIcon(turbine: MappedTurbine, isSelected: boolean): L.DivIc
 }
 
 function createFarmIcon(label: string, count: number, faulty: number, warning: number): L.DivIcon {
-  const color = faulty > 0 ? '#f85149' : '#3fb950';
+  const color = faulty > 0 ? '#EF4444' : warning > 0 ? '#F59E0B' : '#10B981';
   const tone = faulty > 0 ? 'fault' : warning > 0 ? 'warning' : 'healthy';
   return L.divIcon({
     className: 'farm-marker',
@@ -334,7 +334,7 @@ export default function TurbineMap({ turbines, selectedId, onSelect, onFarmChang
         const label = regionLabel(region);
 
         L.rectangle(bounds, {
-          color: '#58a6ff',
+          color: '#3B82F6',
           weight: 1.5,
           opacity: 0.86,
           fill: false,
@@ -350,7 +350,7 @@ export default function TurbineMap({ turbines, selectedId, onSelect, onFarmChang
         marker.bindTooltip(
           `<div style="font-size:12px;font-family:sans-serif">
             <b>${label}</b><br/>
-            <span style="color:#8fa2bc">${items.length} \u53f0\u98ce\u673a | \u6545\u969c ${faulty} | \u9884\u8b66 ${warning}</span>
+            <span style="color:#a2b1bf">${items.length} \u53f0\u98ce\u673a | \u6545\u969c ${faulty} | \u9884\u8b66 ${warning}</span>
           </div>`,
           { direction: 'top', offset: [0, -36] },
         );
@@ -383,8 +383,8 @@ export default function TurbineMap({ turbines, selectedId, onSelect, onFarmChang
       const isSelected = t.id === selectedId;
       const tooltipHtml = `<div style="font-size:12px;font-family:sans-serif">
         <b>${t.name}</b><br/>
-        <span style="color:#8fa2bc">HI: ${t.hi_value.toFixed(0)} | ${t.model || '--'}</span><br/>
-        <span style="color:#8fa2bc">${t.region} | ${t.power_mw ?? '--'}MW</span>
+        <span style="color:#a2b1bf">HI: ${t.hi_value.toFixed(0)} | ${t.model || '--'}</span><br/>
+        <span style="color:#a2b1bf">${t.region} | ${t.power_mw ?? '--'}MW</span>
       </div>`;
 
       if (displacementPx > 8) {
@@ -394,7 +394,7 @@ export default function TurbineMap({ turbines, selectedId, onSelect, onFarmChang
             latlng,
           ],
           {
-            color: t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : '#58a6ff',
+            color: t.status === 'fault' ? '#EF4444' : t.status === 'warning' ? '#F59E0B' : '#3B82F6',
             weight: 1,
             opacity: 0.36,
             dashArray: '2 4',
