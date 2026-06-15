@@ -276,7 +276,6 @@ export default function SettingsPage() {
       hi_threshold: Number(hiThreshold),
       email_enabled: emailEnabled,
       email_address: emailEnabled ? emailAddress || null : null,
-      wechat_enabled: wechatEnabled,
     });
     setThresholdSaved(true);
     addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
@@ -1162,7 +1161,7 @@ function AlertSection({
 
         <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <h4 className="text-sm font-medium">通知方式</h4>
-          <p className="mt-1 text-xs text-text-muted">保存后由后端记录邮件和企业微信通知开关。</p>
+          <p className="mt-1 text-xs text-text-muted">配置邮件通知，用于工单派发和故障告警（需配置SMTP）。</p>
           <div className="mt-4 space-y-3">
             <label className="flex items-center justify-between rounded-md border border-border-default bg-bg-card px-3 py-2">
               <span className="text-sm">邮件通知</span>
@@ -1176,18 +1175,6 @@ function AlertSection({
                 className="industrial-input w-full"
               />
             )}
-            <label className="flex items-center justify-between rounded-md border border-border-default bg-bg-card px-3 py-2">
-              <span className="text-sm">企业微信通知</span>
-              <input type="checkbox" checked={wechatEnabled} onChange={(e) => onWechatEnabledChange(e.target.checked)} />
-            </label>
-            <div className="rounded-md border border-border-default bg-bg-card px-3 py-2">
-              <p className="text-sm">扩展触发项</p>
-              <div className="mt-2 grid gap-2 text-xs text-text-secondary">
-                <span>RUL低于90天：建议维护提醒</span>
-                <span>新故障产生：推送故障诊断摘要</span>
-                <span>工单超期：提醒责任人与管理员</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
