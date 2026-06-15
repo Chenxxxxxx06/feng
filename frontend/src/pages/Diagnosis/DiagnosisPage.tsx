@@ -554,6 +554,7 @@ export default function DiagnosisPage() {
 
   useEffect(() => {
     if (monitorMode !== 'single' || !selectedTurbineId) return;
+    setAutoResult(null);  // Clear stale data on turbine switch
     runAutoDetect();
     const timer = window.setInterval(runAutoDetect, 30000);
     return () => window.clearInterval(timer);
