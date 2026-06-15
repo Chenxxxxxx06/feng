@@ -13,7 +13,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import BladeImage, Fault, FaultSignal, SCADARecord, Turbine, VibrationData, WorkOrder
+from app.models import BladeImage, Fault, FaultKnowledgeNode, FaultSignal, SCADARecord, Turbine, VibrationData, WorkOrder
 from app.schemas import (
     FaultResponse, FaultDetailResponse, FaultSignalResponse,
     BladeDiagnosisRequest, BladeDiagnosisResponse,
@@ -706,6 +706,138 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/faults", response_model=FaultResponse, status_code=201)
+async def create_fault(
+    turbine_id: int = Query(...),
+    fault_type: str = Query(...),
+    confidence: float = Query(0.5, ge=0, le=1),
+    priority: str = Query("medium"),
+    details: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new fault record."""
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+    now = datetime.now(timezone.utc)
+    fault = Fault(
+        turbine_id=turbine_id,
+        fault_type=fault_type,
+        confidence=confidence,
+        status="open",
+    )
+    if details:
+        fault.details = json.loads(details)
+    fault.priority = priority
+    fault.processing_status = "pending"
+    fault.discovered_at = now
+    db.add(fault)
+    await db.commit()
+    await db.refresh(fault)
+    return FaultResponse(
+        id=fault.id, turbine_id=fault.turbine_id,
+        turbine_name=turbine.name, turbine_region=turbine.region or "",
+        detected_at=fault.detected_at or now, fault_type=fault.fault_type,
+        confidence=fault.confidence or 0, status=fault.status or "open",
+        processing_status=getattr(fault, 'processing_status', None) or "pending",
+        priority=fault.priority or "medium", details=fault.details,
+    )
+
+
+@router.put("/faults/{fault_id}", response_model=FaultResponse)
+async def update_fault(
+    fault_id: int,
+    fault_type: str | None = Query(None),
+    confidence: float | None = Query(None, ge=0, le=1),
+    priority: str | None = Query(None),
+    handler: str | None = Query(None),
+    status_note: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update fault record fields."""
+    if fault_id < 0:
+        raise HTTPException(status_code=400, detail="Cannot update CARE-synthetic faults")
+    fault = await db.get(Fault, fault_id)
+    if not fault:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    if fault_type:
+        fault.fault_type = fault_type
+    if confidence is not None:
+        fault.confidence = confidence
+    if priority:
+        fault.priority = priority
+    if handler:
+        fault.handler = handler
+    if status_note:
+        fault.status_note = status_note
+    fault.last_action_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(fault)
+    return _fault_dict(fault)
+
+
+@router.delete("/faults/{fault_id}")
+async def delete_fault(fault_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a fault and its signals."""
+    if fault_id < 0:
+        raise HTTPException(status_code=400, detail="Cannot delete CARE-synthetic faults")
+    fault = await db.get(Fault, fault_id)
+    if not fault:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    signals = (await db.execute(
+        select(FaultSignal).where(FaultSignal.fault_id == fault_id)
+    )).scalars().all()
+    for s in signals:
+        await db.delete(s)
+    await db.delete(fault)
+    await db.commit()
+    return {"success": True, "message": f"Fault #{fault_id} deleted"}
+
+
+@router.patch("/faults/{fault_id}/status")
+async def update_fault_status(
+    fault_id: int,
+    processing_status: str = Query(...),
+    handler: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update fault processing_status: pending→assigned→processing→closed."""
+    valid = {"pending", "assigned", "processing", "closed", "failed"}
+    if processing_status not in valid:
+        raise HTTPException(status_code=422, detail=f"Invalid status. Must be: {valid}")
+    if fault_id < 0:
+        raise HTTPException(status_code=400, detail="Cannot update CARE-synthetic faults")
+    fault = await db.get(Fault, fault_id)
+    if not fault:
+        raise HTTPException(status_code=404, detail="Fault not found")
+    fault.processing_status = processing_status
+    if handler:
+        fault.handler = handler
+    now = datetime.now(timezone.utc)
+    fault.last_action_at = now
+    if processing_status == "closed":
+        fault.closed_at = now
+        fault.status = "closed"
+    elif processing_status == "failed":
+        fault.failed_at = now
+    elif processing_status == "processing":
+        fault.processing_started_at = now
+    await db.commit()
+    return {"success": True, "fault_id": fault_id, "processing_status": processing_status}
+
+
+def _fault_dict(f: Fault) -> dict:
+    return FaultResponse(
+        id=f.id, turbine_id=f.turbine_id,
+        turbine_name="", turbine_region="",
+        detected_at=f.detected_at or datetime.now(timezone.utc),
+        fault_type=f.fault_type, confidence=f.confidence or 0,
+        status=f.status or "open",
+        processing_status=f.processing_status or "pending",
+        priority=f.priority or "medium", details=f.details,
+    ).model_dump()
+
+
 @router.get("/vibration-preview", response_model=VibrationPreviewResponse)
 async def get_vibration_preview(
     turbine_id: int = Query(...),
@@ -854,21 +986,29 @@ async def get_vibration_data(
         if path.exists():
             payload = json.loads(path.read_text(encoding="utf-8"))
 
+    waveform = payload.get("waveform", [])
+    spectrum = payload.get("spectrum", [])
+    sample_rate = payload.get("sample_rate_hz", 1000)
+    # Compute spectrum if not in payload
+    if waveform and not spectrum:
+        spectrum = _spectrum_from_waveform(waveform, sample_rate)
+
     return {
         "turbine_id": turbine_id,
         "component": record.component,
         "timestamp": record.timestamp.isoformat(),
         "duration_seconds": payload.get("duration_seconds"),
-        "sample_rate_hz": payload.get("sample_rate_hz"),
-        "sample_count": payload.get("sample_count"),
+        "sample_rate_hz": sample_rate,
+        "sample_count": payload.get("sample_count", len(waveform)),
         "rms": payload.get("rms", record.rms),
-        "waveform": payload.get("waveform", []),
+        "waveform": waveform,
+        "spectrum": spectrum,
         "peak_frequencies": payload.get("peak_frequencies", []),
         "fault_detected": payload.get("fault_detected", False),
         "fault_info": payload.get("fault_info"),
         "quality": {"display_mode": "wall_clock_24h_loop"} if payload else None,
         "source_dataset": _resolve_vibration_source_dataset(payload, record),
-        "data_source": payload.get("data_source", "imported_dataset"),
+        "algorithm_status": payload.get("algorithm_status", "imported_vibration_dataset"),
         "waveform_path": record.waveform_path,
         "peak_freq_hz": record.peak_freq_hz,
     }
@@ -1046,4 +1186,61 @@ async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
         "message": f"Synced {created} faults from CARE event files",
         "total_events_checked": len(windows),
         "faults_created": created,
+    }
+
+
+@router.post("/seed-knowledge")
+async def seed_knowledge_base(db: AsyncSession = Depends(get_db)):
+    """Import fault knowledge base from frontend/src/data/fault-kb.json into DB.
+
+    Reads the structured fault knowledge JSON (symptoms, root_causes, solutions,
+    spare_parts, related_faults) and inserts into fault_knowledge table.
+    Skips existing entries by fault_type.
+    """
+    import json as _json
+    kb_path = Path(__file__).resolve().parents[3] / "frontend" / "src" / "data" / "fault-kb.json"
+    if not kb_path.exists():
+        raise HTTPException(status_code=404, detail=f"Knowledge base file not found: {kb_path}")
+
+    data = _json.loads(kb_path.read_text(encoding="utf-8"))
+    nodes = data.get("nodes", [])
+    if not nodes:
+        raise HTTPException(status_code=400, detail="No nodes found in fault-kb.json")
+
+    created = 0
+    skipped = 0
+    for node in nodes:
+        ft = node.get("fault_type", "")
+        if not ft:
+            continue
+        # Check duplicate
+        existing = (await db.execute(
+            select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == ft)
+        )).scalar_one_or_none()
+        if existing:
+            skipped += 1
+            continue
+
+        fk = FaultKnowledgeNode(
+            fault_type=ft,
+            category=node.get("category", "other"),
+            icon=node.get("icon", "⚠️"),
+            severity=node.get("severity", "medium"),
+            symptoms=node.get("symptoms", []),
+            root_causes=node.get("root_causes", []),
+            solutions=node.get("solutions", []),
+            related_faults=node.get("related_faults", []),
+            spare_parts=node.get("spare_parts", []),
+            cases=node.get("cases", []),
+            source="manual",
+            confidence=1.0,
+            verified=True,
+        )
+        db.add(fk)
+        created += 1
+
+    await db.commit()
+    return {
+        "success": True,
+        "message": f"Seeded {created} knowledge nodes, skipped {skipped} existing",
     }
