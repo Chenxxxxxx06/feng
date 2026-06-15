@@ -159,7 +159,7 @@ async def generate_maintenance_plan(
 
         # Cost estimate
         cost_estimate = _estimate_maintenance_cost(
-            r.component, r.remaining_life_days, turbine.power_mw or 2.0
+            r.component, r.remaining_life_days, turbine.power_mw or 2.0, turbine.hi_value or 85.0
         )
 
         tasks.append({
@@ -277,8 +277,14 @@ def _estimate_maintenance_cost(
     component: str,
     rul_days: float,
     power_mw: float,
+    hi_value: float = 85.0,
 ) -> float:
-    """Estimate maintenance cost based on component, urgency, and turbine power."""
+    """Estimate maintenance cost based on component, urgency, turbine power and health.
+
+    Lower HI → higher cost (more damage to repair).
+    Larger power → higher cost (bigger components).
+    Shorter RUL → higher cost (emergency premium).
+    """
     base_costs = {
         "齿轮箱": 120_000,
         "发电机": 45_000,
@@ -287,18 +293,20 @@ def _estimate_maintenance_cost(
         "变桨系统": 18_000,
     }
     base = base_costs.get(component, 30_000)
-    # Urgency multiplier: more urgent = more expensive (emergency premium)
+    # Urgency multiplier: more urgent = more expensive
     if rul_days < 30:
         urgency_mult = 1.5
     elif rul_days < 90:
         urgency_mult = 1.2
-    elif rul_days < 180:
+    elif rul_days < 365:
         urgency_mult = 1.0
     else:
         urgency_mult = 0.85
-    # Power scaling: larger turbines cost more to fix
-    power_mult = power_mw / 2.0
-    return base * urgency_mult * power_mult
+    # Power scaling: per-MW cost (baseline 2MW turbine)
+    power_mult = max(0.5, power_mw / 1.5) if power_mw > 0 else 1.0
+    # HI scaling: worse health → higher repair cost
+    hi_mult = max(0.7, 100.0 / max(hi_value, 40.0))
+    return round(base * urgency_mult * power_mult * hi_mult, 2)
 
 
 # ── LLM-friendly summary builder ──
