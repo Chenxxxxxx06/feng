@@ -16,6 +16,7 @@ import type {
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
 const COMPONENT_OPTIONS = [
+  { value: 'blade', label: '叶片' },
   { value: 'gearbox_high_speed', label: '齿轮箱高速轴' },
   { value: 'gearbox_intermediate', label: '齿轮箱中间轴' },
   { value: 'generator_bearing_de', label: '发电机驱动端轴承' },
@@ -486,7 +487,7 @@ export default function DiagnosisPage() {
   const [turbines, setTurbines] = useState<Turbine[]>([]);
   const [selectedTurbineId, setSelectedTurbineId] = useState<number | null>(null);
   const [monitorMode, setMonitorMode] = useState<MonitorMode>('single');
-  const [component, setComponent] = useState('gearbox_high_speed');
+  const [component, setComponent] = useState('blade');
   const [windowHours, setWindowHours] = useState(24);
   const [autoResult, setAutoResult] = useState<AutoFaultDetectionResult | null>(null);
   const [batchResult, setBatchResult] = useState<BatchAutoFaultDetectionResult | null>(null);
@@ -1283,16 +1284,16 @@ export default function DiagnosisPage() {
               <h3 className="text-sm font-medium">振动波形展示</h3>
               <div className="text-xs text-text-muted">
                 RMS <span className="font-mono text-accent-cyan">{vibration?.rms ?? '--'}</span>
-                <span className="ml-3">{vibration?.algorithm_status || 'imported_dataset'}</span>
+                <span className="ml-3">{vibration?.algorithm_status || (vibration ? '已加载' : '无数据')}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-bg-secondary rounded border border-border-default p-2">
-                <p className="text-[10px] text-text-muted mb-1">近24小时波形占位</p>
+                <p className="text-[10px] text-text-muted mb-1">{vibration ? `波形 (${(vibration.duration_seconds || 0).toFixed(2)}s)` : '波形无数据'}</p>
                 <div ref={waveformRef} className="h-52" />
               </div>
               <div className="bg-bg-secondary rounded border border-border-default p-2">
-                <p className="text-[10px] text-text-muted mb-1">频谱分析入口占位</p>
+                <p className="text-[10px] text-text-muted mb-1">{vibration?.spectrum?.length ? `频谱 (${vibration.spectrum.length}点)` : '频谱无数据'}</p>
                 <div ref={spectrumRef} className="h-52" />
               </div>
             </div>
