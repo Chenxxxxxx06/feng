@@ -1,8 +1,14 @@
+import json
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
+from app.config import get_settings
+
+settings = get_settings()
 from app.models import RULPrediction, Turbine, User
 from app.schemas import RULResponse, RULListResponse, CostComparisonRequest, CostComparisonResponse
 from app.api.auth import get_current_user
@@ -172,6 +178,7 @@ async def schedule_maintenance(
     max_days: int = Query(90, description="Max days to schedule ahead"),
     top_n: int = Query(30, description="Number of most urgent items to schedule"),
     create_work_orders: bool = Query(False, description="Create WorkOrder records for high/urgent items"),
+    ai_optimize: bool = Query(False, description="Use AI to review and suggest schedule improvements"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -232,6 +239,49 @@ async def schedule_maintenance(
             wos_created += 1
         await db.commit()
 
+    # ── AI schedule review ──
+    ai_analysis = None
+    if ai_optimize:
+        try:
+            from app.services.qwen_client import chat
+            schedule_json = json.dumps({
+                "scheduled": [{k: v for k, v in t.items() if k in (
+                    "turbine_name", "component", "scheduled_date", "priority",
+                    "rul_days", "urgency_score", "downtime_hours"
+                )} for t in ok[:15]],
+                "overflow": [{k: v for k, v in t.items() if k in (
+                    "turbine_name", "component", "rul_days", "priority"
+                )} for t in overflow[:5]],
+                "conflicts": conflicts[:5],
+                "weather_safe_days": sum(1 for w in weather_windows if w.get("safe", False)),
+            }, ensure_ascii=False, default=str)
+            weather_windows = await get_weather_for_dates(
+                [start + timedelta(days=i) for i in range(min(16, max_days))],
+                lat=37.3, lng=107.6,
+            )
+            prompt = f"""你是风电运维排程专家。以下是贪心算法生成的排程结果，请分析并给出优化建议。
+
+当前排程:
+{schedule_json}
+
+请输出JSON格式:
+{{
+  "issues": ["发现的问题"],
+  "suggestions": ["优化建议"],
+  "risk_items": ["需关注的高风险项"]
+}}"""
+            eff_key = user.api_key or settings.DASHSCOPE_API_KEY or None
+            ai_resp = chat([
+                {"role": "system", "content": "你是风电运维排程专家。只输出JSON，不要其他文字。"},
+                {"role": "user", "content": prompt},
+            ], model=user.model_preference or "qwen-turbo",
+               api_key=eff_key,
+               api_provider=user.api_provider if user.api_key else ("通义千问 DashScope" if eff_key else None),
+               temperature=0.3, max_tokens=512)
+            ai_analysis = json.loads(ai_resp.strip().removeprefix("```json").removesuffix("```").strip())
+        except Exception:
+            ai_analysis = {"issues": [], "suggestions": ["AI分析暂不可用，请检查API密钥配置"], "risk_items": []}
+
     return {
         "scheduled": ok,
         "overflow": overflow,
@@ -243,6 +293,7 @@ async def schedule_maintenance(
         "total_overflow": len(overflow),
         "conflict_count": len(conflicts),
         "work_orders_created": wos_created,
+        "ai_analysis": ai_analysis,
     }
 
 
