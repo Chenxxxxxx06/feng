@@ -151,154 +151,121 @@ async def refresh_rul_predictions(
     }
 
 
-# ── Industry-standard degradation thresholds (ISO 13381-1:2015) ──
-HI_FAILURE_THRESHOLD = 55.0   # HI below this → functional failure expected
-HI_HEALTHY = 90.0             # HI above this → negligible degradation
-MIN_DEGRADATION_RATE = 0.0001 # Minimum rate (per day) to avoid divide-by-zero
-DEFAULT_DEGRADATION_DAYS = 365 * 5  # 5-year assumption when no trend is detectable
+# ── Linear degradation model (ISO 13381-1:2015) ──
+HI_FAILURE_THRESHOLD = 55.0   # HI below → functional failure
+HI_WARNING = 70.0             # HI below → accelerated degradation
+HI_HEALTHY = 90.0             # HI above → negligible degradation
+MIN_DEGRADATION_RATE = 0.015  # 0.015/day ≈ 5.5 HI/year (minimum detectable)
+DEFAULT_DEGRADATION_RATE = 0.05  # 0.05/day ≈ 18 HI/year (typical warning)
+FAST_DEGRADATION_RATE = 0.15     # 0.15/day ≈ 55 HI/year (fault mode)
 
 
-async def _fit_turbine_degradation(
+async def _estimate_linear_degradation(
     turbine: Turbine,
     db: AsyncSession,
 ) -> dict:
-    """Fit exponential degradation model from turbine SCADA history.
+    """Estimate linear degradation rate from SCADA start/end HI delta.
 
-    Returns {"lambda": rate_per_day, "r_squared": fit_quality, "data_points": N}
-    or None if insufficient data.
+    RUL = (HI_current - HI_failure) / degradation_rate
+
+    Uses 10 evenly-spaced windows over turbine SCADA history, estimates HI at
+    each window, then fits a simple linear trend. Falls back to status-based
+    conservative rate when data is sparse or trend is not evident.
     """
-    # Get SCADA records ordered by time, sample ~1 point per day
-    rows_result = await db.execute(
+    # Get SCADA boundaries
+    t_result = await db.execute(
         select(SCADARecord.timestamp)
         .where(SCADARecord.turbine_id == turbine.id)
         .order_by(SCADARecord.timestamp.asc())
     )
-    all_timestamps = [row[0] for row in rows_result.fetchall()]
+    timestamps = [r[0] for r in t_result.fetchall()]
+    if len(timestamps) < 50:
+        return None
 
-    if len(all_timestamps) < 100:
-        return None  # insufficient data
-
-    # Compute effective observation span
-    t0 = all_timestamps[0]
-    t1 = all_timestamps[-1]
+    t0 = timestamps[0]
+    t1 = timestamps[-1]
     if t0.tzinfo is None:
         t0 = t0.replace(tzinfo=timezone.utc)
     if t1.tzinfo is None:
         t1 = t1.replace(tzinfo=timezone.utc)
-    total_days = max(1.0, (t1 - t0).total_seconds() / 86400)
+    span_days = max(30.0, (t1 - t0).total_seconds() / 86400)
 
-    if total_days < 30:
-        return None  # too short to fit
+    # 10 evenly-spaced windows
+    window_span = span_days / 10
+    hi_estimates: list[tuple[float, float]] = []  # (day, hi)
 
-    # Sample evenly across the observation window (up to 100 windows)
-    num_windows = min(100, len(all_timestamps) // 10)
-    window_days = total_days / num_windows
-    time_points: list[float] = []
-    hi_values: list[float] = []
-
-    for i in range(num_windows):
-        window_center = t0.timestamp() + (i + 0.5) * window_days * 86400
-        t_center = datetime.fromtimestamp(window_center, tz=timezone.utc)
-        # Get SCADA around this window center
-        half = timedelta(seconds=window_days * 43200)
-        window_rows = await db.execute(
+    for w in range(10):
+        w_center = t0 + timedelta(seconds=(w + 0.5) * window_span * 86400)
+        half = timedelta(seconds=window_span * 43200)
+        recs = await db.execute(
             select(SCADARecord)
             .where(
                 SCADARecord.turbine_id == turbine.id,
-                SCADARecord.timestamp >= t_center - half,
-                SCADARecord.timestamp <= t_center + half,
+                SCADARecord.timestamp >= w_center - half,
+                SCADARecord.timestamp <= w_center + half,
             )
-            .limit(50)
+            .limit(30)
         )
-        records = window_rows.scalars().all()
-        if len(records) < 5:
+        rows = recs.scalars().all()
+        if len(rows) < 3:
             continue
-        # Estimate HI for this window using the same logic as care_monitoring_metrics
-        hi = _estimate_hi_from_records(records)
-        time_points.append((t_center - t0).total_seconds() / 86400)
-        hi_values.append(hi)
+        # Simple HI proxy: how often power < 10% at wind >= 6 m/s
+        bad, total = 0.0, 0.0
+        for r in rows:
+            w_speed = r.wind_speed_ms or 0
+            pwr = abs(r.power_kw or 0)
+            if w_speed >= 6:
+                total += 1
+                if pwr < 0.10:
+                    bad += 1
+        perf_ratio = bad / total if total > 0 else 0
+        hi = 100.0 - perf_ratio * 60.0
+        day = (w + 0.5) * window_span
+        hi_estimates.append((day, max(40.0, hi)))
 
-    if len(time_points) < 5:
+    if len(hi_estimates) < 3:
         return None
 
-    # Fit exponential model: HI(t) = HI_0 * exp(-lambda * t)
-    # Linearize: ln(HI) = ln(HI_0) - lambda * t
-    t_arr = np.array(time_points)
-    hi_arr = np.array(hi_values)
-    log_hi = np.log(np.maximum(hi_arr, 0.1))
+    # Linear fit: HI = intercept + slope * day
+    days_arr = np.array([e[0] for e in hi_estimates])
+    hi_arr = np.array([e[1] for e in hi_estimates])
+    slope = np.polyfit(days_arr, hi_arr, 1)[0]  # negative = degrading
 
-    # Linear regression: log_hi = a + b * t,  where lambda = -b
-    A = np.vstack([np.ones_like(t_arr), t_arr]).T
-    coeffs, residuals, rank, singular = np.linalg.lstsq(A, log_hi, rcond=None)
-    intercept, slope = coeffs[0], coeffs[1]
-
-    # Degradation rate (per day)
+    # Degradation rate (HI points per day, always positive for degrading)
     degradation_rate = max(MIN_DEGRADATION_RATE, -slope)
+    # If slope is near zero (stable), use conservative rate based on status
+    if -slope < MIN_DEGRADATION_RATE:
+        if turbine.status == "fault":
+            degradation_rate = FAST_DEGRADATION_RATE
+        elif turbine.status == "warning":
+            degradation_rate = DEFAULT_DEGRADATION_RATE
+        else:
+            degradation_rate = MIN_DEGRADATION_RATE
 
-    # R-squared
-    ss_res = np.sum(residuals) if len(residuals) > 0 else 0.0
-    ss_tot = np.sum((log_hi - np.mean(log_hi)) ** 2)
-    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    # Estimate initial HI from fit
+    hi_start = float(np.polyval([slope, hi_arr[0] - slope * days_arr[0]], 0))
 
     return {
-        "lambda": degradation_rate,
-        "r_squared": r_squared,
-        "data_points": len(time_points),
-        "observation_days": total_days,
+        "degradation_rate": degradation_rate,
+        "hi_start": hi_start,
+        "hi_end": float(hi_arr[-1]),
+        "span_days": span_days,
+        "data_points": len(hi_estimates),
     }
 
 
-def _estimate_hi_from_records(records: list[SCADARecord]) -> float:
-    """Quick HI estimate from a window of SCADA records.
-
-    Uses the same scoring logic as care_monitoring_metrics for consistency.
-    """
-    if not records:
-        return 85.0
-    perf_penalty = 0.0
-    thermal_penalty = 0.0
-    for r in records:
-        wind = r.wind_speed_ms or 0.0
-        power = abs(r.power_kw or 0.0)
-        gen_temp = r.gen_temperature_c
-        gearbox_temp = r.gearbox_temperature_c
-
-        if wind >= 10 and power < 0.35:
-            perf_penalty += 2.2
-        elif wind >= 8 and power < 0.25:
-            perf_penalty += 1.4
-        elif wind >= 6 and power < 0.10:
-            perf_penalty += 0.8
-
-        if gen_temp is not None and gen_temp > 95:
-            thermal_penalty += 1.4
-        elif gen_temp is not None and gen_temp > 90:
-            thermal_penalty += 0.8
-        if gearbox_temp is not None and gearbox_temp > 88:
-            thermal_penalty += 1.4
-        elif gearbox_temp is not None and gearbox_temp > 82:
-            thermal_penalty += 0.8
-
-    total = max(len(records), 1)
-    perf_score = max(40.0, 100.0 - (perf_penalty / (total * 2.2)) * 60.0)
-    thermal_score = max(45.0, 100.0 - (thermal_penalty / (total * 2.8)) * 55.0)
-    return perf_score * 0.6 + thermal_score * 0.4
-
-
-def _project_rul_exponential(
+def _project_rul_linear(
     current_hi: float,
     degradation_rate: float,
     failure_threshold: float = HI_FAILURE_THRESHOLD,
 ) -> float:
-    """Project RUL using exponential degradation model: HI(t) = HI_0 * exp(-λt).
+    """Project RUL using linear degradation: RUL = (HI - threshold) / rate.
 
-    RUL = ln(failure_threshold / current_hi) / (-λ)
+    Guarantees: higher HI → longer RUL; lower HI → shorter RUL.
     """
     if current_hi <= failure_threshold:
-        return max(1.0, current_hi * 0.5)
-    if degradation_rate <= MIN_DEGRADATION_RATE:
-        return DEFAULT_DEGRADATION_DAYS
-    return math.log(failure_threshold / current_hi) / (-degradation_rate)
+        return max(1.0, (current_hi / failure_threshold) * 30.0)
+    return (current_hi - failure_threshold) / degradation_rate
 
 
 async def _predict_turbine_components(
@@ -306,14 +273,15 @@ async def _predict_turbine_components(
     now: datetime,
     db: AsyncSession,
 ) -> list[RULPrediction]:
-    """Generate RUL predictions using data-driven exponential degradation model.
+    """Generate RUL predictions using linear degradation model.
 
-    Fits HI(t) = HI_0 * exp(-λt) from SCADA history, then projects:
-        RUL = ln(HI_failure / HI_current) / λ
+    RUL = (HI_current - HI_failure) / degradation_rate
 
-    Falls back to industry-standard Weibull-like estimates when SCADA is sparse.
+    Degradation rate estimated from SCADA trend, or status-based fallback.
+    Component offsets adjust effective HI per component physics.
     """
     hi = turbine.hi_value or 85.0
+    status = turbine.status or "normal"
 
     # Days since last maintenance
     maint_days = 180.0
@@ -323,37 +291,40 @@ async def _predict_turbine_components(
             lm = lm.replace(tzinfo=timezone.utc)
         maint_days = max(1.0, (now - lm).days)
 
-    # ── Fit degradation model from SCADA history ──
-    degradation = await _fit_turbine_degradation(turbine, db)
-    if degradation and degradation["r_squared"] > 0.3:
-        # Data-driven: use fitted degradation rate with confidence
-        fitted_lambda = degradation["lambda"]
-        fit_quality = degradation["r_squared"]
-        data_weight = min(1.0, degradation["data_points"] / 30.0)
+    # Estimate degradation rate from SCADA history
+    deg = await _estimate_linear_degradation(turbine, db)
+    if deg:
+        base_rate = deg["degradation_rate"]
+        data_quality = min(1.0, deg["data_points"] / 7.0)
     else:
-        # Sparse data: use conservative rate from HI
-        fitted_lambda = max(
-            MIN_DEGRADATION_RATE,
-            (100.0 - max(hi, 50.0)) / (DEFAULT_DEGRADATION_DAYS * 0.3),
-        )
-        fit_quality = 0.0
-        data_weight = 0.0
+        # No SCADA trend → use status-based conservative rate
+        if status == "fault":
+            base_rate = FAST_DEGRADATION_RATE
+        elif status == "warning":
+            base_rate = DEFAULT_DEGRADATION_RATE
+        else:
+            base_rate = MIN_DEGRADATION_RATE
+        data_quality = 0.0
 
     predictions: list[RULPrediction] = []
     for component_name, (comp_key, weight) in COMPONENT_WEIGHTS.items():
-        # Component offset from overall HI
+        # Component offset: bearings/gearbox degrade faster
         comp_offset = _component_offset(comp_key, maint_days, hi)
-        effective_hi = max(15.0, min(99.0, hi + comp_offset))
+        effective_hi = max(20.0, min(99.0, hi + comp_offset))
 
-        # Per-component degradation rate (adjusted by weight)
-        comp_lambda = fitted_lambda * (0.7 + weight * 2.0)
+        # Per-component degradation rate (gearbox faster, blade slower)
+        rate_modifiers = {
+            "gearbox": 1.5, "main_bearing": 1.3, "generator": 1.0,
+            "blade": 0.5, "pitch": 0.7,
+        }
+        comp_rate = base_rate * rate_modifiers.get(comp_key, 1.0)
 
-        # Project RUL using exponential model
-        remaining = _project_rul_exponential(effective_hi, comp_lambda)
+        # Project RUL using linear model
+        remaining = _project_rul_linear(effective_hi, comp_rate)
 
-        # Confidence interval: wider when fit is poor or HI is low
-        spread_pct = 0.08 + (1.0 - data_weight) * 0.25 + (100.0 - effective_hi) / 200.0
-        spread = max(3.0, remaining * spread_pct)
+        # Confidence: wider when data is sparse or HI is low
+        spread_pct = 0.10 + (1.0 - data_quality) * 0.15 + (100.0 - effective_hi) / 300.0
+        spread = max(5.0, remaining * spread_pct)
         lower = round(max(1.0, remaining - spread), 1)
         upper = round(remaining + spread, 1)
 
