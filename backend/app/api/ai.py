@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import Turbine, SCADARecord, Fault, User
+from app.models import Turbine, SCADARecord, Fault, FaultKnowledgeNode, User
 from app.schemas import (
     AISummaryRequest, AISummaryResponse,
     AIFaultAnalysisRequest, AIFaultAnalysisResponse,
@@ -183,10 +183,14 @@ async def copilot_endpoint(
             logger.warning(f"Screenshot analysis failed, proceeding text-only: {e}")
 
     try:
+        knowledge_results = data.knowledge_results
+        if knowledge_results is None:
+            knowledge_results = await _load_copilot_knowledge_results(data.messages, db)
+
         reply = copilot_chat(
             messages=data.messages,
             page_context=page_context,
-            knowledge_results=data.knowledge_results,
+            knowledge_results=knowledge_results,
             screenshot_description=screenshot_description,
             model=current_user.model_preference,
             api_key=current_user.api_key,
@@ -204,6 +208,40 @@ async def copilot_endpoint(
         return AICopilotResponse(
             reply="抱歉, AI服务暂时不可用。请稍后重试。"
         )
+
+
+async def _load_copilot_knowledge_results(messages: list[dict], db: AsyncSession) -> list[str]:
+    """Load concise knowledge snippets from the backend knowledge base for Copilot."""
+    latest_user_text = ""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            latest_user_text = str(message.get("content", ""))
+            break
+
+    result = await db.execute(select(FaultKnowledgeNode))
+    nodes = result.scalars().all()
+    if not nodes:
+        return []
+
+    def node_text(node: FaultKnowledgeNode) -> str:
+        symptoms = "、".join(
+            f"{s.get('indicator', '')}{s.get('threshold', '')}"
+            for s in (node.symptoms or [])[:3]
+        )
+        causes = "、".join((node.root_causes or [])[:3])
+        solutions = "、".join(s.get("action", "") for s in (node.solutions or [])[:3])
+        return (
+            f"[{node.category}] {node.fault_type}，严重度: {node.severity}。"
+            f"症状: {symptoms or '暂无'}。根因: {causes or '暂无'}。方案: {solutions or '暂无'}。"
+        )
+
+    matched = [
+        node for node in nodes
+        if node.fault_type in latest_user_text
+        or any(s.get("indicator", "") and s.get("indicator", "") in latest_user_text for s in (node.symptoms or []))
+    ]
+    selected = matched[:5] if matched else nodes[:5]
+    return [node_text(node) for node in selected]
 
 
 @router.post("/test-connection")

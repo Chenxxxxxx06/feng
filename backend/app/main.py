@@ -4,6 +4,7 @@ Provides REST API for wind turbine health management.
 """
 
 import logging
+import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import uvicorn
 
-from app.config import get_settings
+from app.config import get_settings, get_project_root
 
 # Configure logging
 logging.basicConfig(
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         await ensure_runtime_schema(conn)
     logger.info("Database tables created/verified")
+    await seed_knowledge_base_if_empty()
     yield
     # Shutdown
     logger.info("Shutting down PHM system...")
@@ -79,6 +81,40 @@ async def _ensure_sqlite_column(conn, table_name: str, column_name: str, definit
         logger.info("Added %s.%s column", table_name, column_name)
 
 
+async def seed_knowledge_base_if_empty():
+    """Initialize the backend knowledge base from the bundled preset when empty."""
+    from sqlalchemy import func, select
+    from app.database import async_session
+    from app.models import FaultKnowledgeNode
+
+    kb_path = get_project_root() / "frontend" / "src" / "data" / "fault-kb.json"
+    if not kb_path.exists():
+        logger.warning("Knowledge preset not found: %s", kb_path)
+        return
+
+    async with async_session() as db:
+        result = await db.execute(select(func.count(FaultKnowledgeNode.id)))
+        if (result.scalar() or 0) > 0:
+            return
+
+        data = json.loads(kb_path.read_text(encoding="utf-8"))
+        for node_data in data.get("nodes", []):
+            db.add(FaultKnowledgeNode(
+                fault_type=node_data["fault_type"],
+                category=node_data["category"],
+                icon=node_data.get("icon", "⚠️"),
+                severity=node_data.get("severity", "medium"),
+                symptoms=node_data.get("symptoms", []),
+                root_causes=node_data.get("root_causes", []),
+                solutions=node_data.get("solutions", []),
+                related_faults=node_data.get("related_faults", []),
+                spare_parts=node_data.get("spare_parts", []),
+                cases=node_data.get("cases", []),
+            ))
+        await db.commit()
+        logger.info("Knowledge base initialized from preset: %d nodes", len(data.get("nodes", [])))
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     version="2.0.0",
@@ -98,7 +134,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["X-Total-Count"],
 )

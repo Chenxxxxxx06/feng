@@ -1,18 +1,20 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import * as echarts from 'echarts';
-import kbData from '../../data/fault-kb.json';
 import api from '../../services/api';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
 // ─── Types ───
 interface FaultNode {
-  id: string; fault_type: string; category: string; icon: string; severity: string;
+  id: number | string; fault_type: string; category: string; icon: string; severity: string;
   symptoms: { indicator: string; threshold: string; unit: string }[];
   root_causes: string[];
   solutions: { action: string; difficulty: string; downtime_hours: number }[];
   related_faults: { id: string; name: string; probability: number }[];
   spare_parts: { name: string; quantity: number; est_cost: number }[];
   cases: { turbine: string; date: string; summary: string; resolution: string; total_cost: number; downtime_days: number }[];
+  source?: string;
+  confidence?: number;
+  verified?: boolean;
 }
 
 interface GraphNode {
@@ -32,7 +34,7 @@ interface GraphNode {
 }
 
 interface GraphData {
-  stats?: { active_faults: number; warning_turbines: number; pending_workorders: number; personnel_count: number; total_turbines: number; total_knowledge_nodes: number };
+  stats?: { active_faults: number; warning_turbines: number; pending_workorders: number; personnel_count: number; total_turbines: number; total_knowledge_nodes: number; regions?: string[] };
   nodes: GraphNode[]; edges: { source: string; target: string; label: string }[];
   fault_type?: string;
 }
@@ -55,8 +57,6 @@ const STATUS_COLOR: Record<string, string> = {
   low: '#3fb950', medium: '#f0883e', high: '#da3633', critical: '#ff4444',
 };
 
-const CATEGORIES = ['全部', ...Array.from(new Set((kbData.nodes as FaultNode[]).map(n => n.category)))];
-
 // ─── Component ───
 export default function KnowledgeBasePage() {
   // Encyclopedia state
@@ -65,6 +65,9 @@ export default function KnowledgeBasePage() {
   const [severityFilter, setSeverityFilter] = useState('');
   const [detail, setDetail] = useState<FaultNode | null>(null);
   const [copilotMsg, setCopilotMsg] = useState('');
+  const [nodes, setNodes] = useState<FaultNode[]>([]);
+  const [kbLoading, setKbLoading] = useState(true);
+  const [kbError, setKbError] = useState(false);
 
   // Graph state
   const [graphView, setGraphView] = useState<'topology' | 'knowledge'>('topology');
@@ -81,7 +84,34 @@ export default function KnowledgeBasePage() {
 
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInst = useRef<echarts.ECharts | null>(null);
-  const nodes = kbData.nodes as FaultNode[];
+
+  // ─── Fetch encyclopedia from backend knowledge base ───
+  const fetchKnowledgeBase = useCallback(async () => {
+    setKbLoading(true);
+    setKbError(false);
+    try {
+      const { data } = await api.get<{ nodes: FaultNode[] }>('/knowledge-base');
+      const nextNodes = data.nodes || [];
+      setNodes(nextNodes);
+      setDetail(current => {
+        if (!current) return current;
+        return nextNodes.find(n => String(n.id) === String(current.id)) || null;
+      });
+    } catch {
+      setKbError(true);
+    } finally {
+      setKbLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchKnowledgeBase();
+  }, [fetchKnowledgeBase]);
+
+  const categories = useMemo(
+    () => ['全部', ...Array.from(new Set(nodes.map(n => n.category)))],
+    [nodes],
+  );
 
   // ─── Encyclopedia filter ───
   const filtered = useMemo(() => {
@@ -97,13 +127,13 @@ export default function KnowledgeBasePage() {
       }
       return true;
     });
-  }, [search, category, severityFilter]);
+  }, [nodes, search, category, severityFilter]);
 
   const stats = useMemo(() => ({
     total: nodes.length,
     categories: new Set(nodes.map(n => n.category)).size,
     high: nodes.filter(n => n.severity === 'high' || n.severity === 'critical').length,
-  }), []);
+  }), [nodes]);
 
   // ─── Fetch graph ───
   const fetchGraph = useCallback(async () => {
@@ -257,6 +287,20 @@ export default function KnowledgeBasePage() {
     setCopilotMsg(`请分析故障: ${node.fault_type}。症状: ${node.symptoms.map(s => s.indicator).join('、')}。严重度: ${SEVERITY[node.severity]}。请给出诊断建议。`);
   };
 
+  const handleVerifyNode = async (node: FaultNode) => {
+    await api.patch(`/knowledge-base/${node.id}/verify`);
+    setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? { ...n, verified: true, confidence: 1.0 } : n));
+    setDetail({ ...node, verified: true, confidence: 1.0 });
+    fetchGraph();
+  };
+
+  const handleDeleteNode = async (node: FaultNode) => {
+    await api.delete(`/knowledge-base/${node.id}`);
+    setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
+    setDetail(null);
+    fetchGraph();
+  };
+
   const switchToKnowledge = (faultType: string) => {
     setSelectedFaultType(faultType);
     setGraphView('knowledge');
@@ -290,7 +334,7 @@ export default function KnowledgeBasePage() {
           <div className="flex gap-2 mb-3">
             <input className="flex-1 bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm placeholder-text-muted focus:outline-none focus:border-accent-blue" placeholder="搜索故障名称、症状、根因..." value={search} onChange={e => setSearch(e.target.value)} />
             <select className="bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm" value={category} onChange={e => setCategory(e.target.value)}>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c === '全部' ? '全部分类' : c}</option>)}
+              {categories.map(c => <option key={c} value={c}>{c === '全部' ? '全部分类' : c}</option>)}
             </select>
             <select className="bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
               <option value="">全部严重度</option>
@@ -298,7 +342,14 @@ export default function KnowledgeBasePage() {
             </select>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
-            {filtered.map(node => (
+            {kbLoading ? (
+              <div className="text-xs text-text-muted px-2 py-6">正在加载后端知识库...</div>
+            ) : kbError ? (
+              <div className="flex items-center gap-3 text-xs text-text-muted px-2 py-6">
+                <span>知识库加载失败</span>
+                <button onClick={fetchKnowledgeBase} className="text-accent-blue hover:underline">重试</button>
+              </div>
+            ) : filtered.length > 0 ? filtered.map(node => (
               <button
                 key={node.id}
                 className="flex-shrink-0 w-[180px] bg-bg-card border border-border-subtle rounded-xl p-3 text-left hover:border-accent-blue/50 hover:shadow-lg transition-all group cursor-pointer"
@@ -313,7 +364,9 @@ export default function KnowledgeBasePage() {
                 </div>
                 <p className="text-[10px] text-text-muted">{node.category} · {node.solutions.length}方案 · {node.cases.length}案例</p>
               </button>
-            ))}
+            )) : (
+              <div className="text-xs text-text-muted px-2 py-6">暂无符合条件的知识节点</div>
+            )}
           </div>
         </div>
 
@@ -420,8 +473,8 @@ export default function KnowledgeBasePage() {
               <div className="bg-accent-yellow/10 border border-accent-yellow/30 rounded-lg p-3 flex items-center justify-between">
                 <span className="text-xs text-accent-yellow">🤖 AI提取 · 置信度{Math.round(((detail as any).confidence || 0) * 100)}% · 待验证</span>
                 <div className="flex gap-2">
-                  <button onClick={async () => { await api.patch(`/knowledge-base/${(detail as any).id}/verify`); setDetail({...detail, verified: true, confidence: 1.0} as any); }} className="text-[10px] px-2 py-1 bg-accent-green/20 text-accent-green rounded">确认</button>
-                  <button onClick={async () => { await api.delete(`/knowledge-base/${(detail as any).id}`); setDetail(null); }} className="text-[10px] px-2 py-1 bg-accent-red/20 text-accent-red rounded">删除</button>
+                  <button onClick={() => handleVerifyNode(detail)} className="text-[10px] px-2 py-1 bg-accent-green/20 text-accent-green rounded">确认</button>
+                  <button onClick={() => handleDeleteNode(detail)} className="text-[10px] px-2 py-1 bg-accent-red/20 text-accent-red rounded">删除</button>
                 </div>
               </div>
             )}
@@ -459,7 +512,7 @@ export default function KnowledgeBasePage() {
                 <div className="space-y-1.5">
                   {detail.related_faults.map((rf, i) => (
                     <div key={i} className="flex justify-between text-sm bg-bg-deep rounded-lg px-3 py-2">
-                      <button className="text-accent-blue hover:underline text-left" onClick={() => { const n = nodes.find(x => x.id === rf.id); if (n) setDetail(n); }}>{rf.name}</button>
+                      <button className="text-accent-blue hover:underline text-left" onClick={() => { const n = nodes.find(x => String(x.id) === String(rf.id) || x.fault_type === rf.name); if (n) setDetail(n); }}>{rf.name}</button>
                       <span className="text-text-muted text-xs">{Math.round(rf.probability * 100)}% 伴生</span>
                     </div>
                   ))}
