@@ -288,7 +288,11 @@ def summarize_page(
     Returns:
         {"conclusions": [...], "suggestions": [...]}
     """
-    model_status = describe_model(model, api_key, api_provider, base_url)
+    # Use system-level API key + provider as fallback
+    effective_key = api_key or settings.DASHSCOPE_API_KEY or None
+    effective_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if effective_key else None)
+
+    model_status = describe_model(model, effective_key, effective_provider, base_url)
 
     system_prompt = _build_system_prompt(
         "根据当前页面数据, 生成简洁的分析报告。\n\n"
@@ -305,14 +309,15 @@ def summarize_page(
 
 请分析页面数据, 输出3条关键结论和2条建议。"""
 
-    # Use system-level API key as fallback when user hasn't configured one
+    # Use system-level API key + provider as fallback when user hasn't configured
     effective_key = api_key or settings.DASHSCOPE_API_KEY or None
+    effective_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if effective_key else None)
 
     try:
         result = chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
+        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=effective_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
 
         # Try to parse JSON from response
         result = result.strip()
