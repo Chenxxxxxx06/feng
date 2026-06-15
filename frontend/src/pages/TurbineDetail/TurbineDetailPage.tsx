@@ -338,7 +338,17 @@ export default function TurbineDetailPage() {
         </div>
       </div>
 
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        turbine_id: id ? Number(id) : undefined,
+        turbine_name: turbine?.name,
+        turbine_status: turbine?.status,
+        hi_value: turbine?.hi_value,
+        power_mw: turbine?.power_mw,
+        fault_count: faults.length,
+        recent_faults: faults.slice(0, 5).map(f => f.fault_type),
+        has_vibration: !!vibration?.rms,
+        has_blade_images: bladeImages.length > 0,
+      }} />
     </div>
   );
 }

@@ -332,7 +332,12 @@ export default function KnowledgeBasePage() {
           </div>
         </div>
       )}
-      <CopilotFAB initialMessage={copilotMsg} />
+      <CopilotFAB initialMessage={copilotMsg} pageContext={{
+        selected_node_id: detail?.id,
+        selected_fault_type: detail?.fault_type,
+        selected_category: detail?.category,
+        kb_total_nodes: nodes.length,
+      }} />
     </div>
   );
 }

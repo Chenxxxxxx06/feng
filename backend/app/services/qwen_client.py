@@ -107,8 +107,9 @@ def describe_model(model: Optional[str], api_key: Optional[str], api_provider: O
         mode = "local_fallback"
         billing = "no_remote_charge"
     elif not key_bound:
-        mode = "key_unbound"
-        billing = "no_remote_charge"
+        # User has key but no provider set — trust the model's default provider
+        mode = "remote"
+        billing = "provider_billed"
     elif not provider_matches:
         mode = "provider_mismatch"
         billing = "no_remote_charge"

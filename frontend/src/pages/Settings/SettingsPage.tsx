@@ -561,7 +561,9 @@ export default function SettingsPage() {
           </main>
         </div>
       </div>
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        active_section: activeSection,
+      }} />
     </div>
   );
 }
