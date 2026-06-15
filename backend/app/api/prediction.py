@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import RULPrediction, Turbine
+from app.models import RULPrediction, Turbine, User
 from app.schemas import RULResponse, RULListResponse, CostComparisonRequest, CostComparisonResponse
 from app.api.auth import get_current_user
 from app.services.prediction_service import (
@@ -171,7 +171,9 @@ async def schedule_maintenance(
     start_date: str | None = Query(None, description="Start date YYYY-MM-DD, defaults to today"),
     max_days: int = Query(90, description="Max days to schedule ahead"),
     top_n: int = Query(30, description="Number of most urgent items to schedule"),
+    create_work_orders: bool = Query(False, description="Create WorkOrder records for high/urgent items"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Auto-schedule maintenance tasks from the current plan.
 
@@ -179,12 +181,13 @@ async def schedule_maintenance(
     - Hard crew-hour capacity per day (24h = 3 crews × 8h)
     - Items that can't fit in their RUL window are returned as overflow
     - Returns scheduled plan + conflict report
+    - When create_work_orders=True, creates WorkOrder records for urgent+high priority items
     """
     from datetime import date as date_type
 
     plan = await generate_maintenance_plan(db=db)
     if not plan:
-        return {"scheduled": [], "conflicts": [], "overflow": [], "message": "无维修计划"}
+        return {"scheduled": [], "conflicts": [], "overflow": [], "message": "无维修计划", "work_orders_created": 0}
 
     start = date_type.today()
     if start_date:
@@ -198,6 +201,37 @@ async def schedule_maintenance(
     overflow = [t for t in scheduled if t.get("overflow")]
     ok = [t for t in scheduled if not t.get("overflow")]
 
+    # ── Create WorkOrder records for scheduled high/urgent items ──
+    wos_created = 0
+    if create_work_orders:
+        from app.models import WorkOrder as WorkOrderModel
+        for item in ok:
+            if item.get("priority") not in ("urgent", "high"):
+                continue
+            # Check if work order already exists for this turbine+component
+            existing = (await db.execute(
+                select(WorkOrderModel).where(
+                    WorkOrderModel.turbine_id == item["turbine_id"],
+                    WorkOrderModel.fault_type == item.get("fault_type", ""),
+                    WorkOrderModel.status.in_(["pending", "assigned", "in_progress"]),
+                )
+            )).scalars().first()
+            if existing:
+                continue
+            wo = WorkOrderModel(
+                turbine_id=item["turbine_id"],
+                title=f'{item.get("turbine_name","")} {item.get("component","")}{item.get("action","检修")}',
+                description=f'自动排程生成: RUL={item.get("rul_days",0):.0f}d, 紧急度={item.get("urgency_score",0)}',
+                priority=item.get("priority", "medium"),
+                fault_type=item.get("fault_type", ""),
+                status="pending",
+                cost_estimate=item.get("cost_estimate", 0),
+                due_date=date_type.fromisoformat(item["scheduled_date"]) if item.get("scheduled_date") else None,
+            )
+            db.add(wo)
+            wos_created += 1
+        await db.commit()
+
     return {
         "scheduled": ok,
         "overflow": overflow,
@@ -208,6 +242,7 @@ async def schedule_maintenance(
         "total_scheduled": len(ok),
         "total_overflow": len(overflow),
         "conflict_count": len(conflicts),
+        "work_orders_created": wos_created,
     }
 
 
