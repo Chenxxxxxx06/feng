@@ -115,7 +115,6 @@ const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'alerts', label: '告警规则', desc: 'HI阈值和通知方式' },
   { key: 'pipeline', label: '数据源管理', desc: 'SCADA/振动/图像/气象' },
   { key: 'personnel', label: '人员管理', desc: '维护人员和负载' },
-  { key: 'logs', label: '操作日志', desc: '本次配置变更记录' },
 ];
 
 const sourceIcons: Record<string, string> = {
@@ -569,7 +568,6 @@ export default function SettingsPage() {
                 onRemove={removePerson}
               />
             )}
-            {activeSection === 'logs' && <LogsSection logs={logs} />}
           </main>
         </div>
       </div>
@@ -1362,16 +1360,6 @@ function PersonnelSection({
           </div>
         </div>
       )}
-    </SectionShell>
-  );
-}
-
-function LogsSection({ logs }: { logs: ActivityLog[] }) {
-  return (
-    <SectionShell title="操作日志" description="展示本次进入系统设置后的配置变更、连接测试和人员维护记录。">
-      <div className="rounded-lg border border-border-default bg-navy-900/60">
-        {logs.map((log) => <LogRow key={log.id} log={log} />)}
-      </div>
     </SectionShell>
   );
 }
