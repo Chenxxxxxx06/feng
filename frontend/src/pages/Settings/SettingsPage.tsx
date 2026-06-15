@@ -174,6 +174,7 @@ export default function SettingsPage() {
   const [emailAddress, setEmailAddress] = useState('');
   const [wechatEnabled, setWechatEnabled] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [model, setModel] = useState(user?.model_preference || 'gpt-4');
   const [personalForm, setPersonalForm] = useState<PersonalForm>({
     displayName: user?.username || '',
@@ -206,18 +207,18 @@ export default function SettingsPage() {
   const [personForm, setPersonForm] = useState({ name: '', skills: '', region: '陕北', email: '' });
   const [aiTestStatus, setAiTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [aiTestMessage, setAiTestMessage] = useState('');
-  const [logs, setLogs] = useState<ActivityLog[]>([
-    {
-      id: 1,
-      time: new Date().toLocaleString('zh-CN'),
-      action: '打开系统设置',
-      result: '加载当前配置',
-      level: 'info',
-    },
-  ]);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+
+  const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
+    setLogs((prev) => [
+      { id: Date.now(), time: new Date().toLocaleString('zh-CN'), action, result, level },
+      ...prev,
+    ].slice(0, 20));
+  };
 
   useEffect(() => {
     if (!user) fetchMe();
+    addLog('打开系统设置', '开始加载配置...', 'info');
     loadThresholds();
     refreshPipeline();
     refreshPersonnel();
@@ -226,6 +227,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (user?.model_preference) setModel(normalizeModelPreference(user.model_preference));
+    if (user?.api_base_url) setApiBaseUrl(user.api_base_url);
     if (user) {
       setPersonalForm((prev) => ({
         ...prev,
@@ -235,13 +237,6 @@ export default function SettingsPage() {
     }
     if (user?.role === 'admin') setUnlocked(true);
   }, [user]);
-
-  const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
-    setLogs((prev) => [
-      { id: Date.now(), time: new Date().toLocaleString('zh-CN'), action, result, level },
-      ...prev,
-    ].slice(0, 12));
-  };
 
   const loadThresholds = async () => {
     const { data } = await api.get<ThresholdConfig[]>('/settings/thresholds');
@@ -319,13 +314,14 @@ export default function SettingsPage() {
 
   const saveProfile = async () => {
     const option = getModelOption(model);
-    const payload: { api_key?: string; api_provider?: string; model_preference: string } = {
+    const payload: Record<string, string> = {
       model_preference: model,
     };
     if (apiKey.trim()) {
       payload.api_key = apiKey.trim();
-      payload.api_provider = option?.provider;
+      if (option?.provider) payload.api_provider = option.provider;
     }
+    if (apiBaseUrl.trim()) payload.api_base_url = apiBaseUrl.trim();
 
     try {
       setProfileError('');
@@ -518,12 +514,14 @@ export default function SettingsPage() {
               <AISettingsSection
                 user={user}
                 apiKey={apiKey}
+                apiBaseUrl={apiBaseUrl}
                 model={model}
                 profileSaved={profileSaved}
                 profileError={profileError}
                 aiTestStatus={aiTestStatus}
                 aiTestMessage={aiTestMessage}
                 onApiKeyChange={setApiKey}
+                onApiBaseUrlChange={setApiBaseUrl}
                 onModelChange={setModel}
                 onSave={saveProfile}
                 onTestAi={testAiConnection}
@@ -857,24 +855,28 @@ function PersonalSettingsSection({
 function AISettingsSection({
   user,
   apiKey,
+  apiBaseUrl,
   model,
   profileSaved,
   profileError,
   aiTestStatus,
   aiTestMessage,
   onApiKeyChange,
+  onApiBaseUrlChange,
   onModelChange,
   onSave,
   onTestAi,
 }: {
   user: CurrentUser | null;
   apiKey: string;
+  apiBaseUrl: string;
   model: string;
   profileSaved: boolean;
   profileError: string;
   aiTestStatus: 'idle' | 'testing' | 'success' | 'error';
   aiTestMessage: string;
   onApiKeyChange: (value: string) => void;
+  onApiBaseUrlChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onSave: () => void;
   onTestAi: () => void;
@@ -994,6 +996,18 @@ function AISettingsSection({
                 </select>
               </label>
             </div>
+            <div className="mt-4">
+              <label className="block">
+                <span className="text-xs text-text-muted">自定义API地址 (可选，自建代理或Ollama时填写)</span>
+                <input
+                  type="text"
+                  placeholder={user?.api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1'}
+                  value={apiBaseUrl}
+                  onChange={(e) => onApiBaseUrlChange(e.target.value)}
+                  className="industrial-input mt-1 w-full text-xs"
+                />
+              </label>
+            </div>
             <div className="mt-4 grid gap-3 lg:grid-cols-3">
               <InfoLine label="当前账号" value={user?.username || '-'} />
               <InfoLine label="实际模型ID" value={currentModel?.value || model} />
@@ -1019,15 +1033,6 @@ function AISettingsSection({
             )}
           </div>
 
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
-            <h4 className="text-sm font-medium">已接入供应商</h4>
-            <p className="mt-1 text-xs text-text-muted">下列模型值会直接传给对应供应商，页面显示名与后端实际调用模型保持一致。</p>
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {providerRows.map((provider) => (
-                <ProviderRow key={provider.name} {...provider} />
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="space-y-5">
