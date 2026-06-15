@@ -15,9 +15,11 @@ interface FaultNode {
   source?: string;
   confidence?: number;
   verified?: boolean;
+  review_state?: 'pending' | 'approved';
 }
 
 type KnowledgeFormMode = 'create' | 'edit';
+type ReviewFilter = 'all' | 'pending' | 'approved';
 
 interface GraphNode {
   id: string; name: string; category: string; symbol: string; symbolSize: number;
@@ -92,6 +94,7 @@ export default function KnowledgeBasePage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('全部');
   const [severityFilter, setSeverityFilter] = useState('');
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
   const [detail, setDetail] = useState<FaultNode | null>(null);
   const [copilotMsg, setCopilotMsg] = useState('');
   const [nodes, setNodes] = useState<FaultNode[]>([]);
@@ -153,6 +156,8 @@ export default function KnowledgeBasePage() {
     return nodes.filter(n => {
       if (category !== '全部' && n.category !== category) return false;
       if (severityFilter && n.severity !== severityFilter) return false;
+      if (reviewFilter === 'pending' && !(n.source === 'ai_extracted' && !n.verified)) return false;
+      if (reviewFilter === 'approved' && n.source === 'ai_extracted' && !n.verified) return false;
       if (q) {
         return n.fault_type.toLowerCase().includes(q)
           || n.symptoms.some(s => s.indicator.toLowerCase().includes(q))
@@ -161,12 +166,13 @@ export default function KnowledgeBasePage() {
       }
       return true;
     });
-  }, [nodes, search, category, severityFilter]);
+  }, [nodes, search, category, severityFilter, reviewFilter]);
 
   const stats = useMemo(() => ({
     total: nodes.length,
     categories: new Set(nodes.map(n => n.category)).size,
     high: nodes.filter(n => n.severity === 'high' || n.severity === 'critical').length,
+    pendingReview: nodes.filter(n => n.source === 'ai_extracted' && !n.verified).length,
   }), [nodes]);
 
   // ─── Fetch graph ───
@@ -323,12 +329,21 @@ export default function KnowledgeBasePage() {
 
   const handleVerifyNode = async (node: FaultNode) => {
     await api.patch(`/knowledge-base/${node.id}/verify`);
-    setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? { ...n, verified: true, confidence: 1.0 } : n));
-    setDetail({ ...node, verified: true, confidence: 1.0 });
+    setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? { ...n, verified: true, confidence: 1.0, review_state: 'approved' } : n));
+    setDetail({ ...node, verified: true, confidence: 1.0, review_state: 'approved' });
+    fetchGraph();
+  };
+
+  const handleRejectNode = async (node: FaultNode) => {
+    await api.patch(`/knowledge-base/${node.id}/reject`);
+    setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
+    setDetail(null);
     fetchGraph();
   };
 
   const handleDeleteNode = async (node: FaultNode) => {
+    const ok = window.confirm(`确认删除知识节点「${node.fault_type}」？删除后将不会出现在故障百科、知识图谱和 Copilot 知识参考中。`);
+    if (!ok) return;
     await api.delete(`/knowledge-base/${node.id}`);
     setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
     setDetail(null);
@@ -446,6 +461,11 @@ export default function KnowledgeBasePage() {
               <option value="">全部严重度</option>
               <option value="critical">紧急</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option>
             </select>
+            <select className="bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm" value={reviewFilter} onChange={e => setReviewFilter(e.target.value as ReviewFilter)}>
+              <option value="all">全部审核状态</option>
+              <option value="pending">待审核</option>
+              <option value="approved">已通过</option>
+            </select>
             <button onClick={openCreateForm} className="bg-accent-blue/20 border border-accent-blue/40 text-accent-blue rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-accent-blue/30">
               新增知识
             </button>
@@ -466,7 +486,12 @@ export default function KnowledgeBasePage() {
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xl">{node.icon}</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${SEVERITY_COLOR[node.severity]}`}>{SEVERITY[node.severity]}</span>
+                  <div className="flex items-center gap-1">
+                    {node.source === 'ai_extracted' && !node.verified && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-accent-yellow/15 text-accent-yellow">待审核</span>
+                    )}
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${SEVERITY_COLOR[node.severity]}`}>{SEVERITY[node.severity]}</span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <h3 className="font-semibold text-xs group-hover:text-accent-blue">{node.fault_type}</h3>
@@ -575,6 +600,9 @@ export default function KnowledgeBasePage() {
             <div className="flex items-center gap-2">
               <button onClick={() => switchToKnowledge(detail.fault_type)} className="text-[10px] px-2 py-1 rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20">🧠 知识网络</button>
               <button onClick={() => openEditForm(detail)} className="text-[10px] px-2 py-1 rounded bg-bg-deep border border-border-subtle text-text-secondary hover:text-text-primary hover:border-accent-blue/50">编辑</button>
+              {!(detail.source === 'ai_extracted' && !detail.verified) && (
+                <button onClick={() => handleDeleteNode(detail)} className="text-[10px] px-2 py-1 rounded bg-accent-red/10 border border-accent-red/25 text-accent-red hover:bg-accent-red/20">删除</button>
+              )}
               <button onClick={() => setDetail(null)} className="text-text-muted hover:text-text-primary text-xl leading-none">&times;</button>
             </div>
           </div>
@@ -584,7 +612,7 @@ export default function KnowledgeBasePage() {
                 <span className="text-xs text-accent-yellow">🤖 AI提取 · 置信度{Math.round(((detail as any).confidence || 0) * 100)}% · 待验证</span>
                 <div className="flex gap-2">
                   <button onClick={() => handleVerifyNode(detail)} className="text-[10px] px-2 py-1 bg-accent-green/20 text-accent-green rounded">确认</button>
-                  <button onClick={() => handleDeleteNode(detail)} className="text-[10px] px-2 py-1 bg-accent-red/20 text-accent-red rounded">删除</button>
+                  <button onClick={() => handleRejectNode(detail)} className="text-[10px] px-2 py-1 bg-accent-red/20 text-accent-red rounded">驳回</button>
                 </div>
               </div>
             )}

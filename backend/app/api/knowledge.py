@@ -32,6 +32,22 @@ class KnowledgeNodeCreate(BaseModel):
     extracted_from: Optional[str] = None
 
 
+def _review_state(node: FaultKnowledgeNode) -> str:
+    if getattr(node, "source", "manual") == "ai_extracted" and not getattr(node, "verified", True):
+        return "pending"
+    return "approved"
+
+
+def _apply_review_filter(stmt, review_state: Optional[str]):
+    if review_state == "pending":
+        return stmt.where(FaultKnowledgeNode.source == "ai_extracted", FaultKnowledgeNode.verified.is_(False))
+    if review_state == "approved":
+        return stmt.where(FaultKnowledgeNode.verified.is_(True))
+    if review_state == "ai":
+        return stmt.where(FaultKnowledgeNode.source == "ai_extracted")
+    return stmt
+
+
 class KnowledgeNodeUpdate(BaseModel):
     fault_type: Optional[str] = Field(default=None, min_length=1, max_length=128)
     category: Optional[str] = Field(default=None, min_length=1, max_length=64)
@@ -63,6 +79,7 @@ def _node_to_dict(n: FaultKnowledgeNode) -> dict:
         "source": getattr(n, "source", "manual"),
         "confidence": getattr(n, "confidence", 1.0),
         "verified": getattr(n, "verified", True),
+        "review_state": _review_state(n),
     }
 
 
@@ -74,6 +91,7 @@ def _node_to_dict(n: FaultKnowledgeNode) -> dict:
 async def list_all(
     category: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
+    review_state: Optional[str] = Query(None, description="all | pending | approved | ai"),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(FaultKnowledgeNode)
@@ -81,6 +99,7 @@ async def list_all(
         stmt = stmt.where(FaultKnowledgeNode.category == category)
     if severity:
         stmt = stmt.where(FaultKnowledgeNode.severity == severity)
+    stmt = _apply_review_filter(stmt, review_state)
     result = await db.execute(stmt)
     return {"nodes": [_node_to_dict(n) for n in result.scalars().all()]}
 
@@ -141,6 +160,16 @@ async def verify_node(node_id: int, db: AsyncSession = Depends(get_db)):
     return {"status": "verified"}
 
 
+@router.patch("/knowledge-base/{node_id}/reject")
+async def reject_node(node_id: int, db: AsyncSession = Depends(get_db)):
+    node = await db.get(FaultKnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "Knowledge node not found")
+    await db.delete(node)
+    await db.commit()
+    return {"status": "rejected"}
+
+
 @router.patch("/knowledge-base/{node_id}")
 async def update_knowledge_node(
     node_id: int,
@@ -189,6 +218,7 @@ async def delete_knowledge_node(node_id: int, db: AsyncSession = Depends(get_db)
 
 @router.get("/knowledge-graph")
 async def get_knowledge_graph(
+    include_unverified: bool = Query(False, description="Include pending AI-extracted knowledge"),
     view: str = Query("topology", description="topology | knowledge"),
     fault_type: Optional[str] = Query(None, description="知识视图: 聚焦故障类型"),
     region: Optional[str] = Query(None, description="拓扑视图: 区域筛选"),
@@ -225,6 +255,9 @@ async def get_knowledge_graph(
     # ─── Load data ───
     result = await db.execute(select(FaultKnowledgeNode))
     all_knowledge = result.scalars().all()
+    all_knowledge_all_states = all_knowledge
+    if not include_unverified:
+        all_knowledge = [n for n in all_knowledge if getattr(n, "verified", True)]
 
     result = await db.execute(select(Turbine))
     all_turbines = result.scalars().all()
@@ -255,6 +288,10 @@ async def get_knowledge_graph(
         "personnel_count": len(set(w.assignee for w in all_workorders if w.assignee)),
         "total_turbines": len(all_turbines),
         "total_knowledge_nodes": len(all_knowledge),
+        "pending_knowledge_nodes": sum(
+            1 for n in all_knowledge_all_states
+            if getattr(n, "source", "manual") == "ai_extracted" and not getattr(n, "verified", True)
+        ),
         "regions": sorted(set(getattr(t, 'region', '') for t in all_turbines if getattr(t, 'region', ''))),
     }
 
@@ -408,9 +445,19 @@ async def get_knowledge_graph(
 # ═══════════════════════════════════════════════════
 
 @router.get("/knowledge-graph/stats")
-async def get_graph_stats(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(func.count(FaultKnowledgeNode.id)))
+async def get_graph_stats(include_unverified: bool = Query(False), db: AsyncSession = Depends(get_db)):
+    knowledge_stmt = select(func.count(FaultKnowledgeNode.id))
+    if not include_unverified:
+        knowledge_stmt = knowledge_stmt.where(FaultKnowledgeNode.verified.is_(True))
+    result = await db.execute(knowledge_stmt)
     knowledge_count = result.scalar() or 0
+    result = await db.execute(
+        select(func.count(FaultKnowledgeNode.id)).where(
+            FaultKnowledgeNode.source == "ai_extracted",
+            FaultKnowledgeNode.verified.is_(False),
+        )
+    )
+    pending_knowledge_count = result.scalar() or 0
     result = await db.execute(select(func.count(Turbine.id)))
     turbine_count = result.scalar() or 0
     result = await db.execute(select(func.count(Fault.id)))
@@ -430,6 +477,7 @@ async def get_graph_stats(db: AsyncSession = Depends(get_db)):
 
     return {
         "knowledge_nodes": knowledge_count, "turbines": turbine_count,
+        "pending_knowledge_nodes": pending_knowledge_count,
         "total_faults": fault_count, "active_faults": active_fault_count,
         "total_workorders": wo_count, "pending_workorders": pending_wo_count,
         "warning_turbines": warning_count, "regions": regions, "personnel": personnel,
