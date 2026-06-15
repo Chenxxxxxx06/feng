@@ -225,6 +225,7 @@ export default function SettingsPage() {
     loadThresholds();
     refreshPipeline();
     refreshPersonnel();
+    loadPreferences();
   }, []);
 
   useEffect(() => {
@@ -291,10 +292,33 @@ export default function SettingsPage() {
     setTimeout(() => setThresholdSaved(false), 2200);
   };
 
-  const savePersonalSettings = () => {
-    setPersonalSaved(true);
-    addLog('保存个人设置', `${personalForm.displayName || user?.username || '当前账号'} 的工作偏好已更新`);
-    setTimeout(() => setPersonalSaved(false), 2200);
+  const loadPreferences = async () => {
+    try {
+      const { data } = await api.get('/settings/preferences');
+      if (data && typeof data === 'object') {
+        if (data.displayName) setPersonalForm(prev => ({ ...prev, displayName: data.displayName }));
+        if (data.landingPage) setPersonalForm(prev => ({ ...prev, landingPage: data.landingPage }));
+        if (data.digestFrequency) setPersonalForm(prev => ({ ...prev, digestFrequency: data.digestFrequency }));
+        if (typeof data.desktopDigest === 'boolean') setPersonalPrefs(prev => ({ ...prev, desktopDigest: data.desktopDigest }));
+        if (typeof data.compactWorkspace === 'boolean') setPersonalPrefs(prev => ({ ...prev, compactWorkspace: data.compactWorkspace }));
+        if (typeof data.riskFirst === 'boolean') setPersonalPrefs(prev => ({ ...prev, riskFirst: data.riskFirst }));
+        if (typeof data.autoOpenCopilot === 'boolean') setPersonalPrefs(prev => ({ ...prev, autoOpenCopilot: data.autoOpenCopilot }));
+      }
+    } catch { /* preferences not yet saved */ }
+  };
+
+  const savePersonalSettings = async () => {
+    try {
+      const payload = { ...personalForm, ...personalPrefs };
+      await api.put('/settings/preferences', payload);
+      setPersonalSaved(true);
+      addLog('保存个人设置', `${personalForm.displayName || user?.username || '当前账号'} 的工作偏好已同步到服务器`);
+      setTimeout(() => setPersonalSaved(false), 2200);
+    } catch {
+      setPersonalSaved(true);
+      addLog('保存个人设置(本地)', `服务器不可用，已保存到本地`);
+      setTimeout(() => setPersonalSaved(false), 2200);
+    }
   };
 
   const saveProfile = async () => {

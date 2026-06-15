@@ -54,6 +54,7 @@ async def ensure_runtime_schema(conn):
     if settings.DATABASE_URL.startswith("sqlite"):
         await _ensure_sqlite_column(conn, "users", "api_provider", "VARCHAR(64)")
         await _ensure_sqlite_column(conn, "users", "api_base_url", "VARCHAR(512)")
+        await _ensure_sqlite_column(conn, "users", "preferences", "JSON")
         work_order_columns = {
             "priority": "VARCHAR(16) DEFAULT 'medium'",
             "fault_type": "VARCHAR(64)",

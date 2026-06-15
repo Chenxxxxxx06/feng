@@ -940,3 +940,115 @@ async def list_blade_images(
         }
         for image in images
     ]
+
+
+@router.post("/refresh-faults-from-events")
+async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
+    """Sync faults from CARE event CSV files. Replaces seed_data demo faults.
+
+    Reads 95 CARE normalized event CSVs, extracts anomaly events (status_type_id in {3,4}
+    or event_label='anomaly'), matches to turbines by source_asset_id + wind_farm,
+    and creates/updates Fault records with real dataset provenance.
+    """
+    from app.services.care_monitoring_metrics import (
+        _load_care_event_windows_from_files, ANOMALY_STATUS_IDS, CARE_REGION_LABELS,
+    )
+
+    windows = _load_care_event_windows_from_files()
+    if not windows:
+        raise HTTPException(status_code=404, detail="CARE event files not found in data/modeling/")
+
+    # Delete all existing faults (replace seed_data demo with CARE events)
+    from sqlalchemy import delete as sqldelete
+    await db.execute(sqldelete(FaultSignal))
+    await db.execute(sqldelete(Fault))
+    await db.commit()
+
+    # Map wind farm names back from Chinese labels
+    FARM_REVERSE = {v: k for k, v in CARE_REGION_LABELS.items()}
+
+    # Pre-load all CARE turbines indexed by source_asset_id
+    all_turbines = (await db.execute(
+        select(Turbine).where(Turbine.source_dataset == CARE_DATASET_ID)
+    )).scalars().all()
+    turbine_by_asset: dict[str, Turbine] = {
+        t.source_asset_id: t for t in all_turbines if t.source_asset_id
+    }
+
+    created = 0
+    for window in windows:
+        labels = str(window.get("event_label") or "").lower()
+        status_id = str(window.get("status_type_id") or "")
+        if labels != "anomaly" and status_id not in ANOMALY_STATUS_IDS:
+            continue
+
+        region_label = window.get("region")
+        wind_farm = FARM_REVERSE.get(region_label, region_label)
+        source_file = window.get("source_file", "")
+
+        # Match turbine by wind farm — find first matching source_asset_id
+        matched = None
+        for asset_id, turbine in turbine_by_asset.items():
+            if wind_farm in asset_id:
+                matched = turbine
+                break
+        if not matched:
+            continue
+
+        # Derive fault type from event component category (from CSV)
+        component = str(window.get("event_component_category") or "bearing")
+        fault_type_map = {
+            "bearing": "bearing_inner_race_wear",
+            "gearbox": "gearbox_tooth_pitting",
+            "generator": "generator_overheat",
+            "blade": "blade_leading_edge_erosion",
+            "pitch": "pitch_system_fault",
+            "main_shaft": "main_shaft_misalignment",
+            "cooling": "cooling_system_fault",
+            "electrical": "electrical_connection",
+        }
+        fault_type = fault_type_map.get(component, "bearing_inner_race_wear")
+
+        # Check for existing fault for this event
+        existing = await db.execute(
+            select(Fault).where(
+                Fault.turbine_id == matched.id,
+                Fault.fault_type == fault_type,
+                Fault.details.contains(source_file),
+            )
+        )
+        if existing.scalar_one_or_none():
+            continue
+
+        event_start = window.get("event_start") or datetime.now(timezone.utc).isoformat()
+        confidence = 0.75 if status_id == "4" else 0.62 if status_id == "3" else 0.55
+
+        fault = Fault(
+            turbine_id=matched.id,
+            detected_at=datetime.now(timezone.utc),
+            fault_type=fault_type,
+            confidence=confidence,
+            status="open",
+            details={
+                "source_dataset": CARE_DATASET_ID,
+                "source_file": source_file,
+                "wind_farm": wind_farm,
+                "event_label": window.get("event_label"),
+                "event_start": event_start,
+                "event_end": window.get("event_end"),
+                "component": component,
+                "method": "care_event_csv_sync",
+            },
+            processing_status="pending",
+            discovered_at=datetime.now(timezone.utc),
+        )
+        db.add(fault)
+        created += 1
+
+    await db.commit()
+    return {
+        "success": True,
+        "message": f"Synced {created} faults from CARE event files",
+        "total_events_checked": len(windows),
+        "faults_created": created,
+    }

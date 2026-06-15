@@ -14,6 +14,10 @@ export default function DashboardPage() {
   const [detail, setDetail] = useState<TurbineDetail | null>(null);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [mtbfHours, setMtbfHours] = useState<number | null>(null);
+  const [mttrHours, setMttrHours] = useState<number | null>(null);
+  const [mttrSource, setMttrSource] = useState<string>('');
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   const fetchData = async () => {
     setLoading(true);
@@ -28,10 +32,47 @@ export default function DashboardPage() {
     api.get(`/turbines/${selectedId}`).then(({ data }) => setDetail(data));
   }, [selectedId]);
 
+  // ── MTBF from CARE event files, MTTR from prediction formula ──
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMetrics = async () => {
+      try {
+        const { data } = await api.get('/turbines/monitoring-metrics');
+        if (cancelled) return;
+        if (data?.mtbf_hours != null) setMtbfHours(data.mtbf_hours);
+      } catch { /* MTBF unavailable */ }
+      try {
+        const { data } = await api.get('/prediction/summary');
+        if (cancelled) return;
+        if (data?.reliability?.mttr_hours != null) {
+          setMttrHours(data.reliability.mttr_hours);
+          setMttrSource(' (估)');
+        }
+      } catch { /* MTTR unavailable */ }
+    };
+    fetchMetrics();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Clock refresh ──
+  useEffect(() => {
+    const t = setInterval(() => setCurrentTime(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
   const healthy = summary.turbines.filter((t) => t.status === 'normal').length;
   const warning = summary.turbines.filter((t) => t.status === 'warning').length;
   const faulty = summary.turbines.filter((t) => t.status === 'fault').length;
   const avail = summary.total > 0 ? ((healthy + warning) / summary.total * 100).toFixed(1) : '--';
+
+  const fmtMtbf = (h: number | null) => {
+    if (h == null) return '--';
+    if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`;
+    if (h >= 720) return `${(h / 720).toFixed(0)} 月`;
+    if (h >= 24) return `${(h / 24).toFixed(0)} 天`;
+    return h.toFixed(0);
+  };
+  const fmtMttr = (h: number | null) => (h != null ? h.toFixed(1) : '--');
 
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ background: 'radial-gradient(ellipse at 50% 30%, #0f1a2e 0%, #080c12 70%)' }}>
@@ -50,7 +91,7 @@ export default function DashboardPage() {
             <span className="w-2 h-2 rounded-full status-dot-live" />
             系统运行正常
           </span>
-          <span className="text-[10px] text-text-muted">{new Date().toLocaleString('zh-CN')}</span>
+          <span className="text-[10px] text-text-muted">本地时间 {currentTime.toLocaleString('zh-CN')}</span>
         </div>
       </div>
 
@@ -61,8 +102,8 @@ export default function DashboardPage() {
           <KPICard label="正常运行" value={String(healthy)} unit="台" color="#3fb950" />
           <KPICard label="预警风机" value={String(warning)} unit="台" color="#d29922" />
           <KPICard label="故障风机" value={String(faulty)} unit="台" color="#f85149" trend={faulty > 0 ? 'up' : undefined} />
-          <KPICard label="MTBF" value="2,340" unit="h" color="#39d2c0" />
-          <KPICard label="MTTR" value="4.2" unit="h" color="#a371f7" />
+          <KPICard label="MTBF" value={mtbfHours != null ? Math.round(mtbfHours).toLocaleString() : '--'} unit="h" color="#39d2c0" />
+          <KPICard label="MTTR" value={fmtMttr(mttrHours)} unit={`h${mttrSource}`} color="#a371f7" />
         </div>
       </div>
 
@@ -121,7 +162,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-2.5">
                   {[
                     ['额定功率', `${detail.power_mw} MW`, '#58a6ff'],
-                    ['上次维护', detail.last_maintenance ? new Date(detail.last_maintenance).toLocaleDateString('zh-CN') : '--', '#8b949e'],
+                    ['上次维护', detail.last_maintenance ? new Date(detail.last_maintenance).toLocaleDateString('zh-CN') : '暂无维护记录', '#8b949e'],
                   ].map(([l, v, c]) => (
                     <div key={l as string} className="industrial-card rounded-lg p-3">
                       <p className="text-[10px] text-text-muted mb-0.5">{l}</p>
