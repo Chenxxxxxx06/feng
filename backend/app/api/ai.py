@@ -218,7 +218,7 @@ async def _load_copilot_knowledge_results(messages: list[dict], db: AsyncSession
             latest_user_text = str(message.get("content", ""))
             break
 
-    result = await db.execute(select(FaultKnowledgeNode))
+    result = await db.execute(select(FaultKnowledgeNode).where(FaultKnowledgeNode.verified.is_(True)))
     nodes = result.scalars().all()
     if not nodes:
         return []
