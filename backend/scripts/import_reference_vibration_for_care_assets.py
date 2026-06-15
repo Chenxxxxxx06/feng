@@ -13,6 +13,7 @@ import json
 import math
 import sqlite3
 from collections import defaultdict
+from functools import lru_cache
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,11 +23,44 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "backend" / "fengdiao_phm.db"
-FEATURES_CSV = ROOT / "reports" / "data_processing" / "vibration_features.csv"
+FEATURES_CSV_CANDIDATES = (
+    ROOT / "docs" / "reports" / "data_processing" / "vibration_features.csv",
+    ROOT / "reports" / "data_processing" / "vibration_features.csv",
+    ROOT / "fengdiao_dataset_db_handoff_20260611" / "datasets" / "processed_features" / "vibration_features.csv",
+)
 DATA_DIR = ROOT / "backend" / "data"
 OUT_DIR = DATA_DIR / "vibration" / "care_reference_waveforms"
 DATASET_ID = "care_public_vibration_reference"
 COMPONENT = "blade"
+
+
+@lru_cache(maxsize=1)
+def raw_vibration_files_by_name() -> dict[str, Path]:
+    raw_root = DATA_DIR / "curated_datasets" / "raw" / "vibration"
+    if not raw_root.exists():
+        return {}
+    return {
+        path.name.lower(): path
+        for path in raw_root.rglob("*.csv")
+    }
+
+
+def resolve_existing_path(raw_path: str) -> Path | None:
+    path = Path(raw_path)
+    candidates = [path] if path.is_absolute() else [
+        ROOT / path,
+        ROOT / "backend" / path,
+        DATA_DIR / path,
+        DATA_DIR / "curated_datasets" / "raw" / "vibration" / path.name,
+    ]
+    existing = next((candidate for candidate in candidates if candidate.exists()), None)
+    if existing:
+        return existing
+    return raw_vibration_files_by_name().get(path.name.lower())
+
+
+def resolve_features_csv() -> Path:
+    return next((path for path in FEATURES_CSV_CANDIDATES if path.exists()), FEATURES_CSV_CANDIDATES[0])
 
 
 def read_numeric_series(path: Path) -> tuple[np.ndarray, str, float]:
@@ -68,11 +102,13 @@ def spectrum(series: np.ndarray, sample_rate: int) -> list[dict]:
 
 def load_sample_catalog() -> dict[str, list[dict]]:
     grouped: dict[str, list[dict]] = defaultdict(list)
-    with FEATURES_CSV.open("r", encoding="utf-8", newline="") as handle:
+    features_csv = resolve_features_csv()
+    with features_csv.open("r", encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle):
-            path = Path(row["source_file"])
-            if path.suffix.lower() != ".csv" or not path.exists():
+            path = resolve_existing_path(row["source_file"])
+            if path is None or path.suffix.lower() != ".csv":
                 continue
+            row["source_file"] = str(path)
             label = row["label"].strip().lower()
             grouped[label].append(row)
     for rows in grouped.values():
@@ -97,6 +133,24 @@ def pick_sample(catalog: dict[str, list[dict]], labels: list[str], index: int) -
     return available[index % len(available)]
 
 
+def table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
+    return {row[1] for row in con.execute(f"PRAGMA table_info({table_name})")}
+
+
+def load_target_turbines(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    columns = table_columns(con, "turbines")
+    source_asset_expr = "source_asset_id" if "source_asset_id" in columns else "NULL AS source_asset_id"
+    where_clause = "WHERE source_dataset = 'care_to_compare_v6'" if "source_dataset" in columns else ""
+    return con.execute(
+        f"""
+        SELECT id, name, status, hi_value, {source_asset_expr}
+        FROM turbines
+        {where_clause}
+        ORDER BY id
+        """
+    ).fetchall()
+
+
 def scale_series(series: np.ndarray, severity: str, hi: float) -> np.ndarray:
     if severity == "healthy":
         return series
@@ -114,14 +168,7 @@ def main() -> None:
 
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    turbines = con.execute(
-        """
-        SELECT id, name, status, hi_value, source_asset_id
-        FROM turbines
-        WHERE source_dataset = 'care_to_compare_v6'
-        ORDER BY id
-        """
-    ).fetchall()
+    turbines = load_target_turbines(con)
 
     now = datetime.now(timezone.utc).isoformat()
     imported = 0
