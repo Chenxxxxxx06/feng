@@ -313,14 +313,10 @@ export default function SettingsPage() {
   };
 
   const saveProfile = async () => {
-    const option = getModelOption(model);
     const payload: Record<string, string> = {
       model_preference: model,
     };
-    if (apiKey.trim()) {
-      payload.api_key = apiKey.trim();
-      if (option?.provider) payload.api_provider = option.provider;
-    }
+    if (apiKey.trim()) payload.api_key = apiKey.trim();
     if (apiBaseUrl.trim()) payload.api_base_url = apiBaseUrl.trim();
 
     try {
@@ -329,7 +325,7 @@ export default function SettingsPage() {
       await fetchMe();
       setApiKey('');
       setProfileSaved(true);
-      addLog('保存AI设置', `默认模型切换为 ${option?.label || model}`);
+      addLog('保存AI设置', `默认模型: ${model}`);
       setTimeout(() => setProfileSaved(false), 2200);
     } catch (error) {
       const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
@@ -881,54 +877,15 @@ function AISettingsSection({
   onSave: () => void;
   onTestAi: () => void;
 }) {
-  const currentModel = getModelOption(model);
   const hasTypedKey = Boolean(apiKey.trim());
   const hasSavedKey = Boolean(user?.api_key);
-  const savedProvider = user?.api_provider || '';
-  const selectedProvider = currentModel?.provider || '';
-  const selectedRequiresKey = currentModel?.requiresKey !== false;
-  const hasSavedOrTypedKey = hasSavedKey || hasTypedKey;
-  const savedKeyUnbound = selectedRequiresKey && hasSavedKey && !savedProvider && !hasTypedKey;
-  const providerMismatch = selectedRequiresKey && hasSavedKey && Boolean(savedProvider) && savedProvider !== selectedProvider && !hasTypedKey;
-  const localModelWithTypedKey = !selectedRequiresKey && hasTypedKey;
-  const canSaveAISettings = !savedKeyUnbound && !providerMismatch && !localModelWithTypedKey;
-  const savedModelPreference = normalizeModelPreference(user?.model_preference);
-  const hasUnsavedAIChanges = hasTypedKey || savedModelPreference !== model;
-  const canTestAISettings = canSaveAISettings && !hasUnsavedAIChanges && aiTestStatus !== 'testing';
-  const keyStatusTone = savedKeyUnbound || providerMismatch || localModelWithTypedKey
-    ? 'border-accent-red/30 bg-accent-red/10 text-accent-red'
-    : hasSavedOrTypedKey
-      ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
-      : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow';
-  const keyStatusLabel = !selectedRequiresKey
-    ? (localModelWithTypedKey ? '本地模型无需密钥' : '本地模型')
-    : hasTypedKey
-      ? `将绑定 ${selectedProvider}`
-      : savedKeyUnbound
-        ? '密钥未绑定'
-        : providerMismatch
-          ? '供应商不匹配'
-          : hasSavedKey
-            ? `${savedProvider}密钥`
-            : '本地兜底';
-  const bindingMessage = localModelWithTypedKey
-    ? '当前选择本地模型，不需要输入AI服务密钥；请清空密钥框后保存。'
-    : hasTypedKey
-      ? `保存后，这个新密钥会被绑定为 ${selectedProvider} 密钥，只能用于 ${selectedProvider} 模型。`
-      : savedKeyUnbound
-        ? '已有密钥来自旧版本，未记录供应商。请重新输入该供应商密钥并保存一次。'
-        : providerMismatch
-          ? `当前保存的是 ${savedProvider} 密钥，不能选择 ${selectedProvider} 模型。请切回 ${savedProvider} 模型，或输入 ${selectedProvider} 的新密钥。`
-          : '';
-  const providerRows = [
-    { name: '通义千问 DashScope', model: 'qwen-plus / qwen-turbo / qwen3.6-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'DeepSeek', model: 'deepseek-v4-flash / chat / reasoner', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: '智谱GLM', model: 'glm-5-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Kimi Moonshot', model: 'kimi-k2.6', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Google Gemini', model: 'gemini-2.5-flash / gemini-3.5-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'OpenAI', model: 'gpt-4o-mini / gpt-4.1 / gpt-4', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Ollama本地模型', model: 'qwen / llama / deepseek', cost: '软件免费，消耗本机算力', state: '适合演示兜底' },
-  ];
+  const hasKey = hasSavedKey || hasTypedKey;
+  const hasUnsavedAIChanges = hasTypedKey || (user?.model_preference && normalizeModelPreference(user.model_preference) !== model);
+  const canTestAISettings = aiTestStatus !== 'testing' && hasKey;
+  const keyStatusTone = hasKey
+    ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+    : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow';
+  const keyStatusLabel = hasKey ? '密钥已配置' : '本地兜底';
 
   const aiPresets = [
     { name: '通义千问', model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
@@ -955,8 +912,7 @@ function AISettingsSection({
           {profileSaved && <span className="text-xs text-accent-green">AI设置已保存</span>}
           <button
             onClick={onSave}
-            disabled={!canSaveAISettings}
-            className={`industrial-btn industrial-btn-primary ${!canSaveAISettings ? 'cursor-not-allowed opacity-50' : ''}`}
+            className="industrial-btn industrial-btn-primary"
           >
             保存AI设置
           </button>
@@ -989,11 +945,13 @@ function AISettingsSection({
               </label>
               <label className="block">
                 <span className="text-xs text-text-muted">默认模型</span>
-                <select value={model} onChange={(e) => onModelChange(e.target.value)} className="industrial-input mt-1 w-full">
-                  {aiModelOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+                <input
+                  type="text"
+                  placeholder="qwen-plus"
+                  value={model}
+                  onChange={(e) => onModelChange(e.target.value)}
+                  className="industrial-input mt-1 w-full"
+                />
               </label>
             </div>
             <div className="mt-4">
@@ -1008,27 +966,18 @@ function AISettingsSection({
                 />
               </label>
             </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
               <InfoLine label="当前账号" value={user?.username || '-'} />
-              <InfoLine label="实际模型ID" value={currentModel?.value || model} />
-              <InfoLine label="供应商" value={currentModel?.provider || '默认通义千问'} />
+              <InfoLine label="实际模型ID" value={model || 'qwen-plus'} />
             </div>
             <div className="mt-3 rounded-md border border-border-default bg-bg-card px-3 py-2 text-xs text-text-secondary">
-              {bindingMessage || (currentModel?.requiresKey === false
-                ? '当前选择本地模型，不需要AI服务密钥；如果本机未启动Ollama，后端会回退到本地规则结果。'
-                : hasSavedOrTypedKey
-                  ? `保存后将使用 ${currentModel?.provider || 'AI供应商'} 的 ${currentModel?.value || model}，调用远程模型可能按供应商规则计费。`
-                  : '当前未配置AI服务密钥，后端不会调用远程收费模型，会使用本地兜底结果，不产生AI调用费用。')}
+              {hasKey
+                ? `使用模型 ${model || 'qwen-plus'}，调用远程模型可能按供应商规则计费。`
+                : '当前未配置AI服务密钥，后端不会调用远程收费模型，使用本地兜底结果，不产生AI调用费用。'}
             </div>
             {profileError && (
               <div className="mt-3 rounded-md border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
                 {profileError}
-              </div>
-            )}
-            {savedProvider && (
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                <InfoLine label="已保存密钥供应商" value={savedProvider} />
-                <InfoLine label="当前模型供应商" value={selectedProvider || '-'} />
               </div>
             )}
           </div>
