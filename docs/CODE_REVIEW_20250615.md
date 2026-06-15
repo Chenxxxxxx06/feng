@@ -190,4 +190,4 @@
 
 ---
 
-*报告由 Claude Code code-review skill 生成*
+*报告由 AI code-review 工具生成*

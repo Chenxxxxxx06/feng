@@ -305,11 +305,14 @@ def summarize_page(
 
 请分析页面数据, 输出3条关键结论和2条建议。"""
 
+    # Use system-level API key as fallback when user hasn't configured one
+    effective_key = api_key or settings.DASHSCOPE_API_KEY or None
+
     try:
         result = chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model or QWEN_CONFIG["cheap_model"], api_key=api_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
+        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
 
         # Try to parse JSON from response
         result = result.strip()

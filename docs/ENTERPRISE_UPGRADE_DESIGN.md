@@ -599,7 +599,7 @@ Embedding: BAAI/bge-large-zh-v1.5 (1024维)
 ```
 Layer 3: Agent层 — Copilot悬浮窗
   ├─ 页面感知 + 多轮对话 + RAG检索 + 工具调用
-  └─ 模型: GPT-4o / Claude 4 / DeepSeek-V3 (可切换)
+  └─ 模型: GPT-4o / DeepSeek-V3 / Qwen-Plus (可切换)
 
 Layer 2: 诊断层 — 专业AI模型
   ├─ CV: YOLOv8-seg + EfficientNetV2 → 叶片损伤检测
@@ -835,7 +835,7 @@ Phase 5 (12周+): 企业级
 | CV诊断与工单联动 | ✅ | 叶片识别结果→一键创建工单 |
 | Dashboard KPI与底层数据 | ✅ | SCADA/工单/故障表聚合计算 |
 | API版本化 | ✅ | /api/v1/ 前缀 |
-| 多模型切换 | ✅ | Settings页可选GPT/Claude/DeepSeek |
+| 多模型切换 | ✅ | Settings页可选GPT/DeepSeek/Qwen/Gemini等 |
 
 ## 风险点
 

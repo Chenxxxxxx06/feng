@@ -48,7 +48,7 @@ async def generate_summary(
         logger.warning(f"AI summary failed, using fallback: {e}")
         # Fallback to local summary
         from app.services.qwen_client import fallback_summary
-        return AISummaryResponse(**fallback_summary(data.page_type))
+        return AISummaryResponse(**fallback_summary(data.page_type, data.page_data))
 
 
 @router.post("/analyze-fault", response_model=AIFaultAnalysisResponse)
