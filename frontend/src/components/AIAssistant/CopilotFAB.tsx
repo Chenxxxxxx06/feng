@@ -81,6 +81,16 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
     return () => window.removeEventListener('resize', handleResize);
   }, [panelPos.x, panelPos.y, setPanelPos]);
 
+  // Auto-open on diagnosis/prediction pages when preference enabled
+  useEffect(() => {
+    const autoOpen = localStorage.getItem('autoOpenCopilot') === 'true';
+    const path = window.location.pathname;
+    if (autoOpen && (path.includes('diagnosis') || path.includes('prediction'))) {
+      const timer = setTimeout(() => setOpen(true), 500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
   // Clamp FAB position on window resize
   useEffect(() => {
     const handleResize = () => {

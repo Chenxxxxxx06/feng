@@ -302,6 +302,9 @@ export default function SettingsPage() {
       const payload = { ...personalForm, ...personalPrefs };
       await api.put('/settings/preferences', payload);
       setPersonalSaved(true);
+      // Sync landing page preference to localStorage for App.tsx routing
+      if (personalForm.landingPage) localStorage.setItem('landingPage', personalForm.landingPage);
+      if (typeof personalPrefs.autoOpenCopilot === 'boolean') localStorage.setItem('autoOpenCopilot', String(personalPrefs.autoOpenCopilot));
       addLog('保存个人设置', `${personalForm.displayName || user?.username || '当前账号'} 的工作偏好已同步到服务器`);
       setTimeout(() => setPersonalSaved(false), 2200);
     } catch {

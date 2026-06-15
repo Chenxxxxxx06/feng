@@ -29,6 +29,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const landing = localStorage.getItem('landingPage') || 'dashboard';
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -42,7 +43,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route index element={<Navigate to={`/${landing}`} replace />} />
         <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
         <Route path="turbine/:id" element={<Suspense fallback={<PageLoader />}><TurbineDetailPage /></Suspense>} />
         <Route path="diagnosis" element={<Suspense fallback={<PageLoader />}><DiagnosisPage /></Suspense>} />
