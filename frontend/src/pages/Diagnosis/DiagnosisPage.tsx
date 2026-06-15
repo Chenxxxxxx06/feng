@@ -242,8 +242,8 @@ export default function DiagnosisPage() {
       backgroundColor: 'transparent',
       grid: { top: 24, right: 18, bottom: 26, left: 42 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: times, axisLabel: { color: '#5c6975', fontSize: 9 } },
-      yAxis: { type: 'value', name: 'mm/s²', axisLabel: { color: '#5c6975', fontSize: 10 } },
+      xAxis: { type: 'category', data: times, axisLabel: { color: '#64748B', fontSize: 9 } },
+      yAxis: { type: 'value', name: 'mm/s²', axisLabel: { color: '#64748B', fontSize: 10 } },
       series: [{ name: '振动波形', type: 'line', data: vibration.waveform, symbol: 'none', lineStyle: { color: '#39d2c0', width: 1 }, areaStyle: { color: 'rgba(57,210,192,0.06)' } }],
     });
     const resize = () => chart.resize();
@@ -259,9 +259,9 @@ export default function DiagnosisPage() {
       backgroundColor: 'transparent',
       grid: { top: 24, right: 16, bottom: 26, left: 38 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: display.map((_, i) => String(i)), axisLabel: { color: '#5c6975', fontSize: 9 } },
-      yAxis: { type: 'value', name: 'Amp', axisLabel: { color: '#5c6975', fontSize: 10 } },
-      series: [{ name: '频谱占位', type: 'bar', data: display, itemStyle: { color: '#58a6ff' }, barWidth: 3 }],
+      xAxis: { type: 'category', data: display.map((_, i) => String(i)), axisLabel: { color: '#64748B', fontSize: 9 } },
+      yAxis: { type: 'value', name: 'Amp', axisLabel: { color: '#64748B', fontSize: 10 } },
+      series: [{ name: '频谱占位', type: 'bar', data: display, itemStyle: { color: '#64748B' }, barWidth: 3 }],
     });
     const resize = () => chart.resize();
     window.addEventListener('resize', resize);
@@ -546,7 +546,7 @@ export default function DiagnosisPage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 border-b border-border-default bg-bg-secondary px-6 py-4">
+      <div className="flex-shrink-0 border-b border-border-default bg-navy-900 px-6 py-4">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-sm font-semibold">故障诊断中心</h2>
@@ -561,7 +561,7 @@ export default function DiagnosisPage() {
         </div>
         <div className="grid grid-cols-5 gap-3">
           {cards.map((c) => (
-            <div key={c.label} className="bg-bg-card border border-border-default rounded-lg px-3 py-2.5">
+            <div key={c.label} className="premium-card rounded-2xl px-3 py-2.5">
               <p className="text-[10px] text-text-muted">{c.label}</p>
               <p className={`text-lg font-mono font-bold ${c.color}`}>
                 {c.value}<span className="text-[10px] font-normal text-text-muted ml-0.5">{c.unit}</span>
@@ -574,7 +574,7 @@ export default function DiagnosisPage() {
 
       <div className="flex-1 overflow-auto p-5 space-y-4">
         <div className="grid grid-cols-[1.35fr_1fr] gap-4">
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-medium">实时故障监测</h3>
@@ -585,7 +585,7 @@ export default function DiagnosisPage() {
               </span>
             </div>
 
-            <div className="mb-3 inline-flex rounded border border-border-default bg-bg-secondary p-1 text-xs">
+            <div className="mb-3 inline-flex rounded border border-border-default bg-navy-900 p-1 text-xs">
               <button
                 onClick={() => setMonitorMode('single')}
                 className={`rounded px-3 py-1.5 ${monitorMode === 'single' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary'}`}
@@ -605,7 +605,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   风机
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={selectedTurbineId || ''}
                     onChange={(e) => setSelectedTurbineId(Number(e.target.value))}
                   >
@@ -615,7 +615,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   部件
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={component}
                     onChange={(e) => setComponent(e.target.value)}
                   >
@@ -625,7 +625,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   时间窗
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={windowHours}
                     onChange={(e) => setWindowHours(Number(e.target.value))}
                   >
@@ -641,7 +641,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   风机分组
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={batchRegion}
                     onChange={(e) => setBatchRegion(e.target.value)}
                   >
@@ -652,7 +652,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   风机状态
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={batchStatus}
                     onChange={(e) => setBatchStatus(e.target.value)}
                   >
@@ -665,7 +665,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   部件
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={component}
                     onChange={(e) => setComponent(e.target.value)}
                   >
@@ -675,7 +675,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   时间窗
                   <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                    className="mt-1 w-full bg-navy-900 border border-border-default rounded px-2 py-2 text-text-primary"
                     value={windowHours}
                     onChange={(e) => setWindowHours(Number(e.target.value))}
                   >
@@ -729,7 +729,7 @@ export default function DiagnosisPage() {
             )}
           </section>
 
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-medium">叶片图像诊断</h3>
               <label className="px-3 py-1.5 rounded bg-bg-hover border border-border-default text-xs cursor-pointer hover:border-accent-blue">
@@ -738,7 +738,7 @@ export default function DiagnosisPage() {
               </label>
             </div>
             <div className="grid grid-cols-[1fr_180px] gap-3">
-              <div className="relative h-40 rounded border border-border-default bg-bg-secondary overflow-hidden flex items-center justify-center">
+              <div className="relative h-40 rounded border border-border-default bg-navy-900 overflow-hidden flex items-center justify-center">
                 {bladePreview ? (
                   <img src={bladePreview} alt="叶片预览" className="w-full h-full object-cover opacity-80" />
                 ) : (
@@ -768,7 +768,7 @@ export default function DiagnosisPage() {
         </div>
 
         {monitorMode === 'group' && batchResult?.success && (
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <div className="flex items-start justify-between gap-4 mb-3">
               <div>
                 <h3 className="text-sm font-medium">分组实时监测记录</h3>
@@ -780,7 +780,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   排序
                   <select
-                    className="mt-1 w-36 bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-text-primary"
+                    className="mt-1 w-36 bg-navy-900 border border-border-default rounded px-2 py-1.5 text-text-primary"
                     value={batchSort}
                     onChange={(e) => {
                       setBatchSort(e.target.value as BatchSortMode);
@@ -799,7 +799,7 @@ export default function DiagnosisPage() {
                 <label className="text-xs text-text-muted">
                   展示
                   <select
-                    className="mt-1 w-32 bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-text-primary"
+                    className="mt-1 w-32 bg-navy-900 border border-border-default rounded px-2 py-1.5 text-text-primary"
                     value={batchGroup}
                     onChange={(e) => {
                       setBatchGroup(e.target.value as BatchGroupMode);
@@ -817,7 +817,7 @@ export default function DiagnosisPage() {
 
             <div className="overflow-x-auto">
               <div className="min-w-[920px] rounded-lg border border-border-default overflow-hidden">
-                <div className="grid grid-cols-[1.2fr_0.85fr_0.8fr_1.25fr_0.85fr_1fr_0.85fr] gap-3 bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
+                <div className="grid grid-cols-[1.2fr_0.85fr_0.8fr_1.25fr_0.85fr_1fr_0.85fr] gap-3 bg-navy-900 px-3 py-2 text-[10px] text-text-muted">
                   <span>风机</span>
                   <span>分组</span>
                   <span>风机状态</span>
@@ -902,7 +902,7 @@ export default function DiagnosisPage() {
         )}
 
         <div className="grid grid-cols-[1.2fr_1fr] gap-4">
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium">振动波形展示</h3>
               <div className="text-xs text-text-muted">
@@ -911,11 +911,11 @@ export default function DiagnosisPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-bg-secondary rounded border border-border-default p-2">
+              <div className="bg-navy-900 rounded border border-border-default p-2">
                 <p className="text-[10px] text-text-muted mb-1">近24小时波形占位</p>
                 <div ref={waveformRef} className="h-52" />
               </div>
-              <div className="bg-bg-secondary rounded border border-border-default p-2">
+              <div className="bg-navy-900 rounded border border-border-default p-2">
                 <p className="text-[10px] text-text-muted mb-1">频谱分析入口占位</p>
                 <div ref={spectrumRef} className="h-52" />
               </div>
@@ -923,7 +923,7 @@ export default function DiagnosisPage() {
             <p className="mt-2 text-xs text-text-muted">{vibration?.message || '振动算法暂不实现，当前保留波形和频谱展示框。'}</p>
           </section>
 
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
                 <h3 className="text-sm font-medium">故障原因排查</h3>
@@ -1005,7 +1005,7 @@ export default function DiagnosisPage() {
         </div>
 
         <div className="grid grid-cols-[0.85fr_1.35fr] gap-4">
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <h3 className="text-sm font-medium mb-3">标准排查步骤</h3>
             <div className="space-y-2">
               {activeTroubleshootingSteps.map((step) => (
@@ -1022,7 +1022,7 @@ export default function DiagnosisPage() {
             </div>
           </section>
 
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          <section className="premium-card rounded-2xl p-4">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
                 <h3 className="text-sm font-medium">故障记录管理</h3>
@@ -1053,12 +1053,12 @@ export default function DiagnosisPage() {
                 value={faultKeyword}
                 onChange={(e) => setFaultKeyword(e.target.value)}
                 placeholder="搜索风机/故障/人员/工单"
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted"
               />
               <select
                 value={faultRegionFilter}
                 onChange={(e) => setFaultRegionFilter(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="all">全部分组</option>
                 {regionOptions.map((region) => <option key={region} value={region}>{region}</option>)}
@@ -1066,7 +1066,7 @@ export default function DiagnosisPage() {
               <select
                 value={faultStatusFilter}
                 onChange={(e) => setFaultStatusFilter(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="all">全部故障状态</option>
                 <option value="open">待处理故障</option>
@@ -1075,7 +1075,7 @@ export default function DiagnosisPage() {
               <select
                 value={faultProcessingFilter}
                 onChange={(e) => setFaultProcessingFilter(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="all">全部处理状态</option>
                 <option value="pending">待处理</option>
@@ -1087,7 +1087,7 @@ export default function DiagnosisPage() {
               <select
                 value={faultHandlerFilter}
                 onChange={(e) => setFaultHandlerFilter(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="all">全部处理人员</option>
                 {faultHandlerOptions.map((handler) => <option key={handler} value={handler}>{handler}</option>)}
@@ -1095,7 +1095,7 @@ export default function DiagnosisPage() {
               <select
                 value={faultPriorityFilter}
                 onChange={(e) => setFaultPriorityFilter(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="all">全部优先级</option>
                 <option value="urgent">紧急</option>
@@ -1109,7 +1109,7 @@ export default function DiagnosisPage() {
               <select
                 value={faultTimeField}
                 onChange={(e) => setFaultTimeField(e.target.value as FaultTimeField)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="discovered_at">按发现时间</option>
                 <option value="processing_started_at">按处理时间</option>
@@ -1121,13 +1121,13 @@ export default function DiagnosisPage() {
                 type="date"
                 value={faultDateFrom}
                 onChange={(e) => setFaultDateFrom(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               />
               <input
                 type="date"
                 value={faultDateTo}
                 onChange={(e) => setFaultDateTo(e.target.value)}
-                className="bg-bg-secondary border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+                className="bg-navy-900 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
               />
             </div>
 

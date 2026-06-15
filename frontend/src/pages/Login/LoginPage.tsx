@@ -27,7 +27,15 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="h-screen flex items-center justify-center bg-bg-primary">
+    <div
+      className="h-screen flex items-center justify-center"
+      style={{
+        backgroundImage: 'url(/fengmian.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
       <div className="w-96 p-8 rounded-lg border border-border-default bg-bg-card glow-card">
         <div className="text-center mb-8">
           <span className="text-4xl text-accent-cyan">⟳</span>

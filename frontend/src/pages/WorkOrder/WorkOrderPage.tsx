@@ -315,7 +315,7 @@ export default function WorkOrderPage() {
   };
 
   return (
-    <div className="h-full overflow-auto bg-bg-primary">
+    <div className="h-full overflow-auto" style={{ background: 'radial-gradient(ellipse at 50% 20%, #0D2447 0%, #071A35 70%)' }}>
       <div className="mx-auto max-w-[1480px] space-y-5 p-6">
         <section className="flex flex-col gap-4 border-b border-border-default/70 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -353,7 +353,7 @@ export default function WorkOrderPage() {
                 data-action="filter-status"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="h-9 rounded border border-border-default bg-bg-secondary px-3 text-sm text-text-primary"
+                className="h-9 rounded border border-border-default bg-navy-900 px-3 text-sm text-text-primary"
               >
                 <option value="">全部状态</option>
                 {STATUS_FILTERS.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
@@ -361,7 +361,7 @@ export default function WorkOrderPage() {
               <select
                 value={priorityFilter}
                 onChange={(e) => setPriorityFilter(e.target.value)}
-                className="h-9 rounded border border-border-default bg-bg-secondary px-3 text-sm text-text-primary"
+                className="h-9 rounded border border-border-default bg-navy-900 px-3 text-sm text-text-primary"
               >
                 <option value="">全部优先级</option>
                 <option value="low">低</option>
@@ -387,7 +387,7 @@ export default function WorkOrderPage() {
         {showCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-[620px] rounded-lg border border-border-default bg-bg-card shadow-2xl">
-              <div className="border-b border-border-default px-6 py-4">
+              <div className="border-b px-6 py-4" style={{ borderColor: 'rgba(59,130,246,0.10)' }}>
                 <h3 className="text-base font-medium">创建新工单</h3>
                 <p className="mt-1 text-xs text-text-muted">填写故障、派工和截止日期信息。</p>
               </div>
@@ -396,15 +396,15 @@ export default function WorkOrderPage() {
                   <p className="mb-3 text-xs font-medium text-text-secondary">基础信息</p>
                   <div className="grid grid-cols-2 gap-3">
                     <input placeholder="风机 ID *" value={form.turbine_id} onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
-                      className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                      className="rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
                     <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                      className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary">
+                      className="rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary">
                       <option value="low">低优先级</option><option value="medium">中优先级</option><option value="high">高优先级</option><option value="urgent">紧急</option>
                     </select>
                     <input placeholder="工单标题 *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
-                      className="col-span-2 rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                      className="col-span-2 rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
                     <select value={form.fault_type} onChange={(e) => setForm({ ...form, fault_type: e.target.value })}
-                      className="col-span-2 rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary">
+                      className="col-span-2 rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary">
                       {FAULT_TYPES.map(ft => <option key={ft} value={ft}>{ft}</option>)}
                     </select>
                   </div>
@@ -416,31 +416,31 @@ export default function WorkOrderPage() {
                     <select value={form.assignee} onChange={(e) => {
                       const p = personnel.find(pp => pp.name === e.target.value);
                       setForm({ ...form, assignee: e.target.value, assignee_id: p ? String(p.id) : '', assignee_email: p?.email || '' });
-                    }} className="col-span-2 rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary">
+                    }} className="col-span-2 rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary">
                       <option value="">选择责任人</option>
                       {personnel.map(p => (
                         <option key={p.id} value={p.name}>{p.name} | {p.email} | {p.region} | 负载:{p.load}</option>
                       ))}
                     </select>
-                    <div className="col-span-2 rounded border border-border-default bg-bg-secondary/70 px-3 py-2 text-xs text-text-secondary">
+                    <div className="col-span-2 rounded border border-border-default bg-navy-900/70 px-3 py-2 text-xs text-text-secondary">
                       责任人邮箱：
                       <span className="ml-1 font-mono text-text-primary">
                         {form.assignee_email || '选择责任人后自动显示'}
                       </span>
                     </div>
                     <input placeholder="预估成本" type="number" value={form.cost_estimate} onChange={(e) => setForm({ ...form, cost_estimate: e.target.value })}
-                      className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                      className="rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
                     <input
                       type="date"
                       value={form.due_date || ''}
                       onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-                      className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none [color-scheme:dark]"
+                      className="rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none [color-scheme:dark]"
                     />
                   </div>
                 </div>
 
                 <textarea placeholder="工单描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4}
-                  className="w-full rounded border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                  className="w-full rounded border border-border-default bg-navy-900 px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
               </div>
               <div className="flex justify-end gap-2 border-t border-border-default px-6 py-4">
                 <button onClick={() => setShowCreate(false)} className="rounded border border-border-default px-4 py-2 text-sm text-text-secondary hover:text-text-primary">取消</button>
@@ -558,7 +558,7 @@ export default function WorkOrderPage() {
         {previewWO && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); }}>
             <div className="h-full w-full max-w-[720px] overflow-auto border-l border-border-default bg-bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
-              <div className="sticky top-0 z-10 border-b border-border-default bg-bg-secondary px-6 py-4">
+              <div className="sticky top-0 z-10 border-b border-border-default bg-navy-900 px-6 py-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="font-mono text-xs text-text-muted">WO-{String(previewWO.id).padStart(4, '0')}</p>
@@ -571,7 +571,7 @@ export default function WorkOrderPage() {
 
               <div className="space-y-5 p-6 text-sm">
                 {editingWO && (
-                  <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+                  <div className="rounded-lg border border-border-default bg-navy-900 p-4">
                     <p className="mb-3 text-xs font-medium text-text-secondary">编辑信息</p>
                     <div className="grid grid-cols-2 gap-3">
                       <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="工单标题"
@@ -609,7 +609,7 @@ export default function WorkOrderPage() {
                   </div>
                 )}
 
-                <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+                <div className="rounded-lg border border-border-default bg-navy-900 p-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <p className="text-xs text-text-muted">优先级</p>
@@ -630,12 +630,12 @@ export default function WorkOrderPage() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+                <div className="rounded-lg border border-border-default bg-navy-900 p-4">
                   <p className="mb-3 text-xs font-medium text-text-secondary">流程进度</p>
                   <WorkOrderStepper status={previewWO.status} />
                 </div>
 
-                <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+                <div className="rounded-lg border border-border-default bg-navy-900 p-4">
                   <p className="mb-2 text-xs font-medium text-text-secondary">AI 分析报告</p>
                   {analyzing ? (
                     <p className="animate-pulse text-text-muted">正在获取风机数据并生成分析...</p>
@@ -655,7 +655,7 @@ export default function WorkOrderPage() {
                   )}
                 </div>
 
-                <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+                <div className="rounded-lg border border-border-default bg-navy-900 p-4">
                   <p className="mb-2 text-xs font-medium text-text-secondary">通知信息</p>
                   <div className="grid gap-3 md:grid-cols-2">
                     <p className="text-text-secondary">收件邮箱：<span className="text-text-primary">{previewWO.assignee_email || '按责任人账号邮箱发送'}</span></p>
@@ -666,7 +666,7 @@ export default function WorkOrderPage() {
                 </div>
               </div>
 
-              <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border-default bg-bg-secondary px-6 py-4">
+              <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border-default bg-navy-900 px-6 py-4">
                 {editingWO ? (
                   <>
                     <button onClick={() => setEditingWO(false)} className="rounded border border-border-default px-4 py-2 text-sm text-text-secondary hover:text-text-primary">取消编辑</button>
