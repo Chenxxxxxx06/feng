@@ -73,11 +73,11 @@ def _resolve_vibration_source_dataset(payload: dict, record: VibrationData) -> s
     if "nrel" in source_file or "gearbox" in source_file:
         return "nrel_gearbox_vibration"
     if "care_reference_waveforms" in waveform_path:
-        return "mendeley_blade_vibration_faults"
+        return "care_reference_waveforms"
 
     source_dataset = quality.get("source_dataset")
     if source_dataset == "care_public_vibration_reference":
-        return "mendeley_blade_vibration_faults"
+        return "care_reference_waveforms"
     return source_dataset
 
 
