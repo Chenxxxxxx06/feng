@@ -217,6 +217,7 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
     """Resolve scene skills to atomic DOM operation steps."""
     entities = entities or {}
     step_defs = {
+        # ── Navigation ──
         "NavigateToMonitor": [
             {"skill": "navigate", "params": {"path": "/dashboard"}},
             {"skill": "wait", "params": {"ms": "800"}},
@@ -232,16 +233,13 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "wait", "params": {"ms": "800"}},
             {"skill": "screenshot", "params": {}},
         ],
-        "LocateTurbineOnMap": [
-            {"skill": "waitForElement",
-             "params": {"selector": "[data-turbine-id='{turbine_id}']", "timeout": "5000"}},
-            {"skill": "click",
-             "params": {"selector": "[data-turbine-id='{turbine_id}']"}},
-            {"skill": "wait", "params": {"ms": "500"}},
+        "NavigateToWorkOrder": [
+            {"skill": "navigate", "params": {"path": "/workorder"}},
+            {"skill": "wait", "params": {"ms": "800"}},
+            {"skill": "screenshot", "params": {}},
         ],
-        "OpenTurbineDetailPanel": [
-            {"skill": "click",
-             "params": {"selector": "[data-action='view-turbine-detail']"}},
+        "NavigateToKnowledge": [
+            {"skill": "navigate", "params": {"path": "/knowledge"}},
             {"skill": "wait", "params": {"ms": "800"}},
             {"skill": "screenshot", "params": {}},
         ],
@@ -254,9 +252,30 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "click", "params": {"selector": "[data-action='back']"}},
             {"skill": "wait", "params": {"ms": "500"}},
         ],
-        "GoToWorkOrder": [
-            {"skill": "navigate", "params": {"path": "/workorder"}},
+        # ── Turbine interaction ──
+        "LocateTurbineOnMap": [
+            {"skill": "waitForElement",
+             "params": {"selector": "[data-turbine-id='{turbine_id}']", "timeout": "5000"}},
+            {"skill": "click",
+             "params": {"selector": "[data-turbine-id='{turbine_id}']"}},
+            {"skill": "wait", "params": {"ms": "500"}},
+        ],
+        "SelectTurbineInDiagnosis": [
+            {"skill": "click", "params": {"selector": "[data-action='select-turbine']"}},
+            {"skill": "wait", "params": {"ms": "300"}},
+            {"skill": "click",
+             "params": {"selector": "option[value='{turbine_id}']"}},
             {"skill": "wait", "params": {"ms": "800"}},
+        ],
+        "RunAutoDetect": [
+            {"skill": "click", "params": {"selector": "[data-action='run-auto-detect']"}},
+            {"skill": "wait", "params": {"ms": "3000"}},
+            {"skill": "screenshot", "params": {}},
+        ],
+        # ── Work Order ──
+        "CreateWorkOrder": [
+            {"skill": "click", "params": {"selector": "[data-action='create-workorder']"}},
+            {"skill": "wait", "params": {"ms": "500"}},
             {"skill": "screenshot", "params": {}},
         ],
         "OpenWorkOrderPreview": [
@@ -272,6 +291,38 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "wait", "params": {"ms": "300"}},
             {"skill": "click", "params": {"selector": "option[value='{status}']"}},
             {"skill": "wait", "params": {"ms": "800"}},
+            {"skill": "screenshot", "params": {}},
+        ],
+        # ── Prediction ──
+        "RefreshRUL": [
+            {"skill": "click", "params": {"selector": "[data-action='refresh-rul']"}},
+            {"skill": "wait", "params": {"ms": "3000"}},
+            {"skill": "screenshot", "params": {}},
+        ],
+        "RunSchedule": [
+            {"skill": "click", "params": {"selector": "[data-action='run-schedule']"}},
+            {"skill": "wait", "params": {"ms": "2000"}},
+            {"skill": "screenshot", "params": {}},
+        ],
+        "CompareCost": [
+            {"skill": "click", "params": {"selector": "[data-action='compare-cost']"}},
+            {"skill": "wait", "params": {"ms": "2000"}},
+            {"skill": "screenshot", "params": {}},
+        ],
+        # ── Analysis combos ──
+        "AnalyzeAndReport": [
+            {"skill": "screenshot", "params": {}},
+            {"skill": "wait", "params": {"ms": "1000"}},
+        ],
+        "MultiPageAudit": [
+            {"skill": "navigate", "params": {"path": "/dashboard"}},
+            {"skill": "wait", "params": {"ms": "1000"}},
+            {"skill": "screenshot", "params": {}},
+            {"skill": "navigate", "params": {"path": "/diagnosis"}},
+            {"skill": "wait", "params": {"ms": "1000"}},
+            {"skill": "screenshot", "params": {}},
+            {"skill": "navigate", "params": {"path": "/prediction"}},
+            {"skill": "wait", "params": {"ms": "1000"}},
             {"skill": "screenshot", "params": {}},
         ],
     }
