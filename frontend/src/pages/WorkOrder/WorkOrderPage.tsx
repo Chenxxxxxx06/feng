@@ -108,16 +108,24 @@ export default function WorkOrderPage() {
   const advanceStatus = async (id: number, current: string) => {
     const idx = STATUS_FLOW.indexOf(current);
     if (idx < STATUS_FLOW.length - 1) {
-      await api.put(`/workorders/${id}`, { status: STATUS_FLOW[idx + 1] });
-      setOpenActionId(null);
-      fetchOrders();
+      try {
+        await api.put(`/workorders/${id}`, { status: STATUS_FLOW[idx + 1] });
+        setOpenActionId(null);
+        fetchOrders();
+      } catch (e: any) {
+        alert(e?.response?.data?.detail || '状态更新失败');
+      }
     }
   };
 
   const cancelOrder = async (id: number) => {
-    await api.delete(`/workorders/${id}`);
-    setOpenActionId(null);
-    fetchOrders();
+    try {
+      await api.delete(`/workorders/${id}`);
+      setOpenActionId(null);
+      fetchOrders();
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '取消工单失败');
+    }
   };
 
   const startEdit = (wo: WorkOrder) => {
@@ -134,20 +142,24 @@ export default function WorkOrderPage() {
 
   const saveEdit = async () => {
     if (!previewWO) return;
-    const assignee = personnel.find((p) => p.name === editForm.assignee);
-    const { data } = await api.put(`/workorders/${previewWO.id}`, {
-      title: editForm.title,
-      description: editForm.description || null,
-      status: editForm.status,
-      assignee: editForm.assignee || null,
-      assignee_id: assignee?.id || null,
-      assignee_email: assignee?.email || null,
-      fault_type: editForm.fault_type || null,
-      cost_estimate: Number(editForm.cost_estimate),
-    });
-    setPreviewWO(data);
-    setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
-    setEditingWO(false);
+    try {
+      const assignee = personnel.find((p) => p.name === editForm.assignee);
+      const { data } = await api.put(`/workorders/${previewWO.id}`, {
+        title: editForm.title,
+        description: editForm.description || null,
+        status: editForm.status,
+        assignee: editForm.assignee || null,
+        assignee_id: assignee?.id || null,
+        assignee_email: assignee?.email || null,
+        fault_type: editForm.fault_type || null,
+        cost_estimate: Number(editForm.cost_estimate),
+      });
+      setPreviewWO(data);
+      setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+      setEditingWO(false);
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '保存工单失败');
+    }
   };
 
   const sendEmail = async (wo: WorkOrder) => {

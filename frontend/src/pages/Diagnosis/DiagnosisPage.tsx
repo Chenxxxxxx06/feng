@@ -1093,7 +1093,7 @@ export default function DiagnosisPage() {
                 <p className="text-text-muted mb-1">模型状态</p>
                 <p className="font-medium text-text-secondary truncate">
                   {monitorMode === 'group'
-                    ? (batchResult?.success ? 'stub_pending_external_model' : '同步中')
+                    ? (batchResult?.success ? (batchResult?.records?.[0]?.algorithm_status || '分析完成') : '同步中')
                     : autoResult?.algorithm_status || '同步中'}
                 </p>
               </div>

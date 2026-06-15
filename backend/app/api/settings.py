@@ -12,7 +12,6 @@ from app.schemas import (
 from app.services.data_pipeline import get_pipeline_state, set_source_status, SourceStatus
 from app.services.data_pipeline.era5_loader import era5_loader
 from app.services.data_pipeline.scada_loader import scada_loader
-from app.services.data_pipeline.blade_simulator import blade_simulator
 from app.api.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])

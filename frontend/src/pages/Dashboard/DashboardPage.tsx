@@ -197,7 +197,7 @@ export default function DashboardPage() {
           <HIChartPanel turbines={summary.turbines} />
           <HealthPiePanel healthy={healthy} warning={warning} faulty={faulty} />
           <div className="rounded-xl border border-border-default bg-bg-card overflow-hidden">
-            <AIPanel pageType="dashboard" />
+            <AIPanel pageType="dashboard" pageData={{ total: summary.total, healthy, warning, faulty, avgHi: summary.turbines.length > 0 ? (summary.turbines.reduce((s, t) => s + t.hi_value, 0) / summary.turbines.length).toFixed(1) : 0, mtbfHours: mtbfHours != null ? Math.round(mtbfHours) : null, mttrHours }} />
           </div>
         </div>
       </div>
