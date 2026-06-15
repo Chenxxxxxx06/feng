@@ -6,7 +6,6 @@ simulators (blade_simulator, vibration_loader) that raise RuntimeError.
 
 Keep this file for reference until blade/vibration ML models are deployed.
 """
-"""
 
 from datetime import datetime, timezone
 
