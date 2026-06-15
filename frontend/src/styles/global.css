@@ -169,6 +169,31 @@ body {
 }
 .industrial-input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 2px rgba(56,139,253,0.15); }
 
+.form-input {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  padding: 8px 9px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(56,139,253,0.12);
+}
+.form-input::placeholder {
+  color: var(--text-muted);
+}
+.form-input option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+select.form-input {
+  color-scheme: dark;
+}
+
 /* ── Button ── */
 .industrial-btn {
   background: linear-gradient(135deg, rgba(56,139,253,0.15), rgba(56,139,253,0.08));

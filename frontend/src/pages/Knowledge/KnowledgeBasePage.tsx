@@ -17,6 +17,8 @@ interface FaultNode {
   verified?: boolean;
 }
 
+type KnowledgeFormMode = 'create' | 'edit';
+
 interface GraphNode {
   id: string; name: string; category: string; symbol: string; symbolSize: number;
   // Turbine
@@ -57,6 +59,33 @@ const STATUS_COLOR: Record<string, string> = {
   low: '#3fb950', medium: '#f0883e', high: '#da3633', critical: '#ff4444',
 };
 
+const createBlankKnowledgeNode = (): FaultNode => ({
+  id: '',
+  fault_type: '',
+  category: '',
+  icon: '⚠️',
+  severity: 'medium',
+  symptoms: [],
+  root_causes: [],
+  solutions: [],
+  related_faults: [],
+  spare_parts: [],
+  cases: [],
+  source: 'manual',
+  confidence: 1,
+  verified: true,
+});
+
+const cloneKnowledgeNode = (node: FaultNode): FaultNode => ({
+  ...node,
+  symptoms: node.symptoms.map(item => ({ ...item })),
+  root_causes: [...node.root_causes],
+  solutions: node.solutions.map(item => ({ ...item })),
+  related_faults: node.related_faults.map(item => ({ ...item })),
+  spare_parts: node.spare_parts.map(item => ({ ...item })),
+  cases: node.cases.map(item => ({ ...item })),
+});
+
 // ─── Component ───
 export default function KnowledgeBasePage() {
   // Encyclopedia state
@@ -68,6 +97,11 @@ export default function KnowledgeBasePage() {
   const [nodes, setNodes] = useState<FaultNode[]>([]);
   const [kbLoading, setKbLoading] = useState(true);
   const [kbError, setKbError] = useState(false);
+  const [formMode, setFormMode] = useState<KnowledgeFormMode | null>(null);
+  const [formNode, setFormNode] = useState<FaultNode | null>(null);
+  const [formOriginalFaultType, setFormOriginalFaultType] = useState('');
+  const [formSaving, setFormSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   // Graph state
   const [graphView, setGraphView] = useState<'topology' | 'knowledge'>('topology');
@@ -301,6 +335,78 @@ export default function KnowledgeBasePage() {
     fetchGraph();
   };
 
+  const openCreateForm = () => {
+    const defaultCategory = categories.find(c => c !== '全部') || '';
+    setFormMode('create');
+    setFormNode({ ...createBlankKnowledgeNode(), category: defaultCategory });
+    setFormOriginalFaultType('');
+    setFormError('');
+  };
+
+  const openEditForm = (node: FaultNode) => {
+    setFormMode('edit');
+    setFormNode(cloneKnowledgeNode(node));
+    setFormOriginalFaultType(node.fault_type);
+    setFormError('');
+  };
+
+  const closeKnowledgeForm = () => {
+    if (formSaving) return;
+    setFormMode(null);
+    setFormNode(null);
+    setFormOriginalFaultType('');
+    setFormError('');
+  };
+
+  const handleSaveKnowledgeNode = async (node: FaultNode) => {
+    if (!node.fault_type.trim() || !node.category.trim()) {
+      setFormError('请填写故障名称和分类');
+      return;
+    }
+
+    const payload = {
+      fault_type: node.fault_type.trim(),
+      category: node.category.trim(),
+      icon: node.icon.trim() || '⚠️',
+      severity: node.severity || 'medium',
+      symptoms: node.symptoms.filter(item => item.indicator.trim()),
+      root_causes: node.root_causes.filter(Boolean),
+      solutions: node.solutions.filter(item => item.action.trim()),
+      related_faults: node.related_faults.filter(item => item.name.trim()),
+      spare_parts: node.spare_parts.filter(item => item.name.trim()),
+      cases: node.cases.filter(item => item.turbine.trim() || item.summary.trim()),
+      source: node.source || 'manual',
+      confidence: node.confidence ?? 1,
+      verified: node.verified ?? true,
+    };
+
+    setFormSaving(true);
+    setFormError('');
+    try {
+      const { data } = formMode === 'edit'
+        ? await api.patch<FaultNode>(`/knowledge-base/${node.id}`, payload)
+        : await api.post<FaultNode>('/knowledge-base', payload);
+
+      setNodes(prev => {
+        if (formMode === 'edit') {
+          return prev.map(item => String(item.id) === String(data.id) ? data : item);
+        }
+        return [data, ...prev];
+      });
+      setDetail(data);
+      setSelectedFaultType(current => current === formOriginalFaultType ? data.fault_type : current);
+      setFormMode(null);
+      setFormNode(null);
+      setFormOriginalFaultType('');
+      fetchGraph();
+    } catch (err: any) {
+      const status = err.response?.status;
+      setFormError(status === 409 ? '同名故障知识已存在' : '保存失败，请稍后重试');
+    } finally {
+      setFormSaving(false);
+    }
+  };
+
   const switchToKnowledge = (faultType: string) => {
     setSelectedFaultType(faultType);
     setGraphView('knowledge');
@@ -340,6 +446,9 @@ export default function KnowledgeBasePage() {
               <option value="">全部严重度</option>
               <option value="critical">紧急</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option>
             </select>
+            <button onClick={openCreateForm} className="bg-accent-blue/20 border border-accent-blue/40 text-accent-blue rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-accent-blue/30">
+              新增知识
+            </button>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
             {kbLoading ? (
@@ -465,6 +574,7 @@ export default function KnowledgeBasePage() {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => switchToKnowledge(detail.fault_type)} className="text-[10px] px-2 py-1 rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20">🧠 知识网络</button>
+              <button onClick={() => openEditForm(detail)} className="text-[10px] px-2 py-1 rounded bg-bg-deep border border-border-subtle text-text-secondary hover:text-text-primary hover:border-accent-blue/50">编辑</button>
               <button onClick={() => setDetail(null)} className="text-text-muted hover:text-text-primary text-xl leading-none">&times;</button>
             </div>
           </div>
@@ -545,6 +655,18 @@ export default function KnowledgeBasePage() {
           </div>
         </div>
       )}
+      {formMode && formNode && (
+        <KnowledgeNodeForm
+          mode={formMode}
+          node={formNode}
+          categories={categories.filter(c => c !== '全部')}
+          saving={formSaving}
+          error={formError}
+          onChange={setFormNode}
+          onClose={closeKnowledgeForm}
+          onSave={handleSaveKnowledgeNode}
+        />
+      )}
       <CopilotFAB initialMessage={copilotMsg} />
     </div>
   );
@@ -600,6 +722,194 @@ function NodeInfoPanel({ node, view, onViewKnowledge, onClose }: { node: GraphNo
 
       <button onClick={onClose} className="w-full mt-2 py-1.5 text-[10px] text-text-muted hover:text-text-primary transition-colors border-t border-border-subtle pt-2">关闭</button>
     </div>
+  );
+}
+
+function KnowledgeNodeForm({
+  mode,
+  node,
+  categories,
+  saving,
+  error,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  mode: KnowledgeFormMode;
+  node: FaultNode;
+  categories: string[];
+  saving: boolean;
+  error: string;
+  onChange: (node: FaultNode) => void;
+  onClose: () => void;
+  onSave: (node: FaultNode) => void;
+}) {
+  const setField = <K extends keyof FaultNode>(key: K, value: FaultNode[K]) => {
+    onChange({ ...node, [key]: value });
+  };
+
+  const updateListItem = <T,>(key: keyof FaultNode, list: T[], index: number, value: T) => {
+    const next = [...list];
+    next[index] = value;
+    onChange({ ...node, [key]: next });
+  };
+
+  const removeListItem = <T,>(key: keyof FaultNode, list: T[], index: number) => {
+    onChange({ ...node, [key]: list.filter((_, i) => i !== index) });
+  };
+  const categoryOptions = categories.includes(node.category) || !node.category
+    ? categories
+    : [node.category, ...categories];
+
+  return (
+    <div className="w-[460px] flex-shrink-0 border-l border-border-subtle bg-bg-card overflow-auto">
+      <div className="sticky top-0 z-20 bg-bg-card/95 backdrop-blur-sm border-b border-border-subtle p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-base">{mode === 'create' ? '新增知识' : '编辑知识'}</h2>
+            <p className="text-xs text-text-muted mt-1">维护故障百科中的结构化知识节点</p>
+          </div>
+          <button onClick={onClose} disabled={saving} className="text-text-muted hover:text-text-primary text-xl leading-none">&times;</button>
+        </div>
+        {error && <div className="mt-3 text-xs text-accent-red bg-accent-red/10 border border-accent-red/20 rounded px-3 py-2">{error}</div>}
+      </div>
+
+      <div className="p-5 space-y-5">
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">基本信息</h3>
+          <div className="grid grid-cols-[1fr_96px] gap-2">
+            <FormInput label="故障名称" value={node.fault_type} onChange={value => setField('fault_type', value)} />
+            <FormInput label="图标" value={node.icon} onChange={value => setField('icon', value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-[10px] text-text-muted">分类</span>
+              <select className="form-input mt-1 w-full" value={node.category} onChange={e => setField('category', e.target.value)}>
+                <option value="" disabled>请选择分类</option>
+                {categoryOptions.map(item => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[10px] text-text-muted">严重度</span>
+              <select className="form-input mt-1 w-full" value={node.severity} onChange={e => setField('severity', e.target.value)}>
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high">高</option>
+                <option value="critical">紧急</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <FormSection title="症状指标" onAdd={() => setField('symptoms', [...node.symptoms, { indicator: '', threshold: '', unit: '' }])}>
+          {node.symptoms.map((item, index) => (
+            <div key={index} className="grid grid-cols-[1fr_92px_72px_28px] gap-2">
+              <input className="form-input" placeholder="指标名" value={item.indicator} onChange={e => updateListItem('symptoms', node.symptoms, index, { ...item, indicator: e.target.value })} />
+              <input className="form-input" placeholder="阈值" value={item.threshold} onChange={e => updateListItem('symptoms', node.symptoms, index, { ...item, threshold: e.target.value })} />
+              <input className="form-input" placeholder="单位" value={item.unit} onChange={e => updateListItem('symptoms', node.symptoms, index, { ...item, unit: e.target.value })} />
+              <RemoveButton onClick={() => removeListItem('symptoms', node.symptoms, index)} />
+            </div>
+          ))}
+        </FormSection>
+
+        <FormSection title="根因分析" onAdd={() => setField('root_causes', [...node.root_causes, ''])}>
+          {node.root_causes.map((item, index) => (
+            <div key={index} className="grid grid-cols-[1fr_28px] gap-2">
+              <input className="form-input" placeholder="根因" value={item} onChange={e => updateListItem('root_causes', node.root_causes, index, e.target.value)} />
+              <RemoveButton onClick={() => removeListItem('root_causes', node.root_causes, index)} />
+            </div>
+          ))}
+        </FormSection>
+
+        <FormSection title="解决方案" onAdd={() => setField('solutions', [...node.solutions, { action: '', difficulty: 'medium', downtime_hours: 0 }])}>
+          {node.solutions.map((item, index) => (
+            <div key={index} className="grid grid-cols-[1fr_82px_82px_28px] gap-2">
+              <input className="form-input" placeholder="动作" value={item.action} onChange={e => updateListItem('solutions', node.solutions, index, { ...item, action: e.target.value })} />
+              <select className="form-input" value={item.difficulty} onChange={e => updateListItem('solutions', node.solutions, index, { ...item, difficulty: e.target.value })}>
+                <option value="easy">简单</option>
+                <option value="medium">中等</option>
+                <option value="hard">困难</option>
+              </select>
+              <input className="form-input" type="number" min="0" placeholder="小时" value={item.downtime_hours} onChange={e => updateListItem('solutions', node.solutions, index, { ...item, downtime_hours: Number(e.target.value) || 0 })} />
+              <RemoveButton onClick={() => removeListItem('solutions', node.solutions, index)} />
+            </div>
+          ))}
+        </FormSection>
+
+        <FormSection title="关联故障" onAdd={() => setField('related_faults', [...node.related_faults, { id: '', name: '', probability: 0 }])}>
+          {node.related_faults.map((item, index) => (
+            <div key={index} className="grid grid-cols-[1fr_82px_28px] gap-2">
+              <input className="form-input" placeholder="故障名称" value={item.name} onChange={e => updateListItem('related_faults', node.related_faults, index, { ...item, name: e.target.value, id: e.target.value })} />
+              <input className="form-input" type="number" min="0" max="1" step="0.1" placeholder="概率" value={item.probability} onChange={e => updateListItem('related_faults', node.related_faults, index, { ...item, probability: Number(e.target.value) || 0 })} />
+              <RemoveButton onClick={() => removeListItem('related_faults', node.related_faults, index)} />
+            </div>
+          ))}
+        </FormSection>
+
+        <FormSection title="备件" onAdd={() => setField('spare_parts', [...node.spare_parts, { name: '', quantity: 1, est_cost: 0 }])}>
+          {node.spare_parts.map((item, index) => (
+            <div key={index} className="grid grid-cols-[1fr_64px_88px_28px] gap-2">
+              <input className="form-input" placeholder="备件名称" value={item.name} onChange={e => updateListItem('spare_parts', node.spare_parts, index, { ...item, name: e.target.value })} />
+              <input className="form-input" type="number" min="0" placeholder="数量" value={item.quantity} onChange={e => updateListItem('spare_parts', node.spare_parts, index, { ...item, quantity: Number(e.target.value) || 0 })} />
+              <input className="form-input" type="number" min="0" placeholder="成本" value={item.est_cost} onChange={e => updateListItem('spare_parts', node.spare_parts, index, { ...item, est_cost: Number(e.target.value) || 0 })} />
+              <RemoveButton onClick={() => removeListItem('spare_parts', node.spare_parts, index)} />
+            </div>
+          ))}
+        </FormSection>
+
+        <FormSection title="历史案例" onAdd={() => setField('cases', [...node.cases, { turbine: '', date: '', summary: '', resolution: '', total_cost: 0, downtime_days: 0 }])}>
+          {node.cases.map((item, index) => (
+            <div key={index} className="space-y-2 rounded border border-border-subtle bg-bg-deep p-3">
+              <div className="grid grid-cols-[1fr_110px_28px] gap-2">
+                <input className="form-input" placeholder="风机" value={item.turbine} onChange={e => updateListItem('cases', node.cases, index, { ...item, turbine: e.target.value })} />
+                <input className="form-input" type="date" value={item.date} onChange={e => updateListItem('cases', node.cases, index, { ...item, date: e.target.value })} />
+                <RemoveButton onClick={() => removeListItem('cases', node.cases, index)} />
+              </div>
+              <textarea className="form-input min-h-[64px]" placeholder="案例摘要" value={item.summary} onChange={e => updateListItem('cases', node.cases, index, { ...item, summary: e.target.value })} />
+              <div className="grid grid-cols-[1fr_86px_86px] gap-2">
+                <input className="form-input" placeholder="处理结果" value={item.resolution} onChange={e => updateListItem('cases', node.cases, index, { ...item, resolution: e.target.value })} />
+                <input className="form-input" type="number" min="0" placeholder="成本" value={item.total_cost} onChange={e => updateListItem('cases', node.cases, index, { ...item, total_cost: Number(e.target.value) || 0 })} />
+                <input className="form-input" type="number" min="0" placeholder="天数" value={item.downtime_days} onChange={e => updateListItem('cases', node.cases, index, { ...item, downtime_days: Number(e.target.value) || 0 })} />
+              </div>
+            </div>
+          ))}
+        </FormSection>
+      </div>
+
+      <div className="sticky bottom-0 border-t border-border-subtle bg-bg-card/95 backdrop-blur-sm p-4 flex gap-2">
+        <button onClick={onClose} disabled={saving} className="flex-1 rounded-lg border border-border-subtle py-2 text-sm text-text-secondary hover:text-text-primary hover:border-border-active disabled:opacity-60">取消</button>
+        <button onClick={() => onSave(node)} disabled={saving} className="flex-1 rounded-lg bg-accent-blue/20 border border-accent-blue/40 py-2 text-sm font-medium text-accent-blue hover:bg-accent-blue/30 disabled:opacity-60">
+          {saving ? '保存中...' : '保存'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FormInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <span className="text-[10px] text-text-muted">{label}</span>
+      <input className="form-input mt-1 w-full" value={value} onChange={e => onChange(e.target.value)} />
+    </label>
+  );
+}
+
+function FormSection({ title, onAdd, children }: { title: string; onAdd: () => void; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{title}</h3>
+        <button onClick={onAdd} className="text-[10px] px-2 py-1 rounded bg-bg-deep border border-border-subtle text-accent-blue hover:border-accent-blue/50">添加</button>
+      </div>
+      <div className="space-y-2">{children}</div>
+    </section>
+  );
+}
+
+function RemoveButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="h-9 rounded border border-border-subtle text-text-muted hover:text-accent-red hover:border-accent-red/40">×</button>
   );
 }
 

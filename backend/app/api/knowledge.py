@@ -1,16 +1,52 @@
 """故障百科 API — 知识图谱数据查询"""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import Optional
+from sqlalchemy.exc import IntegrityError
+from typing import Any, Optional
 
 from app.database import get_db
 from app.models import FaultKnowledgeNode, Turbine, Fault, WorkOrder
 from app.api.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+class KnowledgeNodeCreate(BaseModel):
+    fault_type: str = Field(min_length=1, max_length=128)
+    category: str = Field(min_length=1, max_length=64)
+    icon: str = Field(default="⚠️", max_length=8)
+    severity: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    symptoms: list[dict[str, Any]] = Field(default_factory=list)
+    root_causes: list[str] = Field(default_factory=list)
+    solutions: list[dict[str, Any]] = Field(default_factory=list)
+    related_faults: list[dict[str, Any]] = Field(default_factory=list)
+    spare_parts: list[dict[str, Any]] = Field(default_factory=list)
+    cases: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = Field(default="manual", max_length=32)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    verified: bool = True
+    extracted_from: Optional[str] = None
+
+
+class KnowledgeNodeUpdate(BaseModel):
+    fault_type: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    icon: Optional[str] = Field(default=None, max_length=8)
+    severity: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
+    symptoms: Optional[list[dict[str, Any]]] = None
+    root_causes: Optional[list[str]] = None
+    solutions: Optional[list[dict[str, Any]]] = None
+    related_faults: Optional[list[dict[str, Any]]] = None
+    spare_parts: Optional[list[dict[str, Any]]] = None
+    cases: Optional[list[dict[str, Any]]] = None
+    source: Optional[str] = Field(default=None, max_length=32)
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    verified: Optional[bool] = None
+    extracted_from: Optional[str] = None
 
 # ─── helpers ───
 SEVERITY_CN = {"low": "低", "medium": "中", "high": "高", "critical": "紧急"}
@@ -56,6 +92,26 @@ async def search(q: str, db: AsyncSession = Depends(get_db)):
     return {"nodes": [_node_to_dict(n) for n in result.scalars().all()]}
 
 
+@router.post("/knowledge-base")
+async def create_knowledge_node(data: KnowledgeNodeCreate, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(
+        select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == data.fault_type)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "Fault knowledge node already exists")
+
+    node = FaultKnowledgeNode(**data.model_dump())
+    db.add(node)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "Fault knowledge node already exists")
+
+    await db.refresh(node)
+    return _node_to_dict(node)
+
+
 @router.get("/knowledge-base/{node_id}")
 async def get_detail(node_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(FaultKnowledgeNode).where(FaultKnowledgeNode.id == node_id))
@@ -83,6 +139,38 @@ async def verify_node(node_id: int, db: AsyncSession = Depends(get_db)):
     node.confidence = 1.0
     await db.commit()
     return {"status": "verified"}
+
+
+@router.patch("/knowledge-base/{node_id}")
+async def update_knowledge_node(
+    node_id: int,
+    data: KnowledgeNodeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    node = await db.get(FaultKnowledgeNode, node_id)
+    if not node:
+        raise HTTPException(404, "Knowledge node not found")
+
+    payload = data.model_dump(exclude_unset=True)
+    if "fault_type" in payload and payload["fault_type"] != node.fault_type:
+        existing = await db.execute(
+            select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == payload["fault_type"])
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(409, "Fault knowledge node already exists")
+
+    for key, value in payload.items():
+        setattr(node, key, value)
+    node.updated_at = datetime.now(timezone.utc)
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "Fault knowledge node already exists")
+
+    await db.refresh(node)
+    return _node_to_dict(node)
 
 
 @router.delete("/knowledge-base/{node_id}")
