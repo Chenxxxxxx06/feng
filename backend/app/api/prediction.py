@@ -220,18 +220,24 @@ async def weather_windows_endpoint(
     """Get weather safety windows for outdoor maintenance.
 
     Returns a score (0-100) and flags for each day in the forecast window.
-    Currently uses a seasonal model; real API integration planned.
+    Uses Open-Meteo forecast API for days 1–16, seasonal model for days 17+.
+    Each window includes a `source` field: "open_meteo" or "seasonal_model".
     """
     from datetime import date as date_type, timedelta
 
     today = date_type.today()
     dates = [today + timedelta(days=i) for i in range(days)]
-    windows = get_weather_for_dates(dates, lat=lat, lng=lng)
+    windows = await get_weather_for_dates(dates, lat=lat, lng=lng)
     return {
         "location": {"lat": lat, "lng": lng},
         "windows": windows,
         "safe_days": sum(1 for w in windows if w["safe"]),
         "total_days": len(windows),
+        "forecast_source": {
+            "near_term": "open_meteo",
+            "near_term_days": min(16, days),
+            "long_range": "seasonal_model",
+        },
     }
 
 

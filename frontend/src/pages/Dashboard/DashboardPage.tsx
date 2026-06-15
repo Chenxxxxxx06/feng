@@ -234,29 +234,32 @@ function ScadaTrendChart({
 
     chart.setOption({
       backgroundColor: 'transparent',
-      grid: { top: 8, right: 16, bottom: 20, left: 40 },
+      grid: { top: 6, right: 12, bottom: 18, left: 44 },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(13,36,71,0.95)',
-        borderColor: 'rgba(59,130,246,0.25)',
+        confine: false,
+        extraCssText: 'z-index: 1000; pointer-events: auto;',
+        backgroundColor: 'rgba(10,31,63,0.97)',
+        borderColor: 'rgba(59,130,246,0.35)',
+        borderWidth: 1,
         textStyle: { color: '#F1F5F9', fontSize: 11 },
         formatter: (params: any) => {
           const p = Array.isArray(params) ? params[0] : params;
-          return `${p.axisValue}<br/><span style="color:${color}">●</span> ${p.seriesName}: <b>${p.value} ${unit}</b>`;
+          return `<div style="min-width:120px">${p.axisValue}<br/><span style="color:${color}">●</span> ${p.seriesName}: <b>${p.value} ${unit}</b></div>`;
         },
       },
       xAxis: {
         type: 'category',
         data: data.map((d) => d.time),
-        axisLabel: { color: '#64748B', fontSize: 9 },
+        axisLabel: { color: '#64748B', fontSize: 8, interval: 3 },
         axisLine: { lineStyle: { color: 'rgba(59,130,246,0.10)' } },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#64748B', fontSize: 9, formatter: `{value}` },
+        axisLabel: { color: '#64748B', fontSize: 8, margin: 6 },
         splitLine: { lineStyle: { color: 'rgba(59,130,246,0.06)' } },
-        splitNumber: 3,
+        splitNumber: 2,
       },
       series: [
         {
@@ -956,21 +959,21 @@ export default function DashboardPage() {
           </div>
 
           {/* ── Column 3: SCADA Data Visualization ── */}
-          <div className="premium-card rounded-2xl p-4 flex flex-col overflow-hidden">
+          <div className="premium-card rounded-2xl p-4 flex flex-col overflow-visible">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-[13px] font-semibold text-text-primary">
                 SCADA 数据趋势
               </h3>
               <span className="text-[10px] text-text-muted">近24小时</span>
             </div>
-            <div className="flex-1 grid grid-rows-3 gap-2 overflow-hidden">
+            <div className="flex-1 grid grid-rows-3 gap-3" style={{ minHeight: 0 }}>
               <ScadaTrendChart
                 title="风速趋势"
                 data={windSpeedData}
                 dataKey="windSpeed"
                 color="#22D3EE"
                 unit="m/s"
-                height={70}
+                height={76}
               />
               <ScadaTrendChart
                 title="发电功率"
@@ -978,7 +981,7 @@ export default function DashboardPage() {
                 dataKey="power"
                 color="#3B82F6"
                 unit="kW"
-                height={70}
+                height={76}
               />
               <ScadaTrendChart
                 title="齿轮箱温度"
@@ -986,7 +989,7 @@ export default function DashboardPage() {
                 dataKey="temperature"
                 color="#F59E0B"
                 unit="°C"
-                height={70}
+                height={76}
               />
             </div>
           </div>

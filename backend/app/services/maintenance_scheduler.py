@@ -4,6 +4,7 @@ Key algorithms:
   1. auto_schedule() — greedy deadline-aware slot assignment
   2. detect_conflicts() — same-turbine, crew-overload, weather-unsafe detection
   3. weather_window() — rate a date as safe/unsafe for outdoor maintenance
+     Uses Open-Meteo forecast API for days 1–16, seasonal model for days 17+.
 """
 
 from __future__ import annotations
@@ -12,7 +13,13 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+# ── Open-Meteo config ──
+OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_FORECAST_MAX_DAYS = 16  # free tier daily forecast horizon
 
 # ── Crew and shift config ──
 SHIFT_HOURS = 8  # hours per shift
@@ -178,21 +185,157 @@ def detect_conflicts(scheduled: list[dict]) -> list[dict]:
     return conflicts
 
 
-def weather_window(d: date, lat: float, lng: float) -> dict:
-    """Rate a date/location for outdoor maintenance safety.
+# ── WMO weather-code → Chinese label ──
+_WMO_LABELS: dict[int, str] = {
+    0: "晴", 1: "大部晴", 2: "多云", 3: "阴",
+    45: "雾", 48: "冰雾",
+    51: "小毛毛雨", 53: "毛毛雨", 55: "大毛毛雨",
+    56: "冻毛毛雨", 57: "冻毛毛雨",
+    61: "小雨", 63: "中雨", 65: "大雨",
+    66: "冻雨", 67: "冻雨",
+    71: "小雪", 73: "中雪", 75: "大雪",
+    77: "雪粒",
+    80: "阵雨", 81: "中阵雨", 82: "大阵雨",
+    85: "小阵雪", 86: "大阵雪",
+    95: "雷暴", 96: "冰雹雷暴", 99: "大冰雹雷暴",
+}
 
-    Returns a weather score 0-100 (higher = better) and flags.
-    Stub — real implementation would call Open-Meteo forecast API.
-    For now, uses a simple seasonal model.
+# ── Weather codes that make outdoor turbine work dangerous ──
+_UNSAFE_WEATHER_CODES = {55, 65, 66, 67, 75, 82, 86, 95, 96, 99}
+_CAUTION_WEATHER_CODES = {51, 53, 61, 63, 71, 73, 80, 81, 85}
+
+
+def _score_forecast_day(day_data: dict) -> tuple[int, list[str], bool]:
+    """Score a single Open-Meteo daily forecast row for maintenance safety.
+
+    Returns (score 0–100, flags list, safe boolean).
     """
+    score = 100
+    flags: list[str] = []
+
+    wind_max = day_data.get("wind_speed_10m_max") or 0
+    gust_max = day_data.get("wind_gusts_10m_max") or 0
+    precip = day_data.get("precipitation_sum") or 0
+    temp_max = day_data.get("temperature_2m_max")
+    temp_min = day_data.get("temperature_2m_min")
+    weather_code = day_data.get("weather_code") or 0
+
+    # ── Wind (most critical for turbine work) ──
+    max_wind = max(wind_max, gust_max)
+    if max_wind > 15:
+        score -= 50
+        flags.append(f"强风 {max_wind:.0f}m/s")
+    elif max_wind > 12:
+        score -= 30
+        flags.append(f"大风 {max_wind:.0f}m/s")
+    elif max_wind > 8:
+        score -= 10
+        flags.append(f"微风 {max_wind:.0f}m/s")
+
+    # ── Precipitation ──
+    if precip > 20:
+        score -= 40
+        flags.append(f"暴雨 {precip:.0f}mm")
+    elif precip > 10:
+        score -= 25
+        flags.append(f"大雨 {precip:.0f}mm")
+    elif precip > 5:
+        score -= 15
+        flags.append(f"降雨 {precip:.0f}mm")
+    elif precip > 1:
+        score -= 5
+        flags.append(f"小雨 {precip:.1f}mm")
+
+    # ── Temperature extremes ──
+    if temp_max is not None and temp_max > 38:
+        score -= 15
+        flags.append(f"高温 {temp_max:.0f}°C")
+    elif temp_max is not None and temp_max > 35:
+        score -= 8
+        flags.append(f"炎热 {temp_max:.0f}°C")
+    if temp_min is not None and temp_min < -15:
+        score -= 20
+        flags.append(f"严寒 {temp_min:.0f}°C")
+    elif temp_min is not None and temp_min < -5:
+        score -= 8
+        flags.append(f"低温 {temp_min:.0f}°C")
+
+    # ── Severe weather codes ──
+    if weather_code in _UNSAFE_WEATHER_CODES:
+        score -= 40
+        flags.append(_WMO_LABELS.get(weather_code, f"恶劣天气"))
+    elif weather_code in _CAUTION_WEATHER_CODES:
+        score -= 10
+        label = _WMO_LABELS.get(weather_code, "")
+        if label and label not in flags:
+            flags.append(label)
+
+    score = max(0, min(100, score))
+    safe = score >= 50
+    return score, flags, safe
+
+
+async def _fetch_open_meteo_forecast(
+    lat: float, lng: float, days: int = 16
+) -> dict[str, list]:
+    """Fetch daily forecast from Open-Meteo API.
+
+    Returns { "dates": [...], "rows": [{wind_speed_10m_max, ...}, ...] }
+    or empty dict on failure.
+    """
+    params = {
+        "latitude": lat,
+        "longitude": lng,
+        "daily": ",".join([
+            "weather_code",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_sum",
+            "wind_speed_10m_max",
+            "wind_gusts_10m_max",
+        ]),
+        "wind_speed_unit": "ms",
+        "timezone": "Asia/Shanghai",
+        "forecast_days": min(days, OPEN_METEO_FORECAST_MAX_DAYS),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(OPEN_METEO_FORECAST_URL, params=params)
+            resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Open-Meteo forecast fetch failed: %s", exc)
+        return {}
+
+    body = resp.json()
+    daily = body.get("daily")
+    if not isinstance(daily, dict):
+        return {}
+
+    dates = daily.get("time") or []
+    if not dates:
+        return {}
+
+    keys = [
+        "weather_code", "temperature_2m_max", "temperature_2m_min",
+        "precipitation_sum", "wind_speed_10m_max", "wind_gusts_10m_max",
+    ]
+    rows = []
+    for i in range(len(dates)):
+        row = {}
+        for k in keys:
+            arr = daily.get(k) or []
+            row[k] = arr[i] if i < len(arr) else None
+        rows.append(row)
+
+    return {"dates": dates, "rows": rows, "lat": lat, "lng": lng}
+
+
+def _seasonal_window(d: date, lat: float, lng: float) -> dict:
+    """Fallback seasonal model for dates beyond the forecast horizon."""
     month = d.month
     day_of_month = d.day
 
-    # Seasonal approximation for Shaanxi:
-    # Nov-Feb: cold, possible snow/ice → wind turbine work difficult
-    # Mar-May: moderate, occasional sandstorms in north
-    # Jun-Aug: warm, occasional thunderstorms
-    # Sep-Oct: best season, mild and dry
     if month in (12, 1, 2):
         base_score = 40
         flags = ["低温", "可能的冰雪"]
@@ -205,12 +348,11 @@ def weather_window(d: date, lat: float, lng: float) -> dict:
     elif month in (7, 8):
         base_score = 70
         flags = ["高温", "可能有雷暴"]
-    else:  # 9, 10, 11
+    else:
         base_score = 90
         flags = []
 
-    # Simple pseudo-random daily variation (deterministic from date)
-    variation = (day_of_month * 7 + month * 13) % 20 - 10  # -10 to +10
+    variation = (day_of_month * 7 + month * 13) % 20 - 10
     score = max(0, min(100, base_score + variation))
 
     return {
@@ -220,16 +362,72 @@ def weather_window(d: date, lat: float, lng: float) -> dict:
         "flags": flags,
         "lat": lat,
         "lng": lng,
+        "source": "seasonal_model",
     }
 
 
-def get_weather_for_dates(
+async def get_weather_for_dates(
     dates: list[date],
     lat: float = 37.3,
     lng: float = 107.6,
 ) -> list[dict]:
-    """Get weather windows for a list of dates at a given location."""
-    return [weather_window(d, lat, lng) for d in dates]
+    """Get weather windows for a list of dates at a given location.
+
+    Uses Open-Meteo daily forecast for days within the free 16-day horizon,
+    and the seasonal model for dates beyond that.
+    """
+    if not dates:
+        return []
+
+    today = date.today()
+    horizon = today + timedelta(days=OPEN_METEO_FORECAST_MAX_DAYS - 1)
+
+    forecast_dates = [d for d in dates if d <= horizon]
+    seasonal_dates = [d for d in dates if d > horizon]
+
+    windows: list[dict] = []
+
+    # ── Real forecast for near-term dates ──
+    if forecast_dates:
+        fc = await _fetch_open_meteo_forecast(
+            lat, lng, days=OPEN_METEO_FORECAST_MAX_DAYS
+        )
+        if fc and fc.get("dates"):
+            fc_dates = fc["dates"]
+            fc_rows = fc["rows"]
+            fc_index: dict[str, dict] = {}
+            for i, dstr in enumerate(fc_dates):
+                if i < len(fc_rows):
+                    fc_index[dstr] = fc_rows[i]
+
+            for d in forecast_dates:
+                dkey = d.isoformat()
+                row = fc_index.get(dkey)
+                if row:
+                    score, flags, safe = _score_forecast_day(row)
+                    windows.append({
+                        "date": dkey,
+                        "score": score,
+                        "safe": safe,
+                        "flags": flags,
+                        "lat": lat,
+                        "lng": lng,
+                        "source": "open_meteo",
+                    })
+                else:
+                    windows.append(_seasonal_window(d, lat, lng))
+        else:
+            # API failed — fall back to seasonal for all forecast dates
+            for d in forecast_dates:
+                windows.append(_seasonal_window(d, lat, lng))
+
+    # ── Seasonal model for far-future dates ──
+    for d in seasonal_dates:
+        windows.append(_seasonal_window(d, lat, lng))
+
+    # Sort by date
+    windows.sort(key=lambda w: w["date"])
+    return windows
 
 
 def generate_ics(scheduled: list[dict], title: str = "风电运维计划") -> str:
