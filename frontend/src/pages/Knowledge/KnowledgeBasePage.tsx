@@ -3,9 +3,12 @@ import * as echarts from 'echarts';
 import api from '../../services/api';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
-// ─── Types ───
 interface FaultNode {
-  id: number | string; fault_type: string; category: string; icon: string; severity: string;
+  id: number | string;
+  fault_type: string;
+  category: string;
+  icon: string;
+  severity: string;
   symptoms: { indicator: string; threshold: string; unit: string }[];
   root_causes: string[];
   solutions: { action: string; difficulty: string; downtime_hours: number }[];
@@ -22,50 +25,109 @@ type KnowledgeFormMode = 'create' | 'edit';
 type ReviewFilter = 'all' | 'pending' | 'approved';
 
 interface GraphNode {
-  id: string; name: string; category: string; symbol: string; symbolSize: number;
-  // Turbine
-  status?: string; status_icon?: string; region?: string; fault_count?: number;
-  // Fault record
-  fault_type?: string; active?: boolean; detected_at?: string; status_cn?: string; confidence?: number;
-  // Work order
+  id: string;
+  name: string;
+  category: string;
+  symbol: string;
+  symbolSize: number;
+  status?: string;
+  status_icon?: string;
+  region?: string;
+  fault_count?: number;
+  fault_type?: string;
+  active?: boolean;
+  detected_at?: string;
+  status_cn?: string;
+  confidence?: number;
   assignee?: string;
-  // Knowledge
-  severity?: string; severity_cn?: string;
-  difficulty?: string; downtime_hours?: number;
-  threshold?: string; unit?: string;
-  quantity?: number; est_cost?: number;
-  resolution?: string; total_cost?: number; downtime_days?: number;
+  severity?: string;
+  severity_cn?: string;
+  difficulty?: string;
+  downtime_hours?: number;
+  threshold?: string;
+  unit?: string;
+  quantity?: number;
+  est_cost?: number;
+  resolution?: string;
+  total_cost?: number;
+  downtime_days?: number;
 }
 
 interface GraphData {
-  stats?: { active_faults: number; warning_turbines: number; pending_workorders: number; personnel_count: number; total_turbines: number; total_knowledge_nodes: number; regions?: string[] };
-  nodes: GraphNode[]; edges: { source: string; target: string; label: string }[];
+  stats?: {
+    active_faults: number;
+    warning_turbines: number;
+    pending_workorders: number;
+    personnel_count: number;
+    total_turbines: number;
+    total_knowledge_nodes: number;
+    pending_knowledge_nodes?: number;
+    regions?: string[];
+  };
+  nodes: GraphNode[];
+  edges: { source: string; target: string; label: string }[];
   fault_type?: string;
 }
 
-// ─── Constants ───
-const SEVERITY: Record<string, string> = { low: '低', medium: '中', high: '高', critical: '紧急' };
-const SEVERITY_COLOR: Record<string, string> = { low: 'bg-accent-green/20 text-accent-green', medium: 'bg-accent-yellow/20 text-accent-yellow', high: 'bg-accent-red/20 text-accent-red', critical: 'bg-red-600/30 text-red-400' };
-const DIFFICULTY: Record<string, string> = { easy: '简单', medium: '中等', hard: '困难' };
+const ALL_CATEGORY = '全部';
+
+const SEVERITY: Record<string, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+  critical: '紧急',
+};
+
+const SEVERITY_COLOR: Record<string, string> = {
+  low: 'bg-accent-green/15 text-accent-green border-accent-green/20',
+  medium: 'bg-accent-yellow/15 text-accent-yellow border-accent-yellow/20',
+  high: 'bg-accent-red/15 text-accent-red border-accent-red/20',
+  critical: 'bg-red-600/25 text-red-300 border-red-500/30',
+};
+
+const DIFFICULTY: Record<string, string> = {
+  easy: '简单',
+  medium: '中等',
+  hard: '困难',
+};
 
 const CAT_COLORS: Record<string, string> = {
-  fault: '#388bfd', symptom: '#f0883e', root_cause: '#da3633', solution: '#3fb950',
-  spare_part: '#a371f7', turbine: '#58a6ff', fault_record: '#db6d28', workorder: '#f7b73c',
-  personnel: '#79c0ff', case_record: '#8b949e',
+  fault: '#388bfd',
+  symptom: '#f0883e',
+  root_cause: '#da3633',
+  solution: '#3fb950',
+  spare_part: '#a371f7',
+  turbine: '#58a6ff',
+  fault_record: '#db6d28',
+  workorder: '#f7b73c',
+  personnel: '#79c0ff',
+  case_record: '#8b949e',
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  normal: '#3fb950', warning: '#f0883e', fault: '#da3633', maintenance: '#58a6ff',
-  open: '#da3633', diagnosing: '#f0883e', confirmed: '#db6d28', resolved: '#3fb950',
-  pending: '#f0883e', in_progress: '#388bfd', completed: '#3fb950', cancelled: '#8b949e',
-  low: '#3fb950', medium: '#f0883e', high: '#da3633', critical: '#ff4444',
+  normal: '#3fb950',
+  warning: '#f0883e',
+  fault: '#da3633',
+  maintenance: '#58a6ff',
+  open: '#da3633',
+  diagnosing: '#f0883e',
+  confirmed: '#db6d28',
+  resolved: '#3fb950',
+  pending: '#f0883e',
+  in_progress: '#388bfd',
+  completed: '#3fb950',
+  cancelled: '#8b949e',
+  low: '#3fb950',
+  medium: '#f0883e',
+  high: '#da3633',
+  critical: '#ff4444',
 };
 
 const createBlankKnowledgeNode = (): FaultNode => ({
   id: '',
   fault_type: '',
   category: '',
-  icon: '⚠️',
+  icon: '!',
   severity: 'medium',
   symptoms: [],
   root_causes: [],
@@ -80,19 +142,33 @@ const createBlankKnowledgeNode = (): FaultNode => ({
 
 const cloneKnowledgeNode = (node: FaultNode): FaultNode => ({
   ...node,
-  symptoms: node.symptoms.map(item => ({ ...item })),
-  root_causes: [...node.root_causes],
-  solutions: node.solutions.map(item => ({ ...item })),
-  related_faults: node.related_faults.map(item => ({ ...item })),
-  spare_parts: node.spare_parts.map(item => ({ ...item })),
-  cases: node.cases.map(item => ({ ...item })),
+  symptoms: (node.symptoms || []).map(item => ({ ...item })),
+  root_causes: [...(node.root_causes || [])],
+  solutions: (node.solutions || []).map(item => ({ ...item })),
+  related_faults: (node.related_faults || []).map(item => ({ ...item })),
+  spare_parts: (node.spare_parts || []).map(item => ({ ...item })),
+  cases: (node.cases || []).map(item => ({ ...item })),
 });
 
-// ─── Component ───
+const normalizeNode = (node: FaultNode): FaultNode => ({
+  ...node,
+  icon: node.icon || '!',
+  severity: node.severity || 'medium',
+  symptoms: node.symptoms || [],
+  root_causes: node.root_causes || [],
+  solutions: node.solutions || [],
+  related_faults: node.related_faults || [],
+  spare_parts: node.spare_parts || [],
+  cases: node.cases || [],
+  verified: node.verified ?? true,
+  confidence: node.confidence ?? 1,
+});
+
+const isPendingReview = (node: FaultNode) => node.source === 'ai_extracted' && !node.verified;
+
 export default function KnowledgeBasePage() {
-  // Encyclopedia state
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('全部');
+  const [category, setCategory] = useState(ALL_CATEGORY);
   const [severityFilter, setSeverityFilter] = useState('');
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
   const [detail, setDetail] = useState<FaultNode | null>(null);
@@ -106,7 +182,6 @@ export default function KnowledgeBasePage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // Graph state
   const [graphView, setGraphView] = useState<'topology' | 'knowledge'>('topology');
   const [selectedFaultType, setSelectedFaultType] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
@@ -114,7 +189,6 @@ export default function KnowledgeBasePage() {
   const [graphError, setGraphError] = useState(false);
   const [graphNode, setGraphNode] = useState<GraphNode | null>(null);
 
-  // Topology filters
   const [filterRegion, setFilterRegion] = useState('');
   const [activeOnly, setActiveOnly] = useState(false);
   const [availableRegions, setAvailableRegions] = useState<string[]>([]);
@@ -122,13 +196,12 @@ export default function KnowledgeBasePage() {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInst = useRef<echarts.ECharts | null>(null);
 
-  // ─── Fetch encyclopedia from backend knowledge base ───
   const fetchKnowledgeBase = useCallback(async () => {
     setKbLoading(true);
     setKbError(false);
     try {
       const { data } = await api.get<{ nodes: FaultNode[] }>('/knowledge-base');
-      const nextNodes = data.nodes || [];
+      const nextNodes = (data.nodes || []).map(normalizeNode);
       setNodes(nextNodes);
       setDetail(current => {
         if (!current) return current;
@@ -146,25 +219,24 @@ export default function KnowledgeBasePage() {
   }, [fetchKnowledgeBase]);
 
   const categories = useMemo(
-    () => ['全部', ...Array.from(new Set(nodes.map(n => n.category)))],
+    () => [ALL_CATEGORY, ...Array.from(new Set(nodes.map(n => n.category).filter(Boolean)))],
     [nodes],
   );
 
-  // ─── Encyclopedia filter ───
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
+    const q = search.trim().toLowerCase();
     return nodes.filter(n => {
-      if (category !== '全部' && n.category !== category) return false;
+      if (category !== ALL_CATEGORY && n.category !== category) return false;
       if (severityFilter && n.severity !== severityFilter) return false;
-      if (reviewFilter === 'pending' && !(n.source === 'ai_extracted' && !n.verified)) return false;
-      if (reviewFilter === 'approved' && n.source === 'ai_extracted' && !n.verified) return false;
-      if (q) {
-        return n.fault_type.toLowerCase().includes(q)
-          || n.symptoms.some(s => s.indicator.toLowerCase().includes(q))
-          || n.root_causes.some(r => r.toLowerCase().includes(q))
-          || n.solutions.some(s => s.action.toLowerCase().includes(q));
-      }
-      return true;
+      if (reviewFilter === 'pending' && !isPendingReview(n)) return false;
+      if (reviewFilter === 'approved' && isPendingReview(n)) return false;
+      if (!q) return true;
+
+      return n.fault_type.toLowerCase().includes(q)
+        || n.category.toLowerCase().includes(q)
+        || n.symptoms.some(s => s.indicator.toLowerCase().includes(q))
+        || n.root_causes.some(r => r.toLowerCase().includes(q))
+        || n.solutions.some(s => s.action.toLowerCase().includes(q));
     });
   }, [nodes, search, category, severityFilter, reviewFilter]);
 
@@ -172,10 +244,10 @@ export default function KnowledgeBasePage() {
     total: nodes.length,
     categories: new Set(nodes.map(n => n.category)).size,
     high: nodes.filter(n => n.severity === 'high' || n.severity === 'critical').length,
-    pendingReview: nodes.filter(n => n.source === 'ai_extracted' && !n.verified).length,
+    pendingReview: nodes.filter(isPendingReview).length,
+    aiExtracted: nodes.filter(n => n.source === 'ai_extracted').length,
   }), [nodes]);
 
-  // ─── Fetch graph ───
   const fetchGraph = useCallback(async () => {
     setGraphLoading(true);
     setGraphError(false);
@@ -204,7 +276,6 @@ export default function KnowledgeBasePage() {
     return () => window.removeEventListener('focus', h);
   }, [fetchGraph]);
 
-  // ─── ECharts option ───
   const buildOption = useCallback((data: GraphData) => {
     const isTopo = graphView === 'topology';
     const cats = [...new Set(data.nodes.map(n => n.category))];
@@ -216,30 +287,28 @@ export default function KnowledgeBasePage() {
       let shadow = 0;
 
       if (isTopo) {
-        // Turbine: color by operating status
         if (n.category === 'turbine') {
           color = STATUS_COLOR[n.status || 'normal'] || color;
           borderColor = color;
           borderW = 2;
         }
-        // Fault record: red if active, grey if resolved
         if (n.category === 'fault_record') {
           color = n.active ? '#da3633' : '#484f58';
-          if (n.active) { borderColor = '#ff6b6b'; borderW = 1; }
+          if (n.active) {
+            borderColor = '#ff6b6b';
+            borderW = 1;
+          }
         }
-        // Work order: color by WO status
         if (n.category === 'workorder') {
           color = STATUS_COLOR[n.status || 'pending'] || color;
         }
-      } else {
-        // Knowledge: fault center node colored by severity
-        if (n.category === 'fault') {
-          color = STATUS_COLOR[n.severity || 'medium'] || color;
-          borderColor = color;
-          borderW = 3;
-          shadow = 12;
-        }
+      } else if (n.category === 'fault') {
+        color = STATUS_COLOR[n.severity || 'medium'] || color;
+        borderColor = color;
+        borderW = 3;
+        shadow = 12;
       }
+
       return {
         ...n,
         itemStyle: { color, borderColor, borderWidth: borderW, shadowBlur: shadow, shadowColor: color },
@@ -256,12 +325,10 @@ export default function KnowledgeBasePage() {
         formatter: (p: any) => {
           if (p.dataType === 'edge') return p.data.label || '';
           const n = p.data as GraphNode;
-          const lines: string[] = [];
-          lines.push(`<b>${n.name}</b>`);
-          lines.push(`类型: ${n.category}`);
+          const lines: string[] = [`<b>${n.name}</b>`, `类型: ${graphCategoryLabel(n.category)}`];
           if (n.status_cn || n.status) lines.push(`状态: ${n.status_cn || n.status} ${n.status_icon || ''}`);
           if (n.region) lines.push(`区域: ${n.region}`);
-          if (n.fault_count !== undefined && n.fault_count > 0) lines.push(`活跃故障: ${n.fault_count}个`);
+          if (n.fault_count !== undefined && n.fault_count > 0) lines.push(`活跃故障: ${n.fault_count} 个`);
           if (n.detected_at) lines.push(`发现时间: ${n.detected_at}`);
           if (n.assignee) lines.push(`负责人: ${n.assignee}`);
           if (n.severity_cn || n.severity) lines.push(`严重度: ${n.severity_cn || SEVERITY[n.severity || ''] || n.severity}`);
@@ -274,10 +341,14 @@ export default function KnowledgeBasePage() {
       },
       legend: [{
         data: legendCats.map(c => ({ name: c, icon: 'circle' })),
-        bottom: 0, textStyle: { color: '#8b949e', fontSize: 10 },
+        bottom: 0,
+        textStyle: { color: '#8b949e', fontSize: 10 },
       }],
       series: [{
-        type: 'graph', layout: 'force', roam: true, draggable: true,
+        type: 'graph',
+        layout: 'force',
+        roam: true,
+        draggable: true,
         force: {
           repulsion: isTopo ? 350 : 200,
           edgeLength: isTopo ? [120, 400] : [60, 180],
@@ -285,7 +356,8 @@ export default function KnowledgeBasePage() {
         },
         data: nodeData,
         links: data.edges.map(e => ({
-          source: e.source, target: e.target,
+          source: e.source,
+          target: e.target,
           label: { show: true, formatter: e.label, fontSize: 9, color: '#8b949e' },
         })),
         categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#8b949e' } })),
@@ -296,21 +368,15 @@ export default function KnowledgeBasePage() {
     };
   }, [graphView]);
 
-  // ─── ECharts lifecycle ───
   useEffect(() => {
     if (!chartRef.current || !graphData?.nodes?.length) return;
     if (!chartInst.current) chartInst.current = echarts.init(chartRef.current, undefined, { renderer: 'canvas' });
     chartInst.current.setOption(buildOption(graphData), true);
+
     const handler = (p: any) => {
-      if (p.dataType === 'node') {
-        const n = p.data as GraphNode;
-        setGraphNode(n);
-        // Topology: clicking fault_record offers "查看知识"
-        if (graphView === 'topology' && n.category === 'fault_record' && n.fault_type) {
-          // Don't auto-switch — user clicks button in panel
-        }
-      }
+      if (p.dataType === 'node') setGraphNode(p.data as GraphNode);
     };
+
     chartInst.current.on('click', handler);
     const obs = new ResizeObserver(() => chartInst.current?.resize());
     obs.observe(chartRef.current);
@@ -320,17 +386,17 @@ export default function KnowledgeBasePage() {
       chartInst.current?.dispose();
       chartInst.current = null;
     };
-  }, [graphData, buildOption, graphView]);
+  }, [graphData, buildOption]);
 
-  // ─── Actions ───
   const handleAskAI = (node: FaultNode) => {
-    setCopilotMsg(`请分析故障: ${node.fault_type}。症状: ${node.symptoms.map(s => s.indicator).join('、')}。严重度: ${SEVERITY[node.severity]}。请给出诊断建议。`);
+    setCopilotMsg(`请分析故障：${node.fault_type}。症状：${node.symptoms.map(s => s.indicator).join('、') || '暂无'}。严重度：${SEVERITY[node.severity] || node.severity}。请给出诊断建议。`);
   };
 
   const handleVerifyNode = async (node: FaultNode) => {
     await api.patch(`/knowledge-base/${node.id}/verify`);
-    setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? { ...n, verified: true, confidence: 1.0, review_state: 'approved' } : n));
-    setDetail({ ...node, verified: true, confidence: 1.0, review_state: 'approved' });
+    const next = { ...node, verified: true, confidence: 1.0, review_state: 'approved' as const };
+    setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? next : n));
+    setDetail(next);
     fetchGraph();
   };
 
@@ -351,7 +417,7 @@ export default function KnowledgeBasePage() {
   };
 
   const openCreateForm = () => {
-    const defaultCategory = categories.find(c => c !== '全部') || '';
+    const defaultCategory = categories.find(c => c !== ALL_CATEGORY) || '';
     setFormMode('create');
     setFormNode({ ...createBlankKnowledgeNode(), category: defaultCategory });
     setFormOriginalFaultType('');
@@ -382,7 +448,7 @@ export default function KnowledgeBasePage() {
     const payload = {
       fault_type: node.fault_type.trim(),
       category: node.category.trim(),
-      icon: node.icon.trim() || '⚠️',
+      icon: node.icon.trim() || '!',
       severity: node.severity || 'medium',
       symptoms: node.symptoms.filter(item => item.indicator.trim()),
       root_causes: node.root_causes.filter(Boolean),
@@ -402,14 +468,15 @@ export default function KnowledgeBasePage() {
         ? await api.patch<FaultNode>(`/knowledge-base/${node.id}`, payload)
         : await api.post<FaultNode>('/knowledge-base', payload);
 
+      const saved = normalizeNode(data);
       setNodes(prev => {
         if (formMode === 'edit') {
-          return prev.map(item => String(item.id) === String(data.id) ? data : item);
+          return prev.map(item => String(item.id) === String(saved.id) ? saved : item);
         }
-        return [data, ...prev];
+        return [saved, ...prev];
       });
-      setDetail(data);
-      setSelectedFaultType(current => current === formOriginalFaultType ? data.fault_type : current);
+      setDetail(saved);
+      setSelectedFaultType(current => current === formOriginalFaultType ? saved.fault_type : current);
       setFormMode(null);
       setFormNode(null);
       setFormOriginalFaultType('');
@@ -436,134 +503,132 @@ export default function KnowledgeBasePage() {
 
   const gStats = graphData?.stats;
 
-  // ─── Render ───
   return (
-    <div className="flex h-full">
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* ══════ Header: Encyclopedia ══════ */}
-        <div className="border-b border-border-subtle p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold">📚 故障百科</h1>
-              <p className="text-xs text-text-muted">共 {stats.total} 种 · {stats.categories} 类 · {stats.high} 高危</p>
+    <div className="flex h-full bg-bg-deep">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="border-b border-border-subtle bg-bg-panel/90 p-4">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-lg font-bold text-text-primary">故障百科</h1>
+              <p className="mt-1 text-xs text-text-muted">沉淀故障症状、根因、方案和案例，并对 AI 抽取知识进行审核。</p>
             </div>
-            <span className="text-xs text-accent-green flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />
-              实时数据
-            </span>
-          </div>
-          <div className="flex gap-2 mb-3">
-            <input className="flex-1 bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm placeholder-text-muted focus:outline-none focus:border-accent-blue" placeholder="搜索故障名称、症状、根因..." value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm" value={category} onChange={e => setCategory(e.target.value)}>
-              {categories.map(c => <option key={c} value={c}>{c === '全部' ? '全部分类' : c}</option>)}
-            </select>
-            <select className="bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
-              <option value="">全部严重度</option>
-              <option value="critical">紧急</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option>
-            </select>
-            <select className="bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 text-sm" value={reviewFilter} onChange={e => setReviewFilter(e.target.value as ReviewFilter)}>
-              <option value="all">全部审核状态</option>
-              <option value="pending">待审核</option>
-              <option value="approved">已通过</option>
-            </select>
-            <button onClick={openCreateForm} className="bg-accent-blue/20 border border-accent-blue/40 text-accent-blue rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-accent-blue/30">
+            <button onClick={openCreateForm} className="rounded-lg border border-accent-blue/40 bg-accent-blue/20 px-3 py-2 text-sm font-medium text-accent-blue hover:bg-accent-blue/30">
               新增知识
             </button>
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
+
+          <div className="mb-4 grid grid-cols-4 gap-3">
+            <SummaryTile label="知识节点" value={stats.total} tone="blue" />
+            <SummaryTile label="高危知识" value={stats.high} tone="red" />
+            <SummaryTile label="待审核" value={stats.pendingReview} tone="yellow" active={reviewFilter === 'pending'} onClick={() => setReviewFilter('pending')} />
+            <SummaryTile label="AI 提取" value={stats.aiExtracted} tone="cyan" />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="min-w-[240px] flex-1 rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm placeholder-text-muted focus:border-accent-blue focus:outline-none"
+              placeholder="搜索故障名称、症状、根因或方案"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <select className="rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm" value={category} onChange={e => setCategory(e.target.value)}>
+              {categories.map(c => <option key={c} value={c}>{c === ALL_CATEGORY ? '全部分类' : c}</option>)}
+            </select>
+            <select className="rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
+              <option value="">全部严重度</option>
+              <option value="critical">紧急</option>
+              <option value="high">高</option>
+              <option value="medium">中</option>
+              <option value="low">低</option>
+            </select>
+            <div className="flex overflow-hidden rounded-lg border border-border-subtle text-sm">
+              <ReviewButton label="全部" active={reviewFilter === 'all'} onClick={() => setReviewFilter('all')} />
+              <ReviewButton label={`待审核 ${stats.pendingReview}`} active={reviewFilter === 'pending'} onClick={() => setReviewFilter('pending')} />
+              <ReviewButton label="已通过" active={reviewFilter === 'approved'} onClick={() => setReviewFilter('approved')} />
+            </div>
+          </div>
+
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
             {kbLoading ? (
-              <div className="text-xs text-text-muted px-2 py-6">正在加载后端知识库...</div>
+              <div className="px-2 py-6 text-xs text-text-muted">正在加载知识库...</div>
             ) : kbError ? (
-              <div className="flex items-center gap-3 text-xs text-text-muted px-2 py-6">
+              <div className="flex items-center gap-3 px-2 py-6 text-xs text-text-muted">
                 <span>知识库加载失败</span>
                 <button onClick={fetchKnowledgeBase} className="text-accent-blue hover:underline">重试</button>
               </div>
             ) : filtered.length > 0 ? filtered.map(node => (
-              <button
-                key={node.id}
-                className="flex-shrink-0 w-[180px] bg-bg-card border border-border-subtle rounded-xl p-3 text-left hover:border-accent-blue/50 hover:shadow-lg transition-all group cursor-pointer"
-                onClick={() => setDetail(node)}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xl">{node.icon}</span>
-                  <div className="flex items-center gap-1">
-                    {node.source === 'ai_extracted' && !node.verified && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-accent-yellow/15 text-accent-yellow">待审核</span>
-                    )}
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${SEVERITY_COLOR[node.severity]}`}>{SEVERITY[node.severity]}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <h3 className="font-semibold text-xs group-hover:text-accent-blue">{node.fault_type}</h3>
-                </div>
-                <p className="text-[10px] text-text-muted">{node.category} · {node.solutions.length}方案 · {node.cases.length}案例</p>
-              </button>
+              <KnowledgeCard key={node.id} node={node} active={String(detail?.id) === String(node.id)} onClick={() => setDetail(node)} />
             )) : (
-              <div className="text-xs text-text-muted px-2 py-6">暂无符合条件的知识节点</div>
+              <div className="px-2 py-6 text-xs text-text-muted">暂无符合条件的知识节点</div>
             )}
           </div>
         </div>
 
-        {/* ══════ Stats bar ══════ */}
         {gStats && graphView === 'topology' && (
-          <div className="flex items-center gap-4 px-4 py-2 border-b border-border-subtle bg-bg-deep/50">
-            <StatBadge icon="🔴" label="活跃故障" value={gStats.active_faults} color="text-accent-red" />
-            <StatBadge icon="🟡" label="预警风机" value={gStats.warning_turbines} color="text-accent-yellow" />
-            <StatBadge icon="📝" label="待处理工单" value={gStats.pending_workorders} color="text-accent-blue" />
-            <StatBadge icon="👤" label="在岗人员" value={gStats.personnel_count} color="text-accent-green" />
-            <span className="text-[10px] text-text-muted ml-auto">风机 {gStats.total_turbines} 台 · 知识节点 {gStats.total_knowledge_nodes} 个</span>
+          <div className="flex items-center gap-4 border-b border-border-subtle bg-bg-deep/50 px-4 py-2">
+            <StatBadge label="活跃故障" value={gStats.active_faults} color="text-accent-red" />
+            <StatBadge label="预警风机" value={gStats.warning_turbines} color="text-accent-yellow" />
+            <StatBadge label="待处理工单" value={gStats.pending_workorders} color="text-accent-blue" />
+            <StatBadge label="在岗人员" value={gStats.personnel_count} color="text-accent-green" />
+            <span className="ml-auto text-[10px] text-text-muted">风机 {gStats.total_turbines} 台 · 已审核知识 {gStats.total_knowledge_nodes} 个</span>
           </div>
         )}
 
-        {/* ══════ Filter + View toggle ══════ */}
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-border-subtle">
+        <div className="flex items-center gap-3 border-b border-border-subtle px-4 py-2">
           {graphView === 'topology' ? (
             <>
               {availableRegions.length > 0 && (
-                <select className="bg-bg-card border border-border-subtle rounded px-2.5 py-1 text-xs" value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
-                  <option value="">📍 全部区域</option>
+                <select className="rounded border border-border-subtle bg-bg-card px-2.5 py-1 text-xs" value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
+                  <option value="">全部区域</option>
                   {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
               )}
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input type="checkbox" checked={activeOnly} onChange={e => setActiveOnly(e.target.checked)} />
+                仅看活跃
+              </label>
             </>
           ) : (
             <div className="flex items-center gap-2">
-              <button onClick={backToTopology} className="text-xs px-3 py-1 rounded bg-bg-card border border-border-subtle hover:border-accent-blue text-text-secondary hover:text-text-primary transition-colors">
-                ← 返回运维拓扑
+              <button onClick={backToTopology} className="rounded border border-border-subtle bg-bg-card px-3 py-1 text-xs text-text-secondary hover:border-accent-blue hover:text-text-primary">
+                返回运维拓扑
               </button>
-              {selectedFaultType && (
-                <span className="text-xs text-accent-blue font-medium">{selectedFaultType}</span>
-              )}
+              {selectedFaultType && <span className="text-xs font-medium text-accent-blue">{selectedFaultType}</span>}
             </div>
           )}
-          <div className="ml-auto flex rounded-lg border border-border-subtle overflow-hidden text-xs">
-            <button onClick={backToTopology}
-              className={`px-3 py-1.5 transition-colors ${graphView === 'topology' ? 'bg-accent-blue/20 text-accent-blue font-medium' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}>
-              🗺️ 运维拓扑
+
+          <div className="ml-auto flex overflow-hidden rounded-lg border border-border-subtle text-xs">
+            <button onClick={backToTopology} className={`px-3 py-1.5 ${graphView === 'topology' ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}>
+              运维拓扑
             </button>
-            <button onClick={() => { if (!selectedFaultType) { const first = nodes[0]; if (first) switchToKnowledge(first.fault_type); } }}
-              className={`px-3 py-1.5 transition-colors ${graphView === 'knowledge' ? 'bg-accent-blue/20 text-accent-blue font-medium' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}>
-              🧠 知识网络
+            <button
+              onClick={() => {
+                if (!selectedFaultType) {
+                  const first = nodes.find(n => !isPendingReview(n));
+                  if (first) switchToKnowledge(first.fault_type);
+                } else {
+                  setGraphView('knowledge');
+                }
+              }}
+              className={`px-3 py-1.5 ${graphView === 'knowledge' ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}
+            >
+              知识网络
             </button>
           </div>
         </div>
 
-        {/* ══════ Graph ══════ */}
-        <div className="flex-1 flex">
+        <div className="flex min-h-0 flex-1">
           {graphLoading ? (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-1 items-center justify-center">
               <div className="flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm text-text-muted">
-                  {graphView === 'topology' ? '加载运维拓扑...' : '加载知识网络...'}
-                </span>
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-blue border-t-transparent" />
+                <span className="text-sm text-text-muted">{graphView === 'topology' ? '加载运维拓扑...' : '加载知识网络...'}</span>
               </div>
             </div>
           ) : graphError ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-2">
-              <span className="text-3xl">⚠️</span>
-              <p className="text-sm">加载失败</p>
-              <button onClick={fetchGraph} className="text-xs text-accent-blue hover:underline mt-1">重试</button>
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-text-muted">
+              <p className="text-sm">图谱加载失败</p>
+              <button onClick={fetchGraph} className="mt-1 text-xs text-accent-blue hover:underline">重试</button>
             </div>
           ) : graphData && graphData.nodes.length > 0 ? (
             <>
@@ -571,123 +636,34 @@ export default function KnowledgeBasePage() {
               {graphNode && <NodeInfoPanel node={graphNode} view={graphView} onViewKnowledge={switchToKnowledge} onClose={() => setGraphNode(null)} />}
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-text-muted gap-2">
-              <span className="text-3xl">🗂️</span>
-              <p className="text-sm">
-                {graphView === 'topology' ? '运维拓扑暂无数据' : '知识网络暂无数据'}
-              </p>
-              <p className="text-xs">
-                {graphView === 'topology'
-                  ? '导入风机、故障记录、工单数据后生成运维拓扑'
-                  : '请从百科卡片或运维拓扑中选择一个故障类型查看知识网络'}
-              </p>
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-text-muted">
+              <p className="text-sm">{graphView === 'topology' ? '运维拓扑暂无数据' : '知识网络暂无数据'}</p>
+              <p className="text-xs">{graphView === 'topology' ? '导入风机、故障记录和工单后会生成拓扑。' : '请选择一个已审核知识节点查看网络。'}</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ══════ Detail drawer (百科卡片详情) ══════ */}
       {detail && (
-        <div className="w-[420px] flex-shrink-0 border-l border-border-subtle bg-bg-card overflow-auto">
-          <div className="sticky top-0 bg-bg-card/95 backdrop-blur-sm border-b border-border-subtle p-5 flex items-center justify-between z-10">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">{detail.icon}</span>
-              <div>
-                <h2 className="font-bold text-base">{detail.fault_type}</h2>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${SEVERITY_COLOR[detail.severity]}`}>{SEVERITY[detail.severity]} · {detail.category}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => switchToKnowledge(detail.fault_type)} className="text-[10px] px-2 py-1 rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20">🧠 知识网络</button>
-              <button onClick={() => openEditForm(detail)} className="text-[10px] px-2 py-1 rounded bg-bg-deep border border-border-subtle text-text-secondary hover:text-text-primary hover:border-accent-blue/50">编辑</button>
-              {!(detail.source === 'ai_extracted' && !detail.verified) && (
-                <button onClick={() => handleDeleteNode(detail)} className="text-[10px] px-2 py-1 rounded bg-accent-red/10 border border-accent-red/25 text-accent-red hover:bg-accent-red/20">删除</button>
-              )}
-              <button onClick={() => setDetail(null)} className="text-text-muted hover:text-text-primary text-xl leading-none">&times;</button>
-            </div>
-          </div>
-          <div className="p-5 space-y-6">
-            {(detail as any).source === 'ai_extracted' && !(detail as any).verified && (
-              <div className="bg-accent-yellow/10 border border-accent-yellow/30 rounded-lg p-3 flex items-center justify-between">
-                <span className="text-xs text-accent-yellow">🤖 AI提取 · 置信度{Math.round(((detail as any).confidence || 0) * 100)}% · 待验证</span>
-                <div className="flex gap-2">
-                  <button onClick={() => handleVerifyNode(detail)} className="text-[10px] px-2 py-1 bg-accent-green/20 text-accent-green rounded">确认</button>
-                  <button onClick={() => handleRejectNode(detail)} className="text-[10px] px-2 py-1 bg-accent-red/20 text-accent-red rounded">驳回</button>
-                </div>
-              </div>
-            )}
-            <section>
-              <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">🔍 症状指标</h3>
-              <div className="space-y-1.5">
-                {detail.symptoms.map((s, i) => (
-                  <div key={i} className="flex justify-between text-sm bg-bg-deep rounded-lg px-3 py-2">
-                    <span>{s.indicator}</span>
-                    <span className="text-accent-red font-mono text-xs">{s.threshold}{s.unit ? ` ${s.unit}` : ''}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section>
-              <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">🎯 根因分析</h3>
-              <ol className="space-y-1.5">
-                {detail.root_causes.map((r, i) => <li key={i} className="flex gap-2 text-sm bg-bg-deep rounded-lg px-3 py-2"><span className="text-text-muted font-mono text-xs">{i + 1}.</span><span>{r}</span></li>)}
-              </ol>
-            </section>
-            <section>
-              <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">🔧 解决方案</h3>
-              <div className="space-y-2">
-                {detail.solutions.map((s, i) => (
-                  <div key={i} className="bg-bg-deep rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-1"><span className="text-sm font-medium">{s.action}</span><span className="text-[10px] text-text-muted">{DIFFICULTY[s.difficulty]}</span></div>
-                    <span className="text-[10px] text-text-muted">⏱ 预计停机 {s.downtime_hours}h</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-            {detail.related_faults.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">⚠️ 关联故障</h3>
-                <div className="space-y-1.5">
-                  {detail.related_faults.map((rf, i) => (
-                    <div key={i} className="flex justify-between text-sm bg-bg-deep rounded-lg px-3 py-2">
-                      <button className="text-accent-blue hover:underline text-left" onClick={() => { const n = nodes.find(x => String(x.id) === String(rf.id) || x.fault_type === rf.name); if (n) setDetail(n); }}>{rf.name}</button>
-                      <span className="text-text-muted text-xs">{Math.round(rf.probability * 100)}% 伴生</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-            {detail.cases.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">📖 历史案例</h3>
-                {detail.cases.map((c, i) => (
-                  <div key={i} className="bg-bg-deep rounded-lg p-3 mb-2">
-                    <div className="flex items-center justify-between mb-1"><span className="text-sm font-medium">{c.turbine}</span><span className="text-[10px] text-text-muted">{c.date}</span></div>
-                    <p className="text-xs text-text-secondary mb-2">{c.summary}</p>
-                    <div className="flex gap-3 text-[10px] text-text-muted"><span>🔧 {c.resolution}</span><span>💴 ¥{(c.total_cost / 10000).toFixed(1)}万</span><span>⏱ {c.downtime_days}天</span></div>
-                  </div>
-                ))}
-              </section>
-            )}
-            {detail.spare_parts.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">📦 关联备件</h3>
-                <div className="space-y-1.5">
-                  {detail.spare_parts.map((sp, i) => (
-                    <div key={i} className="flex justify-between text-sm bg-bg-deep rounded-lg px-3 py-2"><span>{sp.name}</span><span className="text-text-muted text-xs">x{sp.quantity} · ¥{sp.est_cost.toLocaleString()}</span></div>
-                  ))}
-                </div>
-              </section>
-            )}
-            <button onClick={() => handleAskAI(detail)} className="w-full py-3 rounded-xl text-sm font-medium transition-all" style={{ background: 'linear-gradient(135deg, rgba(56,139,253,0.15), rgba(57,210,192,0.1))' }}>🤖 AI 诊断此故障</button>
-          </div>
-        </div>
+        <KnowledgeDetailDrawer
+          detail={detail}
+          nodes={nodes}
+          onClose={() => setDetail(null)}
+          onEdit={openEditForm}
+          onDelete={handleDeleteNode}
+          onVerify={handleVerifyNode}
+          onReject={handleRejectNode}
+          onAskAI={handleAskAI}
+          onSwitchToKnowledge={switchToKnowledge}
+          onSelectDetail={setDetail}
+        />
       )}
+
       {formMode && formNode && (
         <KnowledgeNodeForm
           mode={formMode}
           node={formNode}
-          categories={categories.filter(c => c !== '全部')}
+          categories={categories.filter(c => c !== ALL_CATEGORY)}
           saving={formSaving}
           error={formError}
           onChange={setFormNode}
@@ -695,41 +671,215 @@ export default function KnowledgeBasePage() {
           onSave={handleSaveKnowledgeNode}
         />
       )}
+
       <CopilotFAB initialMessage={copilotMsg} />
     </div>
   );
 }
 
-// ─── Node Info Panel (right side of graph) ───
+function KnowledgeCard({ node, active, onClick }: { node: FaultNode; active: boolean; onClick: () => void }) {
+  const pending = isPendingReview(node);
+  const confidence = Math.round((node.confidence ?? 1) * 100);
+  return (
+    <button
+      className={`flex-shrink-0 w-[230px] rounded-lg border bg-bg-card p-3 text-left transition-all hover:border-accent-blue/50 hover:shadow-lg ${active ? 'border-accent-blue/60 shadow-[0_0_18px_rgba(56,139,253,0.18)]' : 'border-border-subtle'}`}
+      onClick={onClick}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-text-primary">{node.fault_type}</p>
+          <p className="mt-0.5 text-[10px] text-text-muted">{node.category || '未分类'} · {node.source === 'ai_extracted' ? 'AI 提取' : '人工维护'}</p>
+        </div>
+        <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-medium ${SEVERITY_COLOR[node.severity] || SEVERITY_COLOR.medium}`}>
+          {SEVERITY[node.severity] || node.severity}
+        </span>
+      </div>
+      <div className="mb-2 line-clamp-2 min-h-[32px] text-xs leading-4 text-text-secondary">
+        {node.symptoms.slice(0, 2).map(s => s.indicator).join('、') || '暂无症状指标'}
+      </div>
+      <div className="flex items-center justify-between text-[10px]">
+        {pending ? (
+          <span className="rounded bg-accent-yellow/15 px-2 py-0.5 text-accent-yellow">待审核</span>
+        ) : (
+          <span className="rounded bg-accent-green/10 px-2 py-0.5 text-accent-green">已通过</span>
+        )}
+        <span className="text-text-muted">置信度 {confidence}%</span>
+      </div>
+    </button>
+  );
+}
+
+function KnowledgeDetailDrawer({
+  detail,
+  nodes,
+  onClose,
+  onEdit,
+  onDelete,
+  onVerify,
+  onReject,
+  onAskAI,
+  onSwitchToKnowledge,
+  onSelectDetail,
+}: {
+  detail: FaultNode;
+  nodes: FaultNode[];
+  onClose: () => void;
+  onEdit: (node: FaultNode) => void;
+  onDelete: (node: FaultNode) => void;
+  onVerify: (node: FaultNode) => void;
+  onReject: (node: FaultNode) => void;
+  onAskAI: (node: FaultNode) => void;
+  onSwitchToKnowledge: (faultType: string) => void;
+  onSelectDetail: (node: FaultNode) => void;
+}) {
+  const pending = isPendingReview(detail);
+
+  return (
+    <div className="w-[440px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
+      <div className="sticky top-0 z-10 border-b border-border-subtle bg-bg-card/95 p-5 backdrop-blur-sm">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <span className={`rounded border px-2 py-0.5 text-[10px] font-medium ${SEVERITY_COLOR[detail.severity] || SEVERITY_COLOR.medium}`}>
+                {SEVERITY[detail.severity] || detail.severity}
+              </span>
+              <span className="rounded bg-bg-deep px-2 py-0.5 text-[10px] text-text-muted">{detail.category}</span>
+              {pending && <span className="rounded bg-accent-yellow/15 px-2 py-0.5 text-[10px] text-accent-yellow">待审核</span>}
+            </div>
+            <h2 className="text-base font-bold leading-snug text-text-primary">{detail.fault_type}</h2>
+            <p className="mt-1 text-xs text-text-muted">
+              {detail.source === 'ai_extracted' ? `AI 提取 · 置信度 ${Math.round((detail.confidence || 0) * 100)}%` : '人工维护'}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-xl leading-none text-text-muted hover:text-text-primary">&times;</button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => onSwitchToKnowledge(detail.fault_type)} className="rounded bg-accent-blue/10 px-3 py-1.5 text-xs text-accent-blue hover:bg-accent-blue/20">知识网络</button>
+          <button onClick={() => onEdit(detail)} className="rounded border border-border-subtle bg-bg-deep px-3 py-1.5 text-xs text-text-secondary hover:border-accent-blue/50 hover:text-text-primary">编辑</button>
+          {pending ? (
+            <>
+              <button onClick={() => onVerify(detail)} className="rounded bg-accent-green/15 px-3 py-1.5 text-xs text-accent-green hover:bg-accent-green/25">通过</button>
+              <button onClick={() => onReject(detail)} className="rounded bg-accent-red/15 px-3 py-1.5 text-xs text-accent-red hover:bg-accent-red/25">驳回</button>
+            </>
+          ) : (
+            <button onClick={() => onDelete(detail)} className="rounded border border-accent-red/25 bg-accent-red/10 px-3 py-1.5 text-xs text-accent-red hover:bg-accent-red/20">删除</button>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-6 p-5">
+        {pending && (
+          <div className="rounded-lg border border-accent-yellow/30 bg-accent-yellow/10 p-3 text-xs text-accent-yellow">
+            该知识由 AI 自动抽取，审核通过前不会进入知识图谱和 Copilot 知识参考。
+          </div>
+        )}
+
+        <DetailSection title="症状指标">
+          {detail.symptoms.length ? detail.symptoms.map((s, i) => (
+            <div key={i} className="flex justify-between gap-3 rounded-lg bg-bg-deep px-3 py-2 text-sm">
+              <span className="text-text-primary">{s.indicator}</span>
+              <span className="font-mono text-xs text-accent-red">{s.threshold}{s.unit ? ` ${s.unit}` : ''}</span>
+            </div>
+          )) : <EmptyLine text="暂无症状指标" />}
+        </DetailSection>
+
+        <DetailSection title="根因分析">
+          {detail.root_causes.length ? detail.root_causes.map((r, i) => (
+            <div key={i} className="flex gap-2 rounded-lg bg-bg-deep px-3 py-2 text-sm">
+              <span className="font-mono text-xs text-text-muted">{i + 1}.</span>
+              <span>{r}</span>
+            </div>
+          )) : <EmptyLine text="暂无根因分析" />}
+        </DetailSection>
+
+        <DetailSection title="解决方案">
+          {detail.solutions.length ? detail.solutions.map((s, i) => (
+            <div key={i} className="rounded-lg bg-bg-deep p-3">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{s.action}</span>
+                <span className="text-[10px] text-text-muted">{DIFFICULTY[s.difficulty] || s.difficulty}</span>
+              </div>
+              <span className="text-[10px] text-text-muted">预计停机 {s.downtime_hours || 0}h</span>
+            </div>
+          )) : <EmptyLine text="暂无解决方案" />}
+        </DetailSection>
+
+        {detail.related_faults.length > 0 && (
+          <DetailSection title="关联故障">
+            {detail.related_faults.map((rf, i) => (
+              <div key={i} className="flex justify-between rounded-lg bg-bg-deep px-3 py-2 text-sm">
+                <button
+                  className="text-left text-accent-blue hover:underline"
+                  onClick={() => {
+                    const n = nodes.find(x => String(x.id) === String(rf.id) || x.fault_type === rf.name);
+                    if (n) onSelectDetail(n);
+                  }}
+                >
+                  {rf.name}
+                </button>
+                <span className="text-xs text-text-muted">{Math.round(rf.probability * 100)}%</span>
+              </div>
+            ))}
+          </DetailSection>
+        )}
+
+        {detail.cases.length > 0 && (
+          <DetailSection title="历史案例">
+            {detail.cases.map((c, i) => (
+              <div key={i} className="rounded-lg bg-bg-deep p-3">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{c.turbine}</span>
+                  <span className="text-[10px] text-text-muted">{c.date}</span>
+                </div>
+                <p className="mb-2 text-xs text-text-secondary">{c.summary}</p>
+                <div className="flex gap-3 text-[10px] text-text-muted">
+                  <span>{c.resolution}</span>
+                  <span>¥{Number(c.total_cost || 0).toLocaleString()}</span>
+                  <span>{c.downtime_days || 0} 天</span>
+                </div>
+              </div>
+            ))}
+          </DetailSection>
+        )}
+
+        {detail.spare_parts.length > 0 && (
+          <DetailSection title="关联备件">
+            {detail.spare_parts.map((sp, i) => (
+              <div key={i} className="flex justify-between rounded-lg bg-bg-deep px-3 py-2 text-sm">
+                <span>{sp.name}</span>
+                <span className="text-xs text-text-muted">x{sp.quantity} · ¥{Number(sp.est_cost || 0).toLocaleString()}</span>
+              </div>
+            ))}
+          </DetailSection>
+        )}
+
+        <button onClick={() => onAskAI(detail)} className="w-full rounded-lg border border-accent-blue/30 bg-accent-blue/10 py-3 text-sm font-medium text-accent-blue hover:bg-accent-blue/20">
+          AI 诊断此故障
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NodeInfoPanel({ node, view, onViewKnowledge, onClose }: { node: GraphNode; view: string; onViewKnowledge: (ft: string) => void; onClose: () => void }) {
   const color = CAT_COLORS[node.category] || '#8b949e';
   return (
-    <div className="w-56 flex-shrink-0 border-l border-border-subtle bg-bg-card/95 p-4 text-xs overflow-auto">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} />
-        <span className="text-text-muted uppercase text-[10px] font-medium">
-          {node.category === 'turbine' ? '风机' :
-           node.category === 'fault_record' ? '故障事件' :
-           node.category === 'workorder' ? '工单' :
-           node.category === 'personnel' ? '人员' :
-           node.category === 'fault' ? '故障知识' :
-           node.category === 'symptom' ? '症状' :
-           node.category === 'root_cause' ? '根因' :
-           node.category === 'solution' ? '方案' :
-           node.category === 'spare_part' ? '备件' :
-           node.category === 'case_record' ? '案例' : node.category}
-        </span>
-        {node.active && <span className="w-1.5 h-1.5 rounded-full bg-accent-red animate-pulse flex-shrink-0" />}
+    <div className="w-56 flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card/95 p-4 text-xs">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ background: color }} />
+        <span className="text-[10px] font-medium uppercase text-text-muted">{graphCategoryLabel(node.category)}</span>
+        {node.active && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-red" />}
       </div>
 
-      <p className="font-semibold text-sm mb-3 leading-tight">{node.name}</p>
+      <p className="mb-3 text-sm font-semibold leading-tight">{node.name}</p>
 
       <div className="space-y-1.5 text-text-secondary">
         {node.status_icon && <div><span className="text-text-muted">状态:</span> {node.status_icon} {node.status_cn || node.status}</div>}
         {!node.status_icon && node.status_cn && <div><span className="text-text-muted">状态:</span> {node.status_cn}</div>}
         {!node.status_icon && !node.status_cn && node.status && <div><span className="text-text-muted">状态:</span> {node.status}</div>}
         {node.region && <div><span className="text-text-muted">区域:</span> {node.region}</div>}
-        {node.fault_count !== undefined && node.fault_count > 0 && <div><span className="text-text-muted">活跃故障:</span> <span className="text-accent-red">{node.fault_count}个</span></div>}
+        {node.fault_count !== undefined && node.fault_count > 0 && <div><span className="text-text-muted">活跃故障:</span> <span className="text-accent-red">{node.fault_count} 个</span></div>}
         {node.detected_at && <div><span className="text-text-muted">发现:</span> {node.detected_at}</div>}
         {node.assignee && <div><span className="text-text-muted">负责人:</span> {node.assignee}</div>}
         {node.severity_cn && <div><span className="text-text-muted">严重度:</span> {node.severity_cn}</div>}
@@ -741,14 +891,13 @@ function NodeInfoPanel({ node, view, onViewKnowledge, onClose }: { node: GraphNo
         {node.confidence !== undefined && <div><span className="text-text-muted">置信度:</span> {Math.round(node.confidence * 100)}%</div>}
       </div>
 
-      {/* Action: view knowledge from fault_record */}
       {view === 'topology' && node.category === 'fault_record' && node.fault_type && (
-        <button onClick={() => onViewKnowledge(node.fault_type!)} className="w-full mt-3 py-1.5 text-[10px] rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors">
-          🧠 查看: {node.fault_type} 知识网络 →
+        <button onClick={() => onViewKnowledge(node.fault_type!)} className="mt-3 w-full rounded bg-accent-blue/10 py-1.5 text-[10px] text-accent-blue hover:bg-accent-blue/20">
+          查看 {node.fault_type} 知识网络
         </button>
       )}
 
-      <button onClick={onClose} className="w-full mt-2 py-1.5 text-[10px] text-text-muted hover:text-text-primary transition-colors border-t border-border-subtle pt-2">关闭</button>
+      <button onClick={onClose} className="mt-2 w-full border-t border-border-subtle pt-2 text-[10px] text-text-muted hover:text-text-primary">关闭</button>
     </div>
   );
 }
@@ -785,26 +934,27 @@ function KnowledgeNodeForm({
   const removeListItem = <T,>(key: keyof FaultNode, list: T[], index: number) => {
     onChange({ ...node, [key]: list.filter((_, i) => i !== index) });
   };
+
   const categoryOptions = categories.includes(node.category) || !node.category
     ? categories
     : [node.category, ...categories];
 
   return (
-    <div className="w-[460px] flex-shrink-0 border-l border-border-subtle bg-bg-card overflow-auto">
-      <div className="sticky top-0 z-20 bg-bg-card/95 backdrop-blur-sm border-b border-border-subtle p-5">
+    <div className="w-[460px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
+      <div className="sticky top-0 z-20 border-b border-border-subtle bg-bg-card/95 p-5 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-base">{mode === 'create' ? '新增知识' : '编辑知识'}</h2>
-            <p className="text-xs text-text-muted mt-1">维护故障百科中的结构化知识节点</p>
+            <h2 className="text-base font-bold">{mode === 'create' ? '新增知识' : '编辑知识'}</h2>
+            <p className="mt-1 text-xs text-text-muted">维护故障百科中的结构化知识节点</p>
           </div>
-          <button onClick={onClose} disabled={saving} className="text-text-muted hover:text-text-primary text-xl leading-none">&times;</button>
+          <button onClick={onClose} disabled={saving} className="text-xl leading-none text-text-muted hover:text-text-primary">&times;</button>
         </div>
-        {error && <div className="mt-3 text-xs text-accent-red bg-accent-red/10 border border-accent-red/20 rounded px-3 py-2">{error}</div>}
+        {error && <div className="mt-3 rounded border border-accent-red/20 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">{error}</div>}
       </div>
 
-      <div className="p-5 space-y-5">
+      <div className="space-y-5 p-5">
         <section className="space-y-3">
-          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">基本信息</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">基本信息</h3>
           <div className="grid grid-cols-[1fr_96px] gap-2">
             <FormInput label="故障名称" value={node.fault_type} onChange={value => setField('fault_type', value)} />
             <FormInput label="图标" value={node.icon} onChange={value => setField('icon', value)} />
@@ -852,7 +1002,7 @@ function KnowledgeNodeForm({
         <FormSection title="解决方案" onAdd={() => setField('solutions', [...node.solutions, { action: '', difficulty: 'medium', downtime_hours: 0 }])}>
           {node.solutions.map((item, index) => (
             <div key={index} className="grid grid-cols-[1fr_82px_82px_28px] gap-2">
-              <input className="form-input" placeholder="动作" value={item.action} onChange={e => updateListItem('solutions', node.solutions, index, { ...item, action: e.target.value })} />
+              <input className="form-input" placeholder="处理动作" value={item.action} onChange={e => updateListItem('solutions', node.solutions, index, { ...item, action: e.target.value })} />
               <select className="form-input" value={item.difficulty} onChange={e => updateListItem('solutions', node.solutions, index, { ...item, difficulty: e.target.value })}>
                 <option value="easy">简单</option>
                 <option value="medium">中等</option>
@@ -904,14 +1054,27 @@ function KnowledgeNodeForm({
         </FormSection>
       </div>
 
-      <div className="sticky bottom-0 border-t border-border-subtle bg-bg-card/95 backdrop-blur-sm p-4 flex gap-2">
-        <button onClick={onClose} disabled={saving} className="flex-1 rounded-lg border border-border-subtle py-2 text-sm text-text-secondary hover:text-text-primary hover:border-border-active disabled:opacity-60">取消</button>
-        <button onClick={() => onSave(node)} disabled={saving} className="flex-1 rounded-lg bg-accent-blue/20 border border-accent-blue/40 py-2 text-sm font-medium text-accent-blue hover:bg-accent-blue/30 disabled:opacity-60">
+      <div className="sticky bottom-0 flex gap-2 border-t border-border-subtle bg-bg-card/95 p-4 backdrop-blur-sm">
+        <button onClick={onClose} disabled={saving} className="flex-1 rounded-lg border border-border-subtle py-2 text-sm text-text-secondary hover:border-border-active hover:text-text-primary disabled:opacity-60">取消</button>
+        <button onClick={() => onSave(node)} disabled={saving} className="flex-1 rounded-lg border border-accent-blue/40 bg-accent-blue/20 py-2 text-sm font-medium text-accent-blue hover:bg-accent-blue/30 disabled:opacity-60">
           {saving ? '保存中...' : '保存'}
         </button>
       </div>
     </div>
   );
+}
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-text-muted">{title}</h3>
+      <div className="space-y-2">{children}</div>
+    </section>
+  );
+}
+
+function EmptyLine({ text }: { text: string }) {
+  return <div className="rounded-lg border border-border-subtle bg-bg-deep px-3 py-2 text-xs text-text-muted">{text}</div>;
 }
 
 function FormInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -927,8 +1090,8 @@ function FormSection({ title, onAdd, children }: { title: string; onAdd: () => v
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{title}</h3>
-        <button onClick={onAdd} className="text-[10px] px-2 py-1 rounded bg-bg-deep border border-border-subtle text-accent-blue hover:border-accent-blue/50">添加</button>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">{title}</h3>
+        <button onClick={onAdd} className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-accent-blue hover:border-accent-blue/50">添加</button>
       </div>
       <div className="space-y-2">{children}</div>
     </section>
@@ -937,17 +1100,64 @@ function FormSection({ title, onAdd, children }: { title: string; onAdd: () => v
 
 function RemoveButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="h-9 rounded border border-border-subtle text-text-muted hover:text-accent-red hover:border-accent-red/40">×</button>
+    <button onClick={onClick} className="h-9 rounded border border-border-subtle text-text-muted hover:border-accent-red/40 hover:text-accent-red">x</button>
   );
 }
 
-// ─── Stat badge ───
-function StatBadge({ icon, label, value, color }: { icon: string; label: string; value: number; color: string }) {
+function SummaryTile({ label, value, tone, active, onClick }: { label: string; value: number; tone: 'blue' | 'red' | 'yellow' | 'cyan'; active?: boolean; onClick?: () => void }) {
+  const toneClass = {
+    blue: 'text-accent-blue border-accent-blue/20 bg-accent-blue/10',
+    red: 'text-accent-red border-accent-red/20 bg-accent-red/10',
+    yellow: 'text-accent-yellow border-accent-yellow/20 bg-accent-yellow/10',
+    cyan: 'text-accent-cyan border-accent-cyan/20 bg-accent-cyan/10',
+  }[tone];
+
+  const content = (
+    <>
+      <span className="text-[10px] text-text-muted">{label}</span>
+      <span className={`mt-1 text-lg font-bold ${toneClass.split(' ')[0]}`}>{value}</span>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button onClick={onClick} className={`flex flex-col rounded-lg border p-3 text-left transition-colors ${toneClass} ${active ? 'ring-1 ring-accent-yellow/40' : ''}`}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={`flex flex-col rounded-lg border p-3 ${toneClass}`}>{content}</div>;
+}
+
+function ReviewButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className={`px-3 py-2 transition-colors ${active ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}>
+      {label}
+    </button>
+  );
+}
+
+function StatBadge({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-sm">{icon}</span>
       <span className={`text-sm font-bold ${color}`}>{value}</span>
       <span className="text-[10px] text-text-muted">{label}</span>
     </div>
   );
+}
+
+function graphCategoryLabel(category: string) {
+  return {
+    turbine: '风机',
+    fault_record: '故障事件',
+    workorder: '工单',
+    personnel: '人员',
+    fault: '故障知识',
+    symptom: '症状',
+    root_cause: '根因',
+    solution: '方案',
+    spare_part: '备件',
+    case_record: '案例',
+  }[category] || category;
 }
