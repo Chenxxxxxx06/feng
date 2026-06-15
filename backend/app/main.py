@@ -5,10 +5,12 @@ Provides REST API for wind turbine health management.
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 import uvicorn
 
@@ -22,6 +24,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -113,6 +117,22 @@ app.include_router(agent.router, prefix="/api", tags=["AI诊断"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["系统设置"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
 app.include_router(personnel.router, prefix="/api/personnel", tags=["人员管理"])
+
+
+# --- Serve frontend ---
+if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file_path = FRONTEND_DIST / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    @app.get("/")
+    async def serve_root():
+        return FileResponse(FRONTEND_DIST / "index.html")
 
 
 if __name__ == "__main__":
