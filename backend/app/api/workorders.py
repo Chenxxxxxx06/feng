@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import MaintenanceRecord, NotificationConfig, NotificationLog, User, WorkOrder
+from app.models import Fault, MaintenanceRecord, NotificationConfig, NotificationLog, User, WorkOrder
 from app.schemas import (
     MaintenanceRecordCreate,
     MaintenanceRecordResponse,
@@ -125,6 +125,7 @@ async def list_workorders(
     assignee: str | None = Query(None),
     priority: str | None = Query(None),
     turbine_id: int | None = Query(None),
+    fault_id: int | None = Query(None),
     include_deleted: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
@@ -139,6 +140,8 @@ async def list_workorders(
         q = q.where(WorkOrder.priority == priority)
     if turbine_id:
         q = q.where(WorkOrder.turbine_id == turbine_id)
+    if fault_id:
+        q = q.where(WorkOrder.fault_id == fault_id)
     result = await db.execute(q)
     return [WorkOrderResponse.model_validate(wo) for wo in result.scalars().all()]
 
@@ -173,6 +176,13 @@ async def create_workorder(
     user: User = Depends(get_current_user),
 ):
     payload = data.model_dump(exclude_none=True)
+    if data.fault_id is not None:
+        fault = await db.get(Fault, data.fault_id)
+        if not fault:
+            raise HTTPException(status_code=404, detail="Fault not found")
+        if fault.turbine_id != data.turbine_id:
+            raise HTTPException(status_code=400, detail="Work order turbine_id must match fault turbine_id")
+
     if payload.get("assignee") or payload.get("assignee_id"):
         payload.setdefault("status", "assigned")
 

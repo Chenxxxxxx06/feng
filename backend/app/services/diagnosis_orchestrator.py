@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Fault, FaultSignal, Turbine
+from app.models import Fault, FaultKnowledgeNode, FaultSignal, Turbine
 from app.schemas import (
     AutoFaultDetectionRequest,
     AutoFaultDetectionResponse,
@@ -39,6 +39,20 @@ FAULT_LABELS = {
     "cooling_system_fault": "冷却系统故障",
     "electrical_connection": "电气连接异常",
     "no_fault_detected": "未识别到明确故障",
+}
+
+KNOWLEDGE_ALIASES = {
+    "bearing_inner_race_wear": ["轴承磨损", "轴承内圈故障", "轴承"],
+    "bearing_outer_race": ["轴承磨损", "轴承外圈故障", "轴承"],
+    "bearing_ball": ["轴承磨损", "轴承"],
+    "gearbox_tooth_pitting": ["齿轮箱点蚀", "齿轮箱"],
+    "gearbox_tooth_wear": ["齿轮箱点蚀", "齿轮箱"],
+    "generator_overheat": ["发电机过热", "发电机"],
+    "blade_leading_edge_erosion": ["叶片前缘腐蚀", "叶片"],
+    "pitch_system_fault": ["变桨系统故障", "变桨"],
+    "main_shaft_misalignment": ["轴对中不良", "主轴不对中"],
+    "cooling_system_fault": ["冷却系统故障", "冷却"],
+    "electrical_connection": ["电气连接异常", "电气"],
 }
 
 SIGNAL_DEFAULTS = {
@@ -153,7 +167,7 @@ def build_signal_insights(
     return _fallback_insights(fault_type, turbine_id)
 
 
-def build_troubleshooting_steps(
+def build_fallback_troubleshooting_steps(
     fault_type: str,
     insights: list[DiagnosisSignalInsight],
 ) -> list[TroubleshootingStep]:
@@ -182,6 +196,95 @@ def build_troubleshooting_steps(
             order=4,
             title="闭环跟踪",
             action="处理后持续观察24小时HI、RMS、温度和功率偏差趋势，并更新故障状态。",
+            expected_effect="验证处理效果，降低重复告警和二次故障风险。",
+        ),
+    ]
+
+
+async def _knowledge_node_for_fault(db: AsyncSession, fault_type: str) -> FaultKnowledgeNode | None:
+    candidates = [fault_type, _fault_label(fault_type), *KNOWLEDGE_ALIASES.get(fault_type, [])]
+    for candidate in dict.fromkeys(c for c in candidates if c):
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.fault_type == candidate)
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return node
+
+    for candidate in dict.fromkeys(c for c in candidates if c):
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.fault_type.ilike(f"%{candidate}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return node
+
+    result = await db.execute(
+        select(FaultKnowledgeNode)
+        .where(FaultKnowledgeNode.category.ilike(f"%{_fault_label(fault_type)[:2]}%"))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+def _knowledge_text(items: list, keys: tuple[str, ...] = ("action", "name", "summary")) -> list[str]:
+    values: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            values.append(item)
+            continue
+        if isinstance(item, dict):
+            value = next((str(item[key]) for key in keys if item.get(key)), "")
+            if value:
+                values.append(value)
+    return values
+
+
+async def build_troubleshooting_steps(
+    db: AsyncSession,
+    fault_type: str,
+    insights: list[DiagnosisSignalInsight],
+) -> list[TroubleshootingStep]:
+    node = await _knowledge_node_for_fault(db, fault_type)
+    if not node:
+        return build_fallback_troubleshooting_steps(fault_type, insights)
+
+    root_causes = _knowledge_text(node.root_causes or ())
+    solutions = _knowledge_text(node.solutions or (), ("action", "summary", "name"))
+    spare_parts = _knowledge_text(node.spare_parts or (), ("name", "action", "summary"))
+    top_signal = insights[0].sensor_name if insights else "最高贡献信号"
+
+    return [
+        TroubleshootingStep(
+            order=1,
+            title="确认异常数据",
+            action=f"复核{top_signal}的原始采样、时间戳和传感器状态，并与知识库症状记录交叉核对。",
+            expected_effect="确认诊断输入可信，避免把数据质量问题误判为设备故障。",
+        ),
+        TroubleshootingStep(
+            order=2,
+            title="核对知识库根因",
+            action="优先排查：" + "；".join(root_causes[:3]) if root_causes else "按知识库记录复核故障根因，必要时补充现场检测记录。",
+            expected_effect="将故障定位过程收敛到已沉淀的知识库根因范围。",
+        ),
+        TroubleshootingStep(
+            order=3,
+            title="执行推荐处置",
+            action="建议处置：" + "；".join(solutions[:3]) if solutions else "根据知识库推荐方案制定维修动作和停机窗口。",
+            expected_effect="形成可执行的维修方案，并可流转为工单任务。",
+        ),
+        TroubleshootingStep(
+            order=4,
+            title="准备备件与闭环验证",
+            action=(
+                "备件关注：" + "；".join(spare_parts[:3]) + "。处理后持续观察24小时HI、RMS、温度和功率偏差趋势。"
+                if spare_parts
+                else "处理后持续观察24小时HI、RMS、温度和功率偏差趋势，并更新故障状态。"
+            ),
             expected_effect="验证处理效果，降低重复告警和二次故障风险。",
         ),
     ]
@@ -229,7 +332,7 @@ async def run_auto_fault_identification(
         message=message,
         generated_at=datetime.now(timezone.utc),
         signals=signals,
-        troubleshooting_steps=build_troubleshooting_steps(fault_type, signals),
+        troubleshooting_steps=await build_troubleshooting_steps(db, fault_type, signals),
     )
 
 
@@ -324,7 +427,7 @@ def run_blade_image_diagnosis(turbine_id: int, image_path: str) -> BladeDiagnosi
         algorithm_status="stub_pending_external_model",
         message="叶片图像诊断前后端控制链路已完成；当前为占位结果，待接入真实CV模型接口。",
         damage_regions=regions,
-        troubleshooting_steps=build_troubleshooting_steps(damage_type, insights),
+        troubleshooting_steps=build_fallback_troubleshooting_steps(damage_type, insights),
     )
 
 
