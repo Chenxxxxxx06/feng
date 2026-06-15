@@ -87,7 +87,7 @@ async def seed_knowledge_base_if_empty():
     from app.database import async_session
     from app.models import FaultKnowledgeNode
 
-    kb_path = get_project_root() / "frontend" / "src" / "data" / "fault-kb.json"
+    kb_path = get_project_root() / "backend" / "src" / "data" / "fault-kb.json"
     if not kb_path.exists():
         logger.warning("Knowledge preset not found: %s", kb_path)
         return
