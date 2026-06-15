@@ -94,23 +94,10 @@ def resolve_model_config(model: Optional[str]) -> AIModelConfig:
     return MODEL_CATALOG.get(key, MODEL_CATALOG[QWEN_CONFIG["default_model"]])
 
 
-def describe_model(model: Optional[str], api_key: Optional[str], api_provider: Optional[str] = None, api_base_url: Optional[str] = None) -> dict:
+def describe_model(model: Optional[str], api_key: Optional[str], api_provider: Optional[str] = None) -> dict:
     """Return non-secret status metadata for the configured model."""
-    has_key = bool(api_key)
-    # Direct connection mode: user set their own base_url
-    if api_base_url:
-        return {
-            "provider": "自定义",
-            "api_provider": api_provider,
-            "model": model or QWEN_CONFIG["default_model"],
-            "label": model or QWEN_CONFIG["default_model"],
-            "mode": "remote" if has_key else "local_fallback",
-            "billing": "provider_billed" if has_key else "no_remote_charge",
-            "requires_api_key": True,
-            "has_api_key": has_key,
-        }
-    # Legacy catalog-based
     config = resolve_model_config(model)
+    has_key = bool(api_key)
     provider_matches = api_provider == config.provider
     key_bound = bool(api_provider)
     if not config.requires_api_key:
@@ -120,8 +107,9 @@ def describe_model(model: Optional[str], api_key: Optional[str], api_provider: O
         mode = "local_fallback"
         billing = "no_remote_charge"
     elif not key_bound:
-        mode = "key_unbound"
-        billing = "no_remote_charge"
+        # User has key but no provider set — trust the model's default provider
+        mode = "remote"
+        billing = "provider_billed"
     elif not provider_matches:
         mode = "provider_mismatch"
         billing = "no_remote_charge"
@@ -161,7 +149,6 @@ def chat(
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
-    base_url: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 1024,
     stream: bool = False,
@@ -172,8 +159,7 @@ def chat(
         messages: List of message dicts with 'role' and 'content'
         model: Model preference stored for the current user
         api_key: API key saved for the current user
-        api_provider: Provider that the saved API key belongs to (deprecated)
-        base_url: Direct base URL from user settings (skips MODEL_CATALOG when set)
+        api_provider: Provider that the saved API key belongs to
         temperature: Sampling temperature (0-1)
         max_tokens: Maximum tokens to generate
         stream: Whether to stream the response
@@ -185,23 +171,6 @@ def chat(
         ValueError: If API key not configured
         Exception: If API call fails
     """
-    # Direct-connection mode: use user's own base_url, skip catalog
-    if base_url:
-        if not api_key:
-            raise ValueError("API key not configured")
-        client = get_client(api_key, base_url)
-        response = client.chat.completions.create(
-            model=model or QWEN_CONFIG["default_model"],
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=stream,
-        )
-        if stream:
-            return response
-        return response.choices[0].message.content
-
-    # Legacy catalog-based routing
     config = resolve_model_config(model)
     _ensure_remote_available(config, api_key, api_provider)
 
@@ -318,7 +287,6 @@ def summarize_page(
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
-    base_url: Optional[str] = None,
 ) -> dict:
     """Generate AI summary for a page.
 
@@ -327,13 +295,12 @@ def summarize_page(
         page_data: current page context (turbine stats, alerts, etc.)
         model: Current user's stored model preference
         api_key: Current user's stored AI service key
-        api_provider: Provider that the stored key belongs to (deprecated)
-        base_url: User's base URL (direct mode when set)
+        api_provider: Provider that the stored key belongs to
 
     Returns:
         {"conclusions": [...], "suggestions": [...]}
     """
-    model_status = describe_model(model, api_key, api_provider, base_url)
+    model_status = describe_model(model, api_key, api_provider)
 
     system_prompt = _build_system_prompt(
         "根据当前页面数据, 生成简洁的分析报告。\n\n"
@@ -354,7 +321,7 @@ def summarize_page(
         result = chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model or QWEN_CONFIG["cheap_model"], api_key=api_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
+        ], model=model or QWEN_CONFIG["cheap_model"], api_key=api_key, api_provider=api_provider, temperature=0.3, max_tokens=512)
 
         # Try to parse JSON from response
         result = result.strip()
@@ -377,7 +344,6 @@ def diagnose_fault(
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
-    base_url: Optional[str] = None,
 ) -> str:
     """Generate fault diagnosis report.
 
@@ -388,7 +354,7 @@ def diagnose_fault(
     Returns:
         Diagnosis report text
     """
-    config = describe_model(model, api_key, api_provider, base_url)
+    config = describe_model(model, api_key, api_provider)
     if config["mode"] != "remote":
         raise ValueError(f"{config['provider']} API key is not ready for selected model")
 
@@ -410,7 +376,7 @@ def diagnose_fault(
         return chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model, api_key=api_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.5, max_tokens=512)
+        ], model=model, api_key=api_key, api_provider=api_provider, temperature=0.5, max_tokens=512)
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
         raise
@@ -424,7 +390,6 @@ def copilot_chat(
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
-    base_url: Optional[str] = None,
     stream: bool = False,
 ) -> str:
     """Multi-turn Copilot chat with page context, optional RAG results,
@@ -435,7 +400,6 @@ def copilot_chat(
         page_context: current page data snapshot
         knowledge_results: RAG-retrieved knowledge snippets
         screenshot_description: text description of current page screenshot
-        base_url: User's base URL (direct mode when set)
         stream: return stream generator or string
 
     Returns:
@@ -448,14 +412,6 @@ def copilot_chat(
             f"{screenshot_description}\n"
         )
 
-    # Build maintenance plan section if available (injected by copilot endpoint)
-    plan_section = ""
-    if page_context.get("maintenance_plan_summary"):
-        plan_section = (
-            f"\n当前维修计划:\n"
-            f"{page_context['maintenance_plan_summary']}\n"
-        )
-
     task_prompt = (
         f"当前页面上下文:\n"
         f"- 页面: {page_context.get('page_type', 'unknown')}\n"
@@ -463,7 +419,6 @@ def copilot_chat(
         f"- 预警风机: {page_context.get('warning_count', 0)}\n"
         f"- 故障风机: {page_context.get('fault_count', 0)}\n"
         f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
-        f"{plan_section}"
         f"{screenshot_section}"
         f"\n"
         f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
@@ -473,8 +428,7 @@ def copilot_chat(
         f'2. 涉及安全决策时提醒"建议人工复核"\n'
         f"3. 回复简洁, 关键数据用数字\n"
         f"4. 如果上下文信息不足, 诚实说明\n"
-        f"5. 如果有页面截图描述, 优先参考截图中的实时数据\n"
-        f"6. 如果当前页面有维修计划数据, 优先基于维修计划回答运维排程问题"
+        f"5. 如果有页面截图描述, 优先参考截图中的实时数据"
     )
     system_prompt = _build_system_prompt(task_prompt)
 
@@ -486,8 +440,7 @@ def copilot_chat(
             ],
             model=model or QWEN_CONFIG["default_model"],
             api_key=api_key,
-            api_provider=api_provider if not base_url else None,
-            base_url=base_url,
+            api_provider=api_provider,
             temperature=0.5,
             max_tokens=1024,
             stream=stream,
@@ -502,30 +455,28 @@ def describe_screenshot(
     page_type: str,
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
-    base_url: Optional[str] = None,
 ) -> str:
-    """Use vision model to describe what's visible on the page screenshot.
+    """Use qwen-vl-plus to describe what's visible on the page screenshot.
 
     Args:
         screenshot_base64: Raw base64-encoded JPEG (without data:image prefix)
         page_type: The page type (dashboard, diagnosis, etc.)
-        api_key: User's API key
-        api_provider: Provider that the key belongs to (deprecated)
-        base_url: User's base URL (uses MODEL_CATALOG fallback if not set)
+        api_key: User's DashScope API key
+        api_provider: Provider that the key belongs to
 
     Returns:
         Text description of what's visible on screen.
 
     Raises:
-        ValueError: If API key is not configured
+        ValueError: If API key is not configured for DashScope
     """
-    # Use user's base_url if provided, else fall back to catalog
-    effective_url = base_url or MODEL_CATALOG["qwen-vl-plus"].base_url
-    vision_model = "qwen-vl-plus"  # Default vision model
+    config = MODEL_CATALOG["qwen-vl-plus"]
+    # Fallback to env var when user hasn't set their own key in Settings
     if not api_key:
         api_key = settings.DASHSCOPE_API_KEY
-    if not api_key:
-        raise ValueError("API key not configured for screenshot analysis")
+    if not api_provider and api_key:
+        api_provider = config.provider
+    _ensure_remote_available(config, api_key, api_provider)
 
     vision_prompt = (
         f"你正在查看「风调预顺」PHM系统的{page_type}页面截图。\n"
@@ -540,9 +491,9 @@ def describe_screenshot(
         "- 如果截图不清晰或无法识别，诚实说明"
     )
 
-    client = get_client(api_key, effective_url)
+    client = get_client(api_key, config.base_url)
     response = client.chat.completions.create(
-        model=vision_model,
+        model=config.model_id,
         messages=[
             {"role": "system", "content": WIND_ENGINEER_PRESET},
             {

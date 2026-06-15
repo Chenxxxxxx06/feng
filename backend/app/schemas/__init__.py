@@ -21,7 +21,6 @@ class UserResponse(BaseModel):
     role: str
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    api_base_url: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -176,25 +175,7 @@ class BatchAutoFaultDetectionResponse(BaseModel):
     generated_at: datetime
     records: list[BatchAutoFaultRecord] = []
     group_summary: dict[str, int] = {}
-
-
-class FaultKnowledgeResponse(BaseModel):
-    id: int
-    fault_type: str
-    category: str
-    icon: str = "⚠️"
-    severity: str = "medium"
-    symptoms: list = []
-    root_causes: list = []
-    solutions: list = []
-    related_faults: list = []
-    spare_parts: list = []
-    cases: list = []
-    source: str = "manual"
-    confidence: float = 1.0
-    verified: bool = True
-
-    model_config = {"from_attributes": True}
+    message: str
 
 class VibrationPreviewResponse(BaseModel):
     turbine_id: int
@@ -295,37 +276,6 @@ class WorkOrderEmailRequest(BaseModel):
     content: Optional[str] = None
     use_preview_template: bool = True
 
-class MaintenanceRecordCreate(BaseModel):
-    action_type: str = Field(default="progress", min_length=1, max_length=32)
-    content: Optional[str] = None
-    status: Optional[str] = None
-
-class MaintenanceRecordResponse(BaseModel):
-    id: int
-    work_order_id: int
-    operator_id: Optional[int] = None
-    action_type: str
-    content: Optional[str] = None
-    before_status: Optional[str] = None
-    after_status: Optional[str] = None
-    extra: Optional[dict] = None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-class NotificationLogResponse(BaseModel):
-    id: int
-    work_order_id: Optional[int] = None
-    recipient_email: str
-    subject: Optional[str] = None
-    channel: str
-    status: str
-    error_message: Optional[str] = None
-    sent_at: Optional[datetime] = None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
 class WorkOrderResponse(BaseModel):
     id: int
     turbine_id: int
@@ -350,10 +300,6 @@ class WorkOrderResponse(BaseModel):
     notification_sent_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
-
-class WorkOrderDetailResponse(WorkOrderResponse):
-    records: list[MaintenanceRecordResponse] = []
-    notification_logs: list[NotificationLogResponse] = []
 
 
 # --- Settings ---
@@ -389,16 +335,9 @@ class DataSourceTestRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    api_base_url: Optional[str] = Field(default=None, max_length=512)
-    model_preference: Optional[str] = Field(default=None, max_length=128)
+    model_preference: Optional[str] = Field(default=None, max_length=64)
 
     model_config = {"protected_namespaces": ()}
-
-
-class AITestConnectionRequest(BaseModel):
-    api_key: str
-    model: str
-    base_url: str
 
 
 # --- AI ---
@@ -465,31 +404,3 @@ class PersonnelResponse(BaseModel):
     region: str
     load: int
     email: str
-
-
-# --- Agent Execute ---
-class AgentExecuteRequest(BaseModel):
-    command: str = Field(min_length=1, max_length=512)
-    current_page: Optional[str] = None
-    dry_run: bool = False
-
-class AgentAtomicStep(BaseModel):
-    order: int
-    skill: str
-    params: dict = Field(default_factory=dict)
-    reason: str = ""
-
-class AgentSceneSkill(BaseModel):
-    skill: str
-    params: dict = Field(default_factory=dict)
-
-class AgentExecuteResponse(BaseModel):
-    intent_type: str
-    confidence: float
-    entities: dict = Field(default_factory=dict)
-    scene_skills: list[AgentSceneSkill] = Field(default_factory=list)
-    atomic_steps: list[AgentAtomicStep] = Field(default_factory=list)
-    explanation: str = ""
-    follow_up_analysis: Optional[str] = None
-    requires_clarification: bool = False
-    clarification_question: Optional[str] = None

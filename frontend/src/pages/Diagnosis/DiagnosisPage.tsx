@@ -1186,7 +1186,15 @@ export default function DiagnosisPage() {
         </div>
       </div>
 
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        total_faults: faults.length,
+        open_faults: faults.filter(f => f.status === 'open').length,
+        selected_turbine_id: selectedTurbineId ?? undefined,
+        monitor_mode: monitorMode,
+        top_fault_types: [...new Set(faults.map(f => f.fault_type))].slice(0, 10),
+        auto_detect_result: autoResult ? { fault_type: autoResult.fault_type, confidence: autoResult.confidence } : undefined,
+        batch_summary: batchResult?.group_summary,
+      }} />
     </div>
   );
 }
