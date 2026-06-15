@@ -234,7 +234,7 @@ function MonthGrid({ cursor, today, selectedDate, getEvents, getWeather, dayCell
                 {w && <span className="text-[8px]" title={`${w.score}分 ${w.flags.join(',')}`}>{weatherEmoji(w.score)}</span>}
               </div>
               <div className="flex flex-wrap gap-0.5 mt-0.5">
-                {ev.conflicts.filter(c => c.severity === 'error').length > 0 && <span className="w-2 h-2 rounded-sm bg-accent-red"/>}
+                {ev.conflicts.filter((c: Conflict) => c.severity === 'error').length > 0 && <span className="w-2 h-2 rounded-sm bg-accent-red"/>}
                 {ev.tasks.length > 0 && <span className="w-2 h-2 rounded-full bg-accent-purple"/>}
                 {ev.wos.filter((w: WorkOrder) => w.status === 'pending').length > 0 && <span className="w-2 h-2 rounded-full bg-accent-red"/>}
                 {ev.wos.length > 0 && <span className="w-2 h-2 rounded-full bg-accent-blue"/>}

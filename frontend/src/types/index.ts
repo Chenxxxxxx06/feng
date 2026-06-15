@@ -21,6 +21,16 @@ export interface TurbineSummary {
 
 export type TurbineDetail = Turbine;
 
+export interface WeatherReplayPoint {
+  wind_speed_ms: number | null;
+  wind_gust_ms: number | null;
+  wind_direction_deg: number | null;
+  turbulence_intensity: number | null;
+  air_temperature_c: number | null;
+  air_pressure_hpa: number | null;
+  source_dataset?: string | null;
+}
+
 export interface SCADAPoint {
   timestamp: string;
   power_kw: number | null;
@@ -29,6 +39,14 @@ export interface SCADAPoint {
   gen_temperature_c: number | null;
   gearbox_temperature_c: number | null;
   pitch_angle_deg: number | null;
+  dataset_window?: string | null;
+  source_dataset?: string | null;
+  power_unit?: string | null;
+  power_label?: string | null;
+  bearing_temperature_c?: number | null;
+  grid_frequency_hz?: number | null;
+  nacelle_direction_deg?: number | null;
+  ambient_temp_c?: number | null;
 }
 
 export interface Fault {
@@ -142,6 +160,7 @@ export interface VibrationPreview {
   fault_detected: boolean;
   algorithm_status: string;
   message: string;
+  source_dataset?: string | null;
 }
 
 export interface BladeDiagnosisResult {
@@ -150,6 +169,7 @@ export interface BladeDiagnosisResult {
   confidence: number;
   damage_bbox: { x: number; y: number; w: number; h: number } | null;
   image_path: string;
+  image_url?: string | null;
   algorithm_status: string;
   message: string;
   damage_regions: { label: string; bbox: { x: number; y: number; w: number; h: number }; confidence: number }[];
@@ -173,6 +193,9 @@ export interface CostComparison {
   failure_probability: number;
   recommendation: string;
   optimal_window_days: number;
+  risk_level: string;
+  estimated_saving: number;
+  cost_drivers: string[];
 }
 
 export interface WorkOrder {
@@ -183,10 +206,15 @@ export interface WorkOrder {
   description: string | null;
   status: string;
   assignee: string | null;
+  assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
   created_at: string;
   completed_at: string | null;
+  due_date?: string | null;
+  fault_type?: string | null;
+  priority?: string;
+  notification_sent_at?: string | null;
 }
 
 export interface AISummary {
