@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import type { WorkOrder } from '../../types';
+import type { WorkOrder, TurbineDetail } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
 const STATUS_FLOW = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'closed'];
@@ -34,6 +34,7 @@ export default function WorkOrderPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [previewWO, setPreviewWO] = useState<WorkOrder | null>(null);
+  const [previewTurbine, setPreviewTurbine] = useState<TurbineDetail | null>(null);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -72,22 +73,36 @@ export default function WorkOrderPage() {
     }
   }, [orders, searchParams]);
 
+  // Fetch turbine data when previewing a work order
+  useEffect(() => {
+    if (!previewWO) { setPreviewTurbine(null); return; }
+    let cancelled = false;
+    api.get(`/turbines/${previewWO.turbine_id}`)
+      .then(({ data }) => { if (!cancelled) setPreviewTurbine(data); })
+      .catch(() => { if (!cancelled) setPreviewTurbine(null); });
+    return () => { cancelled = true; };
+  }, [previewWO]);
+
   const handleCreate = async () => {
-    await api.post('/workorders/', {
-      turbine_id: Number(form.turbine_id),
-      title: form.title,
-      description: form.description,
-      assignee: form.assignee || null,
-      assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
-      assignee_email: form.assignee_email || null,
-      priority: form.priority,
-      fault_type: form.fault_type,
-      due_date: form.due_date || null,
-      cost_estimate: Number(form.cost_estimate),
-    });
-    setShowCreate(false);
-    setForm(emptyForm);
-    fetchOrders();
+    try {
+      await api.post('/workorders/', {
+        turbine_id: Number(form.turbine_id),
+        title: form.title,
+        description: form.description,
+        assignee: form.assignee || null,
+        assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
+        assignee_email: form.assignee_email || null,
+        priority: form.priority,
+        fault_type: form.fault_type,
+        due_date: form.due_date || null,
+        cost_estimate: Number(form.cost_estimate),
+      });
+      setShowCreate(false);
+      setForm(emptyForm);
+      fetchOrders();
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '创建工单失败，请检查必填字段(风机ID、标题)');
+    }
   };
 
   const advanceStatus = async (id: number, current: string) => {
@@ -405,10 +420,10 @@ export default function WorkOrderPage() {
                 <div className="border-t border-border-default pt-2">
                   <p className="font-medium mb-1">📊 风机信息</p>
                   <div className="grid grid-cols-2 gap-1 text-text-secondary">
-                    <div>风机: {previewWO.turbine_id}</div>
-                    <div>区域: 陕北</div>
-                    <div>当前状态: 预警</div>
-                    <div>HI值: 78.1</div>
+                    <div>风机: {previewTurbine?.name || previewWO.turbine_id}</div>
+                    <div>区域: {previewTurbine?.region || '--'}</div>
+                    <div>当前状态: {previewTurbine ? (previewTurbine.status === 'normal' ? '正常运行' : previewTurbine.status === 'warning' ? '预警' : '故障') : '--'}</div>
+                    <div>HI值: {previewTurbine?.hi_value != null ? previewTurbine.hi_value.toFixed(1) : '--'}</div>
                   </div>
                 </div>
 

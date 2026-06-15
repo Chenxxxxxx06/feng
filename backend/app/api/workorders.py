@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import Fault, MaintenanceRecord, NotificationConfig, NotificationLog, User, WorkOrder
+from app.models import Fault, MaintenanceRecord, NotificationConfig, NotificationLog, Turbine, User, WorkOrder
 from app.schemas import (
     MaintenanceRecordCreate,
     MaintenanceRecordResponse,
@@ -238,6 +238,16 @@ async def update_workorder(
         after_status=wo.status,
         extra={"updated_fields": sorted(update_data.keys())},
     )
+
+    # ── Update turbine last_maintenance on completion ──
+    if data.status in ("completed", "closed") and before_status not in ("completed", "closed"):
+        turbine_result = await db.execute(select(Turbine).where(Turbine.id == wo.turbine_id))
+        turbine = turbine_result.scalar_one_or_none()
+        if turbine:
+            turbine.last_maintenance = now
+            # Also set downtime_hours on work order if not already set
+            if wo.downtime_hours is None and wo.created_at:
+                wo.downtime_hours = max(0.5, (now - wo.created_at).total_seconds() / 3600)
 
     await db.commit()
     await db.refresh(wo)

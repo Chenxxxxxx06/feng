@@ -16,6 +16,7 @@ class User(Base):
     api_provider = Column(String(64), nullable=True)
     api_base_url = Column(String(512), nullable=True)
     model_preference = Column(String(64), default="gpt-4")
+    preferences = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=func.now())
 

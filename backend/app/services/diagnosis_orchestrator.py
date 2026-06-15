@@ -1,8 +1,11 @@
-"""Diagnosis orchestration layer.
+"""DEPRECATED: Diagnosis orchestration layer.
 
-This module keeps API control flow stable while specialized model code is
-being developed by other team members. Replace the stub blocks here with real
-algorithm adapters when those interfaces are available.
+This module is NOT imported by any code path. All diagnosis logic has been
+moved directly into app/api/diagnosis.py. The stubs here referenced disabled
+simulators (blade_simulator, vibration_loader) that raise RuntimeError.
+
+Keep this file for reference until blade/vibration ML models are deployed.
+"""
 """
 
 from datetime import datetime, timezone

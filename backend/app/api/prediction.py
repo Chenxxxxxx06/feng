@@ -219,14 +219,15 @@ async def weather_windows_endpoint(
 ):
     """Get weather safety windows for outdoor maintenance.
 
-    Returns a score (0-100) and flags for each day in the forecast window.
-    Currently uses a seasonal model; real API integration planned.
+    Uses Open-Meteo daily forecast (up to 16 days) for real wind/precip/temp data.
+    Falls back to seasonal model for dates beyond forecast range.
+    Returns a score (0-100) and flags for each day.
     """
     from datetime import date as date_type, timedelta
 
     today = date_type.today()
     dates = [today + timedelta(days=i) for i in range(days)]
-    windows = get_weather_for_dates(dates, lat=lat, lng=lng)
+    windows = await get_weather_for_dates(dates, lat=lat, lng=lng)
     return {
         "location": {"lat": lat, "lng": lng},
         "windows": windows,

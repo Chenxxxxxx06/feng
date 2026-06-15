@@ -206,14 +206,19 @@ export interface WorkOrder {
   description: string | null;
   status: string;
   assignee: string | null;
+  assignee_id?: number | null;
   assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
   created_at: string;
+  updated_at?: string | null;
   completed_at: string | null;
+  cancelled_at?: string | null;
+  deleted_at?: string | null;
   due_date?: string | null;
   fault_type?: string | null;
   priority?: string;
+  downtime_hours?: number | null;
   notification_sent_at?: string | null;
 }
 
