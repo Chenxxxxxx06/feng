@@ -44,63 +44,7 @@ const CAT_COLORS: Record<string, string> = {
 // CATEGORIES computed dynamically below from nodes
 
 // Demo graph data — shows what the real graph looks like without needing DB seed
-const DEMO_GRAPH: GraphData = {
-  nodes: [
-    { id:'fault_1', name:'齿轮箱点蚀', category:'fault', symbol:'⚙️', symbolSize:40, severity:'high' },
-    { id:'sym_1a', name:'振动RMS', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'sym_1b', name:'油液金属颗粒', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'sym_1c', name:'齿轮箱温度', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'rc_1a', name:'润滑不足或变质', category:'root_cause', symbol:'🎯', symbolSize:20 },
-    { id:'rc_1b', name:'长期过载运行', category:'root_cause', symbol:'🎯', symbolSize:20 },
-    { id:'sol_1a', name:'更换齿轮油清洗油路', category:'solution', symbol:'🔧', symbolSize:22 },
-    { id:'sol_1b', name:'激光熔覆齿面修复', category:'solution', symbol:'🔧', symbolSize:22 },
-    { id:'part_1a', name:'SKF-32222轴承', category:'spare_part', symbol:'📦', symbolSize:20 },
-    { id:'fault_2', name:'轴承磨损', category:'fault', symbol:'🔩', symbolSize:40, severity:'medium' },
-    { id:'sym_2a', name:'振动高频分量', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'sym_2b', name:'轴承温度', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'rc_2a', name:'润滑脂不足', category:'root_cause', symbol:'🎯', symbolSize:20 },
-    { id:'sol_2a', name:'更换润滑脂', category:'solution', symbol:'🔧', symbolSize:22 },
-    { id:'sol_2b', name:'更换轴承', category:'solution', symbol:'🔧', symbolSize:22 },
-    { id:'fault_3', name:'叶片前缘侵蚀', category:'fault', symbol:'🪶', symbolSize:40, severity:'medium' },
-    { id:'sym_3a', name:'功率曲线偏离', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'sym_3b', name:'叶片图像异常', category:'symptom', symbol:'🔍', symbolSize:20 },
-    { id:'rc_3a', name:'风沙雨滴冲蚀', category:'root_cause', symbol:'🎯', symbolSize:20 },
-    { id:'sol_3a', name:'叶片前缘贴膜', category:'solution', symbol:'🔧', symbolSize:22 },
-    { id:'turb_1', name:'陕北3号风机', category:'turbine', symbol:'🌀', symbolSize:35, status:'normal', region:'陕北' },
-    { id:'turb_2', name:'陕北5号风机', category:'turbine', symbol:'🌀', symbolSize:35, status:'warning', region:'陕北' },
-    { id:'fr_1', name:'轴承磨损(记录)', category:'fault_record', symbol:'⚠️', symbolSize:25, status:'open' },
-    { id:'wo_1', name:'巡检陕北3号风机', category:'workorder', symbol:'📋', symbolSize:25, status:'pending', assignee:'李工' },
-    { id:'person_lg', name:'李工', category:'personnel', symbol:'👤', symbolSize:28 },
-  ],
-  edges: [
-    { source:'fault_1', target:'sym_1a', label:'>12 mm/s' },
-    { source:'fault_1', target:'sym_1b', label:'>200 ppm' },
-    { source:'fault_1', target:'sym_1c', label:'>85°C' },
-    { source:'fault_1', target:'rc_1a', label:'根因' },
-    { source:'fault_1', target:'rc_1b', label:'根因' },
-    { source:'fault_1', target:'sol_1a', label:'medium' },
-    { source:'fault_1', target:'sol_1b', label:'hard' },
-    { source:'fault_1', target:'part_1a', label:'x2' },
-    { source:'fault_1', target:'fault_2', label:'伴生60%' },
-    { source:'fault_2', target:'sym_2a', label:'>5kHz' },
-    { source:'fault_2', target:'sym_2b', label:'>75°C' },
-    { source:'fault_2', target:'rc_2a', label:'根因' },
-    { source:'fault_2', target:'sol_2a', label:'easy' },
-    { source:'fault_2', target:'sol_2b', label:'medium' },
-    { source:'fault_3', target:'sym_3a', label:'>5%' },
-    { source:'fault_3', target:'sym_3b', label:'' },
-    { source:'fault_3', target:'rc_3a', label:'根因' },
-    { source:'fault_3', target:'sol_3a', label:'medium' },
-    { source:'turb_1', target:'fr_1', label:'发生故障' },
-    { source:'fr_1', target:'fault_2', label:'匹配知识' },
-    { source:'turb_1', target:'wo_1', label:'工单' },
-    { source:'wo_1', target:'person_lg', label:'负责人' },
-    { source:'turb_2', target:'fault_2', label:'历史故障' },
-  ],
-};
-
 export default function KnowledgeBasePage() {
-  const [demoMode, setDemoMode] = useState(true);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('全部');
   const [severityFilter, setSeverityFilter] = useState('');
@@ -150,17 +94,13 @@ export default function KnowledgeBasePage() {
     high: nodes.filter(n => n.severity === 'high' || n.severity === 'critical').length,
   }), []);
 
-  // Fetch graph data — or use demo data
+  // Fetch graph data from API
   useEffect(() => {
-    if (demoMode) {
-      setGraphData(DEMO_GRAPH);
-      return;
-    }
     api.get('/knowledge-graph').then(({ data }) => setGraphData(data)).catch(() => {});
     const handleFocus = () => { api.get('/knowledge-graph').then(({ data }) => setGraphData(data)).catch(() => {}); };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [demoMode]);
+  }, []);
 
   // ECharts graph
   const buildOption = useCallback((data: GraphData) => {
@@ -216,14 +156,7 @@ export default function KnowledgeBasePage() {
                 <p className="text-xs text-text-muted mt-0.5">共 {stats.total} 种 · {stats.categories} 类 · {stats.high} 高危</p>
               </div>
               <label className="flex items-center gap-2 text-xs cursor-pointer select-none ml-auto">
-                <span className={`${demoMode ? 'text-accent-yellow' : 'text-text-muted'}`}>📦 Demo</span>
-                <button
-                  onClick={() => setDemoMode(!demoMode)}
-                  className={`relative w-9 h-5 rounded-full transition-colors ${demoMode ? 'bg-accent-yellow' : 'bg-bg-hover'}`}
-                >
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${demoMode ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-                </button>
-                <span className={`${!demoMode ? 'text-accent-green' : 'text-text-muted'}`}>🔗 实时</span>
+              <span className="text-accent-green text-[10px]">🔗 实时数据</span>
               </label>
             </div>
           </div>
