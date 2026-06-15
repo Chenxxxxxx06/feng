@@ -7,6 +7,11 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models import SCADARecord, Turbine
 from app.schemas import TurbineResponse, TurbineListResponse
+from app.services.care_monitoring_metrics import (
+    CARE_DATASET_ID,
+    calculate_care_reliability_metrics,
+    refresh_care_hi_snapshots,
+)
 from app.services.data_pipeline.era5_loader import era5_loader
 from app.services.data_pipeline.open_meteo_loader import (
     OpenMeteoWeatherError,
@@ -24,6 +29,40 @@ CARE_POWER_SOURCE_FIELDS = {
 }
 
 
+@router.get("/monitoring-metrics")
+async def get_monitoring_metrics(
+    source_dataset: str = Query(CARE_DATASET_ID, description="数据集ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return dataset-derived dashboard reliability metrics."""
+    if source_dataset != CARE_DATASET_ID:
+        return {
+            "source_dataset": source_dataset,
+            "mtbf_hours": None,
+            "mttr_hours": None,
+            "mttr_available": False,
+            "mttr_note": "Only CARE SCADA monitoring metrics are implemented.",
+            "by_region": {},
+        }
+    return await calculate_care_reliability_metrics(db, source_dataset)
+
+
+@router.post("/refresh-health")
+async def refresh_health_snapshots(
+    source_dataset: str = Query(CARE_DATASET_ID, description="数据集ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recalculate persisted turbine HI snapshots from imported dataset rows."""
+    if source_dataset != CARE_DATASET_ID:
+        raise HTTPException(status_code=400, detail="Only CARE SCADA HI refresh is implemented.")
+    updates = await refresh_care_hi_snapshots(db, source_dataset)
+    return {
+        "source_dataset": source_dataset,
+        "updated": len(updates),
+        "items": updates,
+    }
+
+
 @router.get("/", response_model=TurbineListResponse)
 async def list_turbines(
     model: str | None = Query(None, description="风机型号"),
@@ -31,7 +70,7 @@ async def list_turbines(
     hi_min: float | None = Query(None, description="HI最小值"),
     hi_max: float | None = Query(None, description="HI最大值"),
     status: str | None = Query(None, description="状态"),
-    source_dataset: str | None = Query(None, description="数据集ID"),
+    source_dataset: str | None = Query("care_to_compare_v6", description="数据集ID"),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Turbine)
