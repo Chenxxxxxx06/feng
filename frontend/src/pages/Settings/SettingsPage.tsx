@@ -1211,59 +1211,39 @@ function PipelineSection({
   return (
     <SectionShell
       title="数据源管理"
-      description="检查SCADA、振动、叶片图像和气象数据的接入状态。"
+      description="SCADA、振动、叶片图像和气象数据接入状态。"
       actions={<button onClick={onRefresh} className="industrial-btn">{pipelineLoading ? '刷新中...' : '刷新状态'}</button>}
     >
-      <div className="grid gap-3 xl:grid-cols-2">
-        {pipeline?.sources.map((source) => (
-          <div key={source.type} className="rounded-lg border border-border-default bg-navy-900/60 p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-md border border-border-default bg-bg-card text-xs font-semibold text-accent-blue">
-                  {sourceIcons[source.type] || 'DS'}
-                </span>
-                <div>
-                  <h4 className="text-sm font-medium">{source.name}</h4>
-                  <p className="mt-1 text-xs text-text-muted">{sourceKindLabel[source.type] || '数据源'}</p>
-                </div>
-              </div>
-              <span className={`rounded-full border px-2 py-1 text-[10px] ${statusTone(source.status)}`}>
-                {statusLabel(source.status)}
-              </span>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <InfoLine label="数据量" value={source.record_count ? `${source.record_count.toLocaleString()}条` : '-'} />
-              <InfoLine label="数据类型" value={source.real_data_available ? '真实数据' : '模拟/待接入'} />
-              <InfoLine label="最近更新" value={source.last_update ? new Date(source.last_update).toLocaleDateString('zh-CN') : '-'} />
-            </div>
-            <p className={`mt-3 text-xs ${source.real_data_available ? 'text-accent-green' : 'text-accent-yellow'}`}>
-              {source.note}
-            </p>
-            <div className="mt-4 flex items-center justify-between">
-              <span className={`text-xs ${
-                testResults[source.type] === 'testing' ? 'text-accent-blue' :
-                testResults[source.type] === 'success' ? 'text-accent-green' :
-                testResults[source.type] === 'error' ? 'text-accent-red' : 'text-text-muted'
-              }`}>
-                {testResults[source.type] === 'testing' ? '正在测试...' :
-                 testResults[source.type] === 'success' ? '连接测试完成' :
-                 testResults[source.type] === 'error' ? '连接失败' : '等待操作'}
-              </span>
-              <button onClick={() => onTest(source.type)} className="industrial-btn">测试连接</button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {pipeline?.errors && pipeline.errors.length > 0 && (
-        <div className="mt-5 rounded-lg border border-accent-red/30 bg-accent-red/5 p-4">
-          <p className="text-sm font-medium text-accent-red">管道错误 ({pipeline.errors.length})</p>
-          <div className="mt-2 space-y-1">
-            {pipeline.errors.map((error, index) => (
-              <p key={index} className="font-mono text-xs text-text-muted">{error}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border-default text-text-muted">
+              <th className="py-2 text-left">数据源</th>
+              <th className="py-2 text-left">状态</th>
+              <th className="py-2 text-right">数据量</th>
+              <th className="py-2 text-left hidden sm:table-cell">说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pipeline?.sources.map((source) => (
+              <tr key={source.type} className="border-b border-border-subtle">
+                <td className="py-2 font-medium">{source.name}</td>
+                <td className="py-2">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${statusTone(source.status)}`}>
+                    {statusLabel(source.status)}
+                  </span>
+                </td>
+                <td className="py-2 text-right font-mono">
+                  {source.record_count ? source.record_count.toLocaleString() : '-'}
+                </td>
+                <td className="py-2 text-text-muted hidden sm:table-cell">{source.note}</td>
+              </tr>
             ))}
-          </div>
-        </div>
+          </tbody>
+        </table>
+      </div>
+      {pipeline?.overall_status !== 'healthy' && (
+        <p className="mt-3 text-xs text-accent-red">管道异常: {pipeline?.errors?.join('; ')}</p>
       )}
     </SectionShell>
   );
