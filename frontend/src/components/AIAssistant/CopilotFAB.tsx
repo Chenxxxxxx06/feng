@@ -42,6 +42,32 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const fabRef = useRef<HTMLButtonElement>(null);
   const fabDragging = useRef(false);
   const fabDragOffset = useRef({ x: 0, y: 0 });
+
+function renderMessageContent(text: string, isProgress?: boolean) {
+  if (isProgress) return <span>{text}</span>;
+  // Simple markdown: **bold**, `code`, > quote, - list, \n breaks
+  const lines = text.split('\n');
+  return (
+    <div className="space-y-1">
+      {lines.map((line, i) => {
+        if (!line.trim()) return <br key={i} />;
+        const html = line
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/`(.+?)`/g, '<code class="bg-bg-card px-1 rounded text-[10px]">$1</code>');
+        if (line.startsWith('> ')) {
+          return <div key={i} className="text-text-muted border-l-2 border-border-default pl-2 text-[11px]" dangerouslySetInnerHTML={{ __html: html.slice(2) }} />;
+        }
+        if (/^\d+\.\s/.test(line) || line.startsWith('- ')) {
+          return <div key={i} className="flex gap-1"><span className="text-accent-blue">•</span><span dangerouslySetInnerHTML={{ __html: html.replace(/^\d+\.\s|-\s/, '') }} /></div>;
+        }
+        if (line.includes('📊') || line.includes('📚') || line.includes('🎯') || line.includes('🧠') || line.includes('📝')) {
+          return <div key={i} className="font-medium text-accent-cyan text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />;
+        }
+        return <p key={i} className="text-xs" dangerouslySetInnerHTML={{ __html: html }} />;
+      })}
+    </div>
+  );
+}
   const fabHasMoved = useRef(false);
   const fabDragStart = useRef({ x: 0, y: 0 });
   const fabPosRef = useRef({ x: 0, y: 0 });
@@ -244,12 +270,31 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
         // Agent 任务模式 → 多Agent流水线: Orchestrator→Data+Knowledge→Synthesizer
         const payload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
         if (screenshot) payload.screenshot = screenshot;
+
+        // Show progress step
+        const progressId = Date.now().toString();
+        addMessage({ role: 'assistant', content: `🔍 分析意图中...`, _progress: true, _progressId: progressId });
+
         const { data } = await api.post('/agent/diagnose', payload, { timeout: 120000 });
-        // Format multi-agent report
+
+        // Remove progress message, add formatted result
+        useCopilotStore.getState().removeMessage(progressId);
+
         const parts: string[] = [];
-        if (data.intent) parts.push(`**意图**: ${data.intent.intent_type} (${(data.intent.confidence*100).toFixed(0)}%)`);
-        if (data.data_summary) parts.push(`**数据摘要**: ${data.data_summary}`);
-        if (data.knowledge_matches) parts.push(`**知识匹配**: ${data.knowledge_matches}`);
+        const trace = data.trace || {};
+        // Step trace
+        const steps: string[] = [];
+        if (trace.orchestrator_ms != null) steps.push(`🧠 意图分析 (${trace.orchestrator_ms}ms)`);
+        if (trace.data_agent_ms != null) steps.push(`📊 数据查询 (${trace.data_agent_ms}ms)`);
+        if (trace.knowledge_agent_ms != null) steps.push(`📚 知识检索 (${trace.knowledge_agent_ms}ms)`);
+        if (trace.synthesizer_ms != null) steps.push(`📝 汇总报告 (${trace.synthesizer_ms}ms)`);
+        if (steps.length > 0) parts.push(`> ${steps.join(' → ')}`);
+
+        if (data.intent && data.intent.intent_type) {
+          parts.push(`**🎯 意图**: ${data.intent.intent_type} (置信度${(data.intent.confidence*100).toFixed(0)}%)`);
+        }
+        if (data.data_summary) parts.push(`**📊 数据摘要**:\n${data.data_summary}`);
+        if (data.knowledge_matches) parts.push(`**📚 知识匹配**:\n${data.knowledge_matches}`);
         if (data.report) parts.push(data.report);
         reply = parts.join('\n\n') || JSON.stringify(data);
       } else {
@@ -347,9 +392,11 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
                     ? 'bg-accent-blue/20 text-text-primary'
                     : m.role === 'error'
                     ? 'bg-accent-red/10 text-accent-red'
+                    : m._progress
+                    ? 'bg-accent-cyan/10 text-accent-cyan animate-pulse'
                     : 'bg-bg-hover text-text-primary'
                 }`}>
-                  {m.content}
+                  {renderMessageContent(m.content, m._progress)}
                 </div>
               </div>
             ))}
