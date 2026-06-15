@@ -269,6 +269,34 @@ class WorkOrderUpdate(BaseModel):
     cost_actual: Optional[float] = None
     downtime_hours: Optional[float] = None
 
+class MaintenanceRecordCreate(BaseModel):
+    action_type: str = Field(min_length=1, max_length=32)
+    content: Optional[str] = None
+
+class MaintenanceRecordResponse(BaseModel):
+    id: int
+    work_order_id: int
+    operator_id: Optional[int] = None
+    action_type: str
+    content: Optional[str] = None
+    before_status: Optional[str] = None
+    after_status: Optional[str] = None
+    extra: Optional[dict] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class NotificationLogResponse(BaseModel):
+    id: int
+    work_order_id: int
+    recipient_email: str
+    subject: Optional[str] = None
+    status: str
+    sent_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
 class WorkOrderEmailRequest(BaseModel):
     recipient_user_ids: list[int] = []
     recipient_emails: list[str] = []
@@ -300,6 +328,10 @@ class WorkOrderResponse(BaseModel):
     notification_sent_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+class WorkOrderDetailResponse(WorkOrderResponse):
+    records: list[MaintenanceRecordResponse] = []
+    notification_logs: list[NotificationLogResponse] = []
 
 
 # --- Settings ---
