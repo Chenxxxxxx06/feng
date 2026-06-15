@@ -64,14 +64,14 @@ export function useECharts({
 
 /** Shared chart color helpers */
 export const CHART_COLORS = {
-  red: '#f85149',
-  yellow: '#d29922',
-  green: '#3fb950',
-  blue: '#58a6ff',
-  purple: '#bc8cff',
-  muted: '#8b949e',
-  grid: '#21262d',
-  text: '#5c6975',
+  red: '#EF4444',
+  yellow: '#F59E0B',
+  green: '#10B981',
+  blue: '#3B82F6',
+  purple: '#8B5CF6',
+  muted: '#94A3B8',
+  grid: '#0D2447',
+  text: '#64748B',
 } as const;
 
 /** Color by RUL threshold */

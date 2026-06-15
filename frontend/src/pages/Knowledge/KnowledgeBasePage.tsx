@@ -20,8 +20,16 @@ const SEVERITY: Record<string, string> = { low: '低', medium: '中', high: '高
 const SEVERITY_COLOR: Record<string, string> = { low: 'bg-accent-green/20 text-accent-green', medium: 'bg-accent-yellow/20 text-accent-yellow', high: 'bg-accent-red/20 text-accent-red', critical: 'bg-red-600/30 text-red-400' };
 const DIFFICULTY: Record<string, string> = { easy: '简单', medium: '中等', hard: '困难' };
 const CAT_COLORS: Record<string, string> = {
-  fault: '#388bfd', symptom: '#f0883e', root_cause: '#da3633', solution: '#3fb950',
-  spare_part: '#a371f7', turbine: '#58a6ff', fault_record: '#db6d28', workorder: '#f7b73c', personnel: '#79c0ff',
+  fault: '#3B82F6', symptom: '#F97316', root_cause: '#EF4444', solution: '#10B981',
+  spare_part: '#8B5CF6', turbine: '#3B82F6', fault_record: '#F97316', workorder: '#F59E0B',
+  personnel: '#94A3B8', case_record: '#94A3B8',
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  normal: '#10B981', warning: '#F97316', fault: '#EF4444', maintenance: '#3B82F6',
+  open: '#EF4444', diagnosing: '#F97316', confirmed: '#F97316', resolved: '#10B981',
+  pending: '#F97316', in_progress: '#3B82F6', completed: '#10B981', cancelled: '#94A3B8',
+  low: '#10B981', medium: '#F97316', high: '#EF4444', critical: '#EF4444',
 };
 
 const CATEGORIES = ['全部', ...Array.from(new Set((kbData.nodes as FaultNode[]).map(n => n.category)))];
@@ -129,21 +137,74 @@ export default function KnowledgeBasePage() {
   // ECharts graph
   const buildOption = useCallback((data: GraphData) => {
     const cats = [...new Set(data.nodes.map(n => n.category))];
+
+    const nodeData = data.nodes.map(n => {
+      let color = CAT_COLORS[n.category] || '#94A3B8';
+      let borderColor = 'transparent';
+      let borderW = 0;
+      let shadow = 0;
+
+      if (isTopo) {
+        // Turbine: color by operating status
+        if (n.category === 'turbine') {
+          color = STATUS_COLOR[n.status || 'normal'] || color;
+          borderColor = color;
+          borderW = 2;
+        }
+        // Fault record: red if active, grey if resolved
+        if (n.category === 'fault_record') {
+          color = n.active ? '#EF4444' : '#484f58';
+          if (n.active) { borderColor = '#ff6b6b'; borderW = 1; }
+        }
+        // Work order: color by WO status
+        if (n.category === 'workorder') {
+          color = STATUS_COLOR[n.status || 'pending'] || color;
+        }
+      } else {
+        // Knowledge: fault center node colored by severity
+        if (n.category === 'fault') {
+          color = STATUS_COLOR[n.severity || 'medium'] || color;
+          borderColor = color;
+          borderW = 3;
+          shadow = 12;
+        }
+      }
+      return {
+        ...n,
+        itemStyle: { color, borderColor, borderWidth: borderW, shadowBlur: shadow, shadowColor: color },
+        symbolSize: n.symbolSize,
+      };
+    });
+
+    const legendCats = isTopo
+      ? ['turbine', 'fault_record', 'workorder', 'personnel'].filter(c => cats.includes(c))
+      : ['fault', 'symptom', 'root_cause', 'solution', 'spare_part', 'case_record'].filter(c => cats.includes(c));
+
     return {
       tooltip: {
         formatter: (p: any) => p.dataType === 'node'
           ? `<b>${p.data.name}</b><br/>类型: ${p.data.category}` : `${p.data.label || ''}`,
       },
-      legend: [{ data: cats.map(c => ({ name: c, icon: 'circle' })), bottom: 0, textStyle: { color: '#8b949e', fontSize: 10 } }],
+      legend: [{
+        data: legendCats.map(c => ({ name: c, icon: 'circle' })),
+        bottom: 0, textStyle: { color: '#94A3B8', fontSize: 10 },
+      }],
       series: [{
         type: 'graph', layout: 'force', roam: true, draggable: true,
-        force: { repulsion: 200, edgeLength: [80, 200], gravity: 0.1 },
-        data: data.nodes.map(n => ({ ...n, itemStyle: { color: CAT_COLORS[n.category] || '#8b949e' }, category: n.category })),
-        links: data.edges.map(e => ({ source: e.source, target: e.target, label: { show: true, formatter: e.label, fontSize: 9, color: '#8b949e' } })),
-        categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#8b949e' } })),
-        lineStyle: { color: '#30363d', curveness: 0.2, opacity: 0.6 },
-        label: { show: true, fontSize: 10, color: '#c9d1d9' },
-        emphasis: { focus: 'adjacency', lineStyle: { width: 2 } },
+        force: {
+          repulsion: isTopo ? 350 : 200,
+          edgeLength: isTopo ? [120, 400] : [60, 180],
+          gravity: isTopo ? 0.06 : 0.12,
+        },
+        data: nodeData,
+        links: data.edges.map(e => ({
+          source: e.source, target: e.target,
+          label: { show: true, formatter: e.label, fontSize: 9, color: '#94A3B8' },
+        })),
+        categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#94A3B8' } })),
+        lineStyle: { color: '#30363d', curveness: isTopo ? 0.05 : 0.25, opacity: 0.5 },
+        label: { show: true, fontSize: isTopo ? 11 : 10, color: '#c9d1d9' },
+        emphasis: { focus: 'adjacency', lineStyle: { width: 3, color: '#3B82F6' } },
       }],
     };
   }, []);
@@ -328,16 +389,75 @@ export default function KnowledgeBasePage() {
                 </div>
               </section>
             )}
-            <button onClick={() => handleAskAI(detail)} className="w-full py-3 rounded-xl text-sm font-medium transition-all" style={{ background: 'linear-gradient(135deg, rgba(56,139,253,0.15), rgba(57,210,192,0.1))' }}>🤖 AI 诊断此故障</button>
+            <button onClick={() => handleAskAI(detail)} className="w-full py-3 rounded-xl text-sm font-medium transition-all" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.20), rgba(148,163,184,0.10))' }}>🤖 AI 诊断此故障</button>
           </div>
         </div>
       )}
-      <CopilotFAB initialMessage={copilotMsg} pageContext={{
-        selected_node_id: detail?.id,
-        selected_fault_type: detail?.fault_type,
-        selected_category: detail?.category,
-        kb_total_nodes: nodes.length,
-      }} />
+      <CopilotFAB initialMessage={copilotMsg} />
+    </div>
+  );
+}
+
+// ─── Node Info Panel (right side of graph) ───
+function NodeInfoPanel({ node, view, onViewKnowledge, onClose }: { node: GraphNode; view: string; onViewKnowledge: (ft: string) => void; onClose: () => void }) {
+  const color = CAT_COLORS[node.category] || '#94A3B8';
+  return (
+    <div className="w-56 flex-shrink-0 border-l border-border-subtle bg-bg-card/95 p-4 text-xs overflow-auto">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} />
+        <span className="text-text-muted uppercase text-[10px] font-medium">
+          {node.category === 'turbine' ? '风机' :
+           node.category === 'fault_record' ? '故障事件' :
+           node.category === 'workorder' ? '工单' :
+           node.category === 'personnel' ? '人员' :
+           node.category === 'fault' ? '故障知识' :
+           node.category === 'symptom' ? '症状' :
+           node.category === 'root_cause' ? '根因' :
+           node.category === 'solution' ? '方案' :
+           node.category === 'spare_part' ? '备件' :
+           node.category === 'case_record' ? '案例' : node.category}
+        </span>
+        {node.active && <span className="w-1.5 h-1.5 rounded-full bg-accent-red animate-pulse flex-shrink-0" />}
+      </div>
+
+      <p className="font-semibold text-sm mb-3 leading-tight">{node.name}</p>
+
+      <div className="space-y-1.5 text-text-secondary">
+        {node.status_icon && <div><span className="text-text-muted">状态:</span> {node.status_icon} {node.status_cn || node.status}</div>}
+        {!node.status_icon && node.status_cn && <div><span className="text-text-muted">状态:</span> {node.status_cn}</div>}
+        {!node.status_icon && !node.status_cn && node.status && <div><span className="text-text-muted">状态:</span> {node.status}</div>}
+        {node.region && <div><span className="text-text-muted">区域:</span> {node.region}</div>}
+        {node.fault_count !== undefined && node.fault_count > 0 && <div><span className="text-text-muted">活跃故障:</span> <span className="text-accent-red">{node.fault_count}个</span></div>}
+        {node.detected_at && <div><span className="text-text-muted">发现:</span> {node.detected_at}</div>}
+        {node.assignee && <div><span className="text-text-muted">负责人:</span> {node.assignee}</div>}
+        {node.severity_cn && <div><span className="text-text-muted">严重度:</span> {node.severity_cn}</div>}
+        {node.difficulty && <div><span className="text-text-muted">难度:</span> {DIFFICULTY[node.difficulty] || node.difficulty}</div>}
+        {node.downtime_hours !== undefined && node.downtime_hours > 0 && <div><span className="text-text-muted">停机:</span> {node.downtime_hours}h</div>}
+        {node.est_cost !== undefined && node.est_cost > 0 && <div><span className="text-text-muted">成本:</span> ¥{node.est_cost.toLocaleString()}</div>}
+        {node.quantity !== undefined && <div><span className="text-text-muted">数量:</span> x{node.quantity}</div>}
+        {node.threshold && <div><span className="text-text-muted">阈值:</span> {node.threshold}{node.unit ? ` ${node.unit}` : ''}</div>}
+        {node.confidence !== undefined && <div><span className="text-text-muted">置信度:</span> {Math.round(node.confidence * 100)}%</div>}
+      </div>
+
+      {/* Action: view knowledge from fault_record */}
+      {view === 'topology' && node.category === 'fault_record' && node.fault_type && (
+        <button onClick={() => onViewKnowledge(node.fault_type!)} className="w-full mt-3 py-1.5 text-[10px] rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors">
+          🧠 查看: {node.fault_type} 知识网络 →
+        </button>
+      )}
+
+      <button onClick={onClose} className="w-full mt-2 py-1.5 text-[10px] text-text-muted hover:text-text-primary transition-colors border-t border-border-subtle pt-2">关闭</button>
+    </div>
+  );
+}
+
+// ─── Stat badge ───
+function StatBadge({ icon, label, value, color }: { icon: string; label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-sm">{icon}</span>
+      <span className={`text-sm font-bold ${color}`}>{value}</span>
+      <span className="text-[10px] text-text-muted">{label}</span>
     </div>
   );
 }

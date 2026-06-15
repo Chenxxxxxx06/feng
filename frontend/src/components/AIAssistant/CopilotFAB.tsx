@@ -1,4 +1,5 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import api from '../../services/api';
 import { useCopilotStore } from '../../services/copilotStore';
@@ -10,7 +11,15 @@ const FAB_W = 56;
 const FAB_H = 56;
 const EDGE_GAP = 24;
 
-export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: string }) {
+export interface PageContext {
+  turbine_id?: number;
+  turbine_name?: string;
+  fault_id?: number;
+  fault_type?: string;
+  [key: string]: unknown;
+}
+
+export default function CopilotFAB({ initialMessage = '', pageContext }: { initialMessage?: string; pageContext?: PageContext }) {
   const messages = useCopilotStore((s) => s.messages);
   const input = useCopilotStore((s) => s.input);
   const loading = useCopilotStore((s) => s.loading);
@@ -21,12 +30,25 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
   const setLoading = useCopilotStore((s) => s.setLoading);
   const setOpen = useCopilotStore((s) => s.setOpen);
   const setPanelPos = useCopilotStore((s) => s.setPanelPos);
+  const fabPos = useCopilotStore((s) => s.fabPos);
+  const setFabPos = useCopilotStore((s) => s.setFabPos);
+  const navigate = useNavigate();
 
   const chatRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const initialSent = useRef(false);
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const fabDragging = useRef(false);
+  const fabDragOffset = useRef({ x: 0, y: 0 });
+  const fabHasMoved = useRef(false);
+  const fabDragStart = useRef({ x: 0, y: 0 });
+  const fabPosRef = useRef({ x: 0, y: 0 });
+  const [mode, setMode] = useState<'chat' | 'agent'>('chat');
+
+  // Keep fabPosRef in sync with store
+  useEffect(() => { fabPosRef.current = fabPos; }, [fabPos]);
 
   // Initialize panel position to bottom-right when opened
   useEffect(() => {
@@ -99,6 +121,21 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
     };
   }, [setPanelPos]);
 
+  // FAB drag handlers — direct DOM manipulation for zero-lag dragging
+  const onFabMouseDown = useCallback((e: React.MouseEvent) => {
+    fabDragging.current = true;
+    fabHasMoved.current = false;
+    fabDragStart.current = { x: e.clientX, y: e.clientY };
+    const currentX = fabPosRef.current.x;
+    const currentY = fabPosRef.current.y;
+    fabDragOffset.current = {
+      x: e.clientX - currentX,
+      y: e.clientY - currentY,
+    };
+    // Disable transition during drag for instant response
+    if (fabRef.current) fabRef.current.style.transition = 'none';
+  }, []);
+
   useEffect(() => {
     const onFabDragMove = (e: MouseEvent) => {
       if (!fabDragging.current) return;
@@ -153,7 +190,7 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
         allowTaint: true,
         scale: 0.5,
         ignoreElements: (el) => el.closest('[data-copilot-ignore]') !== null,
-        backgroundColor: '#080c12',
+        backgroundColor: '#071A35',
       });
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
@@ -171,31 +208,35 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
     addMessage(userMsg);
     if (!textOverride) setInput('');
     setLoading(true);
-
     let screenshot: string | null = null;
-    try {
-      screenshot = await captureScreenshot();
-    } catch {
-      // Silently fall back to text-only mode
-    }
+    try { screenshot = await captureScreenshot(); } catch { /* ok */ }
+
+    // Build page_context: merge auto-detected info with page-specific context from props
+    const baseContext: Record<string, unknown> = {
+      page_type: window.location.pathname.replace('/', '') || 'dashboard',
+      url: window.location.href,
+    };
+    if (pageContext) Object.assign(baseContext, pageContext);
 
     try {
       // Get all messages currently in store (including the one just added)
       const currentMsgs = useCopilotStore.getState().messages;
       const allMsgs = [...currentMsgs].map((m) => ({ role: m.role, content: m.content }));
 
-      const isDiagnosis = /风机|故障|振动|温度|异常|原因|怎么修|什么问|诊断|方案|备件|维修|停机|RL/.test(text);
       let reply: string;
 
-      if (isDiagnosis) {
-        try {
-          const { data } = await api.post('/agent/diagnose', { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard' } }, { timeout: 90000 });
-          reply = data.report || data.message || JSON.stringify(data);
-        } catch {
-          const payload: Record<string, unknown> = { messages: allMsgs, page_context: { page_type: window.location.pathname.replace('/', '') || 'dashboard', url: window.location.href } };
-          if (screenshot) payload.screenshot = screenshot;
-          const { data } = await api.post('/ai/copilot', payload, { timeout: 60000 });
-          reply = data.reply;
+      if (mode === 'agent') {
+        // Agent 任务模式 — 规划 → 执行 → 总结
+        const { data } = await api.post('/agent/task', { messages: allMsgs, page_context: baseContext }, { timeout: 90000 });
+        reply = data.report || data.message || JSON.stringify(data);
+
+        // Execute frontend actions (e.g. navigate to another page)
+        const actions: Array<{ type: string; url: string }> = data.actions || [];
+        for (const action of actions) {
+          if (action.type === 'navigate' && action.url) {
+            // Use navigate for smooth SPA transition, close the panel
+            setTimeout(() => { setOpen(false); navigate(action.url); }, 300);
+          }
         }
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
@@ -256,7 +297,6 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
                 </p>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="text-text-muted hover:text-text-primary text-lg">✕</button>
           </div>
 
           {/* Mode Toggle — AI对话 / Agent诊断 */}
@@ -294,12 +334,38 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
                     ? 'bg-accent-red/10 text-accent-red'
                     : 'bg-bg-hover text-text-primary'
                 }`}>
-                  {m.content}
+                  {m.role === 'assistant' ? (
+                    <Markdown content={m.content} />
+                  ) : (
+                    m.content
+                  )}
                 </div>
               </div>
             ))}
-            {loading && <p className="text-text-muted animate-pulse">AI思考中...</p>}
+            {(loading || agentRunning) && <p className="text-text-muted animate-pulse">{agentRunning ? 'Agent执行中...' : 'AI思考中...'}</p>}
           </div>
+
+          {/* Agent Progress */}
+          {mode === 'agent' && agentSteps.length > 0 && (
+            <div className="px-4 py-2 space-y-1 border-t border-border-default bg-bg-secondary/50 max-h-[180px] overflow-auto">
+              {agentSteps.map((s, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                  <span>{
+                    s.status === 'done' ? '✅' : s.status === 'failed' ? '❌' :
+                    s.status === 'running' ? '⏳' : '○'
+                  }</span>
+                  <span className={s.status === 'failed' ? 'text-accent-red' : 'text-text-secondary'}>
+                    {s.message}
+                  </span>
+                  {s.error && <span className="text-accent-red ml-1">— {s.error}</span>}
+                </div>
+              ))}
+              {agentScreenshot && (
+                <img src={`data:image/jpeg;base64,${agentScreenshot}`}
+                  className="mt-1 rounded border border-border-default w-full" alt="截图" />
+              )}
+            </div>
+          )}
 
           {/* Input */}
           <div className="p-3 border-t border-border-default">
@@ -330,7 +396,7 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
               ).map((q) => (
                 <button
                   key={q}
-                  onClick={() => { setInput(q); }}
+                  onClick={() => { mode === 'agent' ? handleSend(q) : setInput(q); }}
                   className="text-[10px] px-2 py-1 rounded border border-border-default text-text-muted hover:text-accent-blue hover:border-accent-blue transition-colors"
                 >
                   {q}
@@ -341,5 +407,22 @@ export default function CopilotFAB({ initialMessage = '' }: { initialMessage?: s
         </div>
       )}
     </>
+  );
+}
+
+function Markdown({ content }: { content: string }) {
+  const html = useMemo(() => {
+    try {
+      return marked(content, { breaks: true, gfm: true });
+    } catch {
+      return content;
+    }
+  }, [content]);
+
+  return (
+    <div
+      className="copilot-markdown text-xs leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
