@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../services/api';
 import { useAuthStore } from '../../services/authStore';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
@@ -174,7 +174,8 @@ export default function SettingsPage() {
   const [wechatEnabled, setWechatEnabled] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [apiBaseUrl, setApiBaseUrl] = useState('');
-  const [model, setModel] = useState(user?.model_preference || 'gpt-4');
+  const [model, setModel] = useState(user?.model_preference || 'qwen-plus');
+  const modelTouched = useRef(false);
   const [personalForm, setPersonalForm] = useState<PersonalForm>({
     displayName: user?.username || '',
     email: user?.email || '',
@@ -225,8 +226,8 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (user?.model_preference) setModel(normalizeModelPreference(user.model_preference));
-    if (user?.api_base_url) setApiBaseUrl(user.api_base_url);
+    if (user?.model_preference && !modelTouched.current) setModel(normalizeModelPreference(user.model_preference));
+    if (user?.api_base_url && !modelTouched.current) setApiBaseUrl(user.api_base_url);
     if (user) {
       setPersonalForm((prev) => ({
         ...prev,
@@ -520,7 +521,7 @@ export default function SettingsPage() {
                 aiTestMessage={aiTestMessage}
                 onApiKeyChange={setApiKey}
                 onApiBaseUrlChange={setApiBaseUrl}
-                onModelChange={setModel}
+                onModelChange={(v) => { modelTouched.current = true; setModel(v); }}
                 onSave={saveProfile}
                 onTestAi={testAiConnection}
               />

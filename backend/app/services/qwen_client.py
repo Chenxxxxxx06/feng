@@ -58,6 +58,7 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
     "qwen-turbo": AIModelConfig("通义千问 DashScope", "通义千问 qwen-turbo", "qwen-turbo", QWEN_CONFIG["base_url"]),
     "qwen3.6-flash": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.6-flash", "qwen3.6-flash", QWEN_CONFIG["base_url"]),
     "qwen3.7-max-2026-05-17": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-max", "qwen3.7-max-2026-05-17", QWEN_CONFIG["base_url"]),
+    "qwen3.7-plus-2026-05-26": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-plus", "qwen3.7-plus-2026-05-26", QWEN_CONFIG["base_url"]),
     "qwen-vl-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-vl-plus", "qwen-vl-plus", QWEN_CONFIG["base_url"]),
     "deepseek-v4-flash": AIModelConfig("DeepSeek", "DeepSeek deepseek-v4-flash", "deepseek-v4-flash", "https://api.deepseek.com"),
     "deepseek-chat": AIModelConfig("DeepSeek", "DeepSeek deepseek-chat", "deepseek-chat", "https://api.deepseek.com"),
