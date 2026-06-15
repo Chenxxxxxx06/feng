@@ -130,8 +130,8 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
     # ── Blade image source ──
     blade_count = (await db.execute(select(func.count(BladeImage.id)))).scalar() or 0
     from pathlib import Path
-    dtu_dir = Path(__file__).resolve().parents[1] / "data" / "curated_datasets" / "raw" / "blade_images" / "dtu_drone_inspection"
-    dtu_images = len(list(dtu_dir.rglob("*.JPG"))) + len(list(dtu_dir.rglob("*.jpg"))) if dtu_dir.exists() else 0
+    dtu_dir = Path(__file__).resolve().parents[2] / "data" / "curated_datasets" / "raw" / "blade_images" / "dtu_drone_inspection"
+    dtu_images = len(set(p.name for p in dtu_dir.rglob("*") if p.suffix.lower() in ('.jpg','.jpeg','.png'))) if dtu_dir.exists() else 0
     sources.append({
         "type": "image",
         "name": "叶片图像数据",
