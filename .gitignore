@@ -97,3 +97,4 @@ handoff_packages/
 API_KEYS_PLACEHOLDER.txt
 *.pem
 *.key
+frontend/tsconfig.tsbuildinfo

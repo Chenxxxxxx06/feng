@@ -22,6 +22,19 @@ from app.models import RULPrediction, Turbine, Fault, WorkOrder
 
 logger = logging.getLogger(__name__)
 
+# ── Urgency scoring weights (configurable) ──
+URGENCY_WEIGHTS = {
+    "rul": 0.40,       # RUL remaining life
+    "hi": 0.25,        # Health index
+    "fault": 0.20,     # Active faults
+    "maintenance": 0.15,  # Maintenance gap
+}
+URGENCY_THRESHOLDS = {
+    "urgent": 70,   # >= 70 → urgent priority
+    "high": 45,     # >= 45 → high priority
+    "medium": 25,   # >= 25 → medium priority
+}
+
 # ── Component maintenance config ──
 COMPONENT_CONFIG = {
     "齿轮箱": {
@@ -132,8 +145,9 @@ async def generate_maintenance_plan(
         fault_score = _score_faults(faults_by_turbine.get(r.turbine_id, []), r.component)
         maint_score = _score_maintenance_gap(turbine, now)
 
+        w = URGENCY_WEIGHTS
         urgency = round(
-            0.40 * rul_score + 0.25 * hi_score + 0.20 * fault_score + 0.15 * maint_score,
+            w["rul"] * rul_score + w["hi"] * hi_score + w["fault"] * fault_score + w["maintenance"] * maint_score,
             1,
         )
 
@@ -148,18 +162,19 @@ async def generate_maintenance_plan(
         ]
 
         # Priority label
-        if urgency >= 70:
+        ut = URGENCY_THRESHOLDS
+        if urgency >= ut["urgent"]:
             priority = "urgent"
-        elif urgency >= 45:
+        elif urgency >= ut["high"]:
             priority = "high"
-        elif urgency >= 25:
+        elif urgency >= ut["medium"]:
             priority = "medium"
         else:
             priority = "low"
 
         # Cost estimate
         cost_estimate = _estimate_maintenance_cost(
-            r.component, r.remaining_life_days, turbine.power_mw or 2.0
+            r.component, r.remaining_life_days, turbine.power_mw or 2.0, turbine.hi_value or 85.0
         )
 
         tasks.append({
@@ -277,8 +292,14 @@ def _estimate_maintenance_cost(
     component: str,
     rul_days: float,
     power_mw: float,
+    hi_value: float = 85.0,
 ) -> float:
-    """Estimate maintenance cost based on component, urgency, and turbine power."""
+    """Estimate maintenance cost based on component, urgency, turbine power and health.
+
+    Lower HI → higher cost (more damage to repair).
+    Larger power → higher cost (bigger components).
+    Shorter RUL → higher cost (emergency premium).
+    """
     base_costs = {
         "齿轮箱": 120_000,
         "发电机": 45_000,
@@ -287,18 +308,20 @@ def _estimate_maintenance_cost(
         "变桨系统": 18_000,
     }
     base = base_costs.get(component, 30_000)
-    # Urgency multiplier: more urgent = more expensive (emergency premium)
+    # Urgency multiplier: more urgent = more expensive
     if rul_days < 30:
         urgency_mult = 1.5
     elif rul_days < 90:
         urgency_mult = 1.2
-    elif rul_days < 180:
+    elif rul_days < 365:
         urgency_mult = 1.0
     else:
         urgency_mult = 0.85
-    # Power scaling: larger turbines cost more to fix
-    power_mult = power_mw / 2.0
-    return base * urgency_mult * power_mult
+    # Power scaling: per-MW cost (baseline 2MW turbine)
+    power_mult = max(0.5, power_mw / 1.5) if power_mw > 0 else 1.0
+    # HI scaling: worse health → higher repair cost
+    hi_mult = max(0.7, 100.0 / max(hi_value, 40.0))
+    return round(base * urgency_mult * power_mult * hi_mult, 2)
 
 
 # ── LLM-friendly summary builder ──

@@ -1,18 +1,14 @@
 export interface Turbine {
   id: number;
   name: string;
-  model: string | null;
-  power_mw: number | null;
-  lat: number | null;
-  lng: number | null;
+  model: string;
+  power_mw: number;
+  lat: number;
+  lng: number;
   region: string;
   status: 'normal' | 'warning' | 'fault';
   hi_value: number;
   last_maintenance: string | null;
-  source_dataset?: string | null;
-  source_asset_id?: string | null;
-  asset_scope?: string | null;
-  geo_scope?: string | null;
 }
 
 export interface TurbineSummary {
@@ -25,47 +21,32 @@ export interface TurbineSummary {
 
 export type TurbineDetail = Turbine;
 
+export interface WeatherReplayPoint {
+  wind_speed_ms: number | null;
+  wind_gust_ms: number | null;
+  wind_direction_deg: number | null;
+  turbulence_intensity: number | null;
+  air_temperature_c: number | null;
+  air_pressure_hpa: number | null;
+  source_dataset?: string | null;
+}
+
 export interface SCADAPoint {
   timestamp: string;
   power_kw: number | null;
-  power_unit?: string | null;
-  power_label?: string | null;
-  power_source_field?: string | null;
   wind_speed_ms: number | null;
   rotor_rpm: number | null;
   gen_temperature_c: number | null;
   gearbox_temperature_c: number | null;
   pitch_angle_deg: number | null;
+  dataset_window?: string | null;
+  source_dataset?: string | null;
+  power_unit?: string | null;
+  power_label?: string | null;
   bearing_temperature_c?: number | null;
-  nacelle_direction_deg?: number | null;
   grid_frequency_hz?: number | null;
-  ambient_temp_c?: number | null;
-  data_source?: string;
-  dataset_window?: 'recent' | 'historical_latest';
-  source_dataset?: string | null;
-  source_file?: string | null;
-  source_row?: number | null;
-  source_turbine_id?: string | null;
-  source_wind_farm?: string | null;
-  event_label?: string | null;
-  event_component_category?: string | null;
-  status_type_id?: string | null;
-}
-
-export interface WeatherReplayPoint {
-  timestamp: string;
-  replay_slot_start_minute?: number | null;
-  wind_speed_ms: number | null;
-  wind_gust_ms?: number | null;
-  wind_direction_deg?: number | null;
   nacelle_direction_deg?: number | null;
-  turbulence_intensity?: number | null;
-  air_temperature_c?: number | null;
-  air_pressure_hpa?: number | null;
-  data_source?: string | null;
-  source_dataset?: string | null;
-  dataset_window?: 'recent' | 'historical_latest';
-  quality?: Record<string, any> | null;
+  ambient_temp_c?: number | null;
 }
 
 export interface Fault {
@@ -177,13 +158,9 @@ export interface VibrationPreview {
   spectrum: number[];
   peak_frequencies: { frequency_hz: number; amplitude: number }[];
   fault_detected: boolean;
-  quality?: Record<string, any> | null;
-  source_dataset?: string | null;
-  data_source?: string | null;
-  waveform_path?: string | null;
-  peak_freq_hz?: number | null;
   algorithm_status: string;
   message: string;
+  source_dataset?: string | null;
 }
 
 export interface BladeDiagnosisResult {
@@ -216,7 +193,7 @@ export interface CostComparison {
   failure_probability: number;
   recommendation: string;
   optimal_window_days: number;
-  risk_level: 'low' | 'medium' | 'high' | string;
+  risk_level: string;
   estimated_saving: number;
   cost_drivers: string[];
 }
@@ -228,20 +205,20 @@ export interface WorkOrder {
   title: string;
   description: string | null;
   status: string;
-  priority?: string | null;
-  fault_type?: string | null;
-  due_date?: string | null;
-  assignee_id?: number | null;
   assignee: string | null;
+  assignee_id?: number | null;
   assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
-  downtime_hours?: number | null;
   created_at: string;
   updated_at?: string | null;
   completed_at: string | null;
   cancelled_at?: string | null;
   deleted_at?: string | null;
+  due_date?: string | null;
+  fault_type?: string | null;
+  priority?: string;
+  downtime_hours?: number | null;
   notification_sent_at?: string | null;
 }
 

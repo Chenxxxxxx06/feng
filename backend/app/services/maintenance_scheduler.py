@@ -12,7 +12,12 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+MAX_FORECAST_DAYS = 16
 
 # ── Crew and shift config ──
 SHIFT_HOURS = 8  # hours per shift
@@ -178,58 +183,155 @@ def detect_conflicts(scheduled: list[dict]) -> list[dict]:
     return conflicts
 
 
-def weather_window(d: date, lat: float, lng: float) -> dict:
-    """Rate a date/location for outdoor maintenance safety.
-
-    Returns a weather score 0-100 (higher = better) and flags.
-    Stub — real implementation would call Open-Meteo forecast API.
-    For now, uses a simple seasonal model.
-    """
+def _seasonal_fallback(d: date, lat: float) -> dict:
+    """Seasonal approximation when forecast is unavailable."""
     month = d.month
-    day_of_month = d.day
-
-    # Seasonal approximation for Shaanxi:
-    # Nov-Feb: cold, possible snow/ice → wind turbine work difficult
-    # Mar-May: moderate, occasional sandstorms in north
-    # Jun-Aug: warm, occasional thunderstorms
-    # Sep-Oct: best season, mild and dry
     if month in (12, 1, 2):
-        base_score = 40
-        flags = ["低温", "可能的冰雪"]
+        base_score, flags = 40, ["低温", "可能的冰雪"]
     elif month in (3, 4):
-        base_score = 65
-        flags = ["风沙季"] if lat > 36 else []
+        base_score, flags = 65, (["风沙季"] if lat > 36 else [])
     elif month in (5, 6):
-        base_score = 80
-        flags = ["偶有雷雨"] if month == 6 else []
+        base_score, flags = 80, (["偶有雷雨"] if month == 6 else [])
     elif month in (7, 8):
-        base_score = 70
-        flags = ["高温", "可能有雷暴"]
-    else:  # 9, 10, 11
-        base_score = 90
-        flags = []
-
-    # Simple pseudo-random daily variation (deterministic from date)
-    variation = (day_of_month * 7 + month * 13) % 20 - 10  # -10 to +10
+        base_score, flags = 70, ["高温", "可能有雷暴"]
+    else:
+        base_score, flags = 90, []
+    variation = (d.day * 7 + month * 13) % 20 - 10
     score = max(0, min(100, base_score + variation))
-
     return {
         "date": d.isoformat(),
         "score": score,
         "safe": score >= 50,
         "flags": flags,
-        "lat": lat,
-        "lng": lng,
+        "source": "seasonal_model",
     }
 
 
-def get_weather_for_dates(
+async def _fetch_open_meteo_forecast(lat: float, lng: float) -> dict[str, dict]:
+    """Fetch daily forecast from Open-Meteo API. Returns {date_str: weather_data}."""
+    params = {
+        "latitude": lat,
+        "longitude": lng,
+        "daily": "wind_speed_10m_max,wind_gusts_10m_max,temperature_2m_max,precipitation_sum",
+        "wind_speed_unit": "ms",
+        "timezone": "Asia/Shanghai",
+        "forecast_days": MAX_FORECAST_DAYS,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(OPEN_METEO_FORECAST_URL, params=params)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("Open-Meteo forecast lookup failed: %s", exc)
+        return {}
+
+    payload = response.json()
+    daily = payload.get("daily")
+    if not isinstance(daily, dict):
+        return {}
+
+    dates = daily.get("time") or []
+    wind_max = daily.get("wind_speed_10m_max") or []
+    gusts_max = daily.get("wind_gusts_10m_max") or []
+    precip = daily.get("precipitation_sum") or []
+    temp_max = daily.get("temperature_2m_max") or []
+
+    forecast: dict[str, dict] = {}
+    for i, d_str in enumerate(dates):
+        w = _safe_get(wind_max, i)
+        g = _safe_get(gusts_max, i)
+        p = _safe_get(precip, i)
+        t = _safe_get(temp_max, i)
+        forecast[d_str] = {
+            "wind_speed_max_ms": w,
+            "wind_gusts_max_ms": g,
+            "precipitation_mm": p,
+            "temperature_max_c": t,
+        }
+    return forecast
+
+
+def _safe_get(lst: list, idx: int) -> float | None:
+    try:
+        return float(lst[idx]) if lst[idx] is not None else None
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _score_from_forecast(fc: dict | None) -> dict:
+    """Convert forecast data to a weather safety score (0-100)."""
+    if not fc:
+        return {"score": 50, "safe": True, "flags": ["无预报数据"], "source": "no_data"}
+
+    score = 100
+    flags: list[str] = []
+    w = fc.get("wind_speed_max_ms")
+    g = fc.get("wind_gusts_max_ms")
+    p = fc.get("precipitation_mm")
+    t = fc.get("temperature_max_c")
+
+    # Wind > 15 m/s → unsafe for outdoor turbine work
+    if w is not None and w > 15:
+        score -= 40
+        flags.append(f"强风 {w:.0f}m/s")
+    elif w is not None and w > 10:
+        score -= 15
+        flags.append(f"大风 {w:.0f}m/s")
+    # Gusts > 20 m/s → dangerous
+    if g is not None and g > 20:
+        score -= 30
+        flags.append(f"阵风 {g:.0f}m/s")
+    # Precipitation > 5mm → rain/snow interruption
+    if p is not None and p > 5:
+        score -= 25
+        flags.append(f"降雨 {p:.0f}mm")
+    elif p is not None and p > 1:
+        score -= 10
+        flags.append(f"小雨 {p:.0f}mm")
+    # Extreme cold or heat
+    if t is not None and t < -10:
+        score -= 20
+        flags.append(f"极寒 {t:.0f}°C")
+    elif t is not None and t > 38:
+        score -= 15
+        flags.append(f"高温 {t:.0f}°C")
+
+    score = max(0, min(100, score))
+    return {
+        "score": score,
+        "safe": score >= 50,
+        "flags": flags,
+        "source": "open_meteo_forecast",
+    }
+
+
+async def get_weather_for_dates(
     dates: list[date],
     lat: float = 37.3,
     lng: float = 107.6,
 ) -> list[dict]:
-    """Get weather windows for a list of dates at a given location."""
-    return [weather_window(d, lat, lng) for d in dates]
+    """Get weather safety windows for outdoor maintenance.
+
+    Uses Open-Meteo daily forecast (up to 16 days ahead).
+    Falls back to seasonal model for dates beyond forecast range.
+    """
+    if not dates:
+        return []
+
+    forecast = await _fetch_open_meteo_forecast(lat, lng)
+    results: list[dict] = []
+    for d in dates:
+        d_str = d.isoformat()
+        fc = forecast.get(d_str)
+        if fc is not None:
+            item = _score_from_forecast(fc)
+        else:
+            item = _seasonal_fallback(d, lat)
+        item["date"] = d_str
+        item["lat"] = lat
+        item["lng"] = lng
+        results.append(item)
+    return results
 
 
 def generate_ics(scheduled: list[dict], title: str = "风电运维计划") -> str:

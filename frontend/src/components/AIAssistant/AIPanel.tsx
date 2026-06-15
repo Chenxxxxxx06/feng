@@ -4,19 +4,20 @@ import type { AISummary } from '../../types';
 
 interface Props {
   pageType: string;
+  pageData?: Record<string, unknown>;
 }
 
-export default function AIPanel({ pageType }: Props) {
+export default function AIPanel({ pageType, pageData }: Props) {
   const [summary, setSummary] = useState<AISummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    api.post('/ai/summary', { page_type: pageType, page_data: {} })
+    api.post('/ai/summary', { page_type: pageType, page_data: pageData || {} })
       .then(({ data }) => setSummary(data))
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
-  }, [pageType]);
+  }, [pageType, JSON.stringify(pageData)]);
 
   return (
     <div className="p-3 max-h-64 overflow-auto">

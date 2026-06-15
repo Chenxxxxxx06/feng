@@ -1,120 +1,78 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import * as echarts from 'echarts';
 import api from '../../services/api';
 import TurbineMap from '../../components/Map/TurbineMap';
 import FilterPanel from '../../components/Common/FilterPanel';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import AIPanel from '../../components/AIAssistant/AIPanel';
 import type { TurbineSummary, TurbineDetail } from '../../types';
 
-const EMPTY_SUMMARY: TurbineSummary = {
-  turbines: [],
-  total: 0,
-  healthy: 0,
-  warning: 0,
-  faulty: 0,
-};
-
-const STATUS_COLORS = {
-  normal: '#3fb950',
-  warning: '#d29922',
-  fault: '#f85149',
-} as const;
-
-function turbineStatusColor(turbine: TurbineDetail) {
-  if (turbine.status === 'normal') return STATUS_COLORS.normal;
-  if (turbine.status === 'warning') return STATUS_COLORS.warning;
-  return STATUS_COLORS.fault;
-}
-
-function hiColor(hiValue: number) {
-  if (hiValue >= 80) return STATUS_COLORS.normal;
-  if (hiValue >= 60) return STATUS_COLORS.warning;
-  return STATUS_COLORS.fault;
-}
-
-function turbineStatusText(status: TurbineDetail['status']) {
-  if (status === 'normal') return '● 正常运行';
-  if (status === 'warning') return '● 预警状态';
-  return '● 故障状态';
-}
-
-function scopedStats(turbines: TurbineDetail[]) {
-  const healthy = turbines.filter((t) => t.status === 'normal').length;
-  const warning = turbines.filter((t) => t.status === 'warning').length;
-  const faulty = turbines.filter((t) => t.status === 'fault').length;
-  const total = turbines.length;
-  return {
-    healthy,
-    warning,
-    faulty,
-    availability: total > 0 ? (((healthy + warning) / total) * 100).toFixed(1) : '--',
-  };
-}
-
 export default function DashboardPage() {
-  const [summary, setSummary] = useState<TurbineSummary>(EMPTY_SUMMARY);
+  const [summary, setSummary] = useState<TurbineSummary>({ turbines: [], total: 0, healthy: 0, warning: 0, faulty: 0 });
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [activeFarm, setActiveFarm] = useState<string | null>(null);
   const [detail, setDetail] = useState<TurbineDetail | null>(null);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [mtbfHours, setMtbfHours] = useState<number | null>(null);
+  const [mttrHours, setMttrHours] = useState<number | null>(null);
+  const [mttrSource, setMttrSource] = useState<string>('');
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const handleSelectTurbine = useCallback((id: number | null) => {
-    setSelectedId(id);
-  }, []);
-
-  const closeDetail = useCallback(() => {
-    setSelectedId(null);
-    setDetail(null);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
+  const fetchData = async () => {
     setLoading(true);
     const params = new URLSearchParams(filters);
-    api.get(`/turbines/?${params.toString()}`)
-      .then(({ data }) => {
-        if (!cancelled) setSummary(data);
-      })
-      .catch(() => {
-        if (!cancelled) setSummary(EMPTY_SUMMARY);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [filters]);
-
+    const { data } = await api.get(`/turbines/?${params}`);
+    setSummary(data);
+    setLoading(false);
+  };
+  useEffect(() => { fetchData(); }, [filters]);
   useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      return;
-    }
-
-    let cancelled = false;
-    api.get(`/turbines/${selectedId}`)
-      .then(({ data }) => {
-        if (!cancelled) setDetail(data);
-      })
-      .catch(() => {
-        if (!cancelled) setDetail(null);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    if (!selectedId) { setDetail(null); return; }
+    api.get(`/turbines/${selectedId}`).then(({ data }) => setDetail(data));
   }, [selectedId]);
 
-  const scopedTurbines = useMemo(
-    () => (activeFarm ? summary.turbines.filter((t) => t.region === activeFarm) : summary.turbines),
-    [activeFarm, summary.turbines],
-  );
-  const stats = useMemo(() => scopedStats(scopedTurbines), [scopedTurbines]);
+  // ── MTBF from CARE event files, MTTR from prediction formula ──
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMetrics = async () => {
+      try {
+        const { data } = await api.get('/turbines/monitoring-metrics');
+        if (cancelled) return;
+        if (data?.mtbf_hours != null) setMtbfHours(data.mtbf_hours);
+      } catch { /* MTBF unavailable */ }
+      try {
+        const { data } = await api.get('/prediction/summary');
+        if (cancelled) return;
+        if (data?.reliability?.mttr_hours != null) {
+          setMttrHours(data.reliability.mttr_hours);
+          setMttrSource(' (估)');
+        }
+      } catch { /* MTTR unavailable */ }
+    };
+    fetchMetrics();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Clock refresh ──
+  useEffect(() => {
+    const t = setInterval(() => setCurrentTime(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const healthy = summary.turbines.filter((t) => t.status === 'normal').length;
+  const warning = summary.turbines.filter((t) => t.status === 'warning').length;
+  const faulty = summary.turbines.filter((t) => t.status === 'fault').length;
+  const avail = summary.total > 0 ? ((healthy + warning) / summary.total * 100).toFixed(1) : '--';
+
+  const fmtMtbf = (h: number | null) => {
+    if (h == null) return '--';
+    if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`;
+    if (h >= 720) return `${(h / 720).toFixed(0)} 月`;
+    if (h >= 24) return `${(h / 24).toFixed(0)} 天`;
+    return h.toFixed(0);
+  };
+  const fmtMttr = (h: number | null) => (h != null ? h.toFixed(1) : '--');
 
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ background: 'radial-gradient(ellipse at 50% 30%, #0f1a2e 0%, #080c12 70%)' }}>
@@ -133,19 +91,19 @@ export default function DashboardPage() {
             <span className="w-2 h-2 rounded-full status-dot-live" />
             系统运行正常
           </span>
-          <span className="text-[10px] text-text-muted">{new Date().toLocaleString('zh-CN')}</span>
+          <span className="text-[10px] text-text-muted">本地时间 {currentTime.toLocaleString('zh-CN')}</span>
         </div>
       </div>
 
       {/* ── KPI Strip ── */}
       <div className="flex-shrink-0 px-6 py-3">
         <div className="grid grid-cols-6 gap-3">
-          <KPICard label="风机可用率" value={stats.availability} unit="%" color="#388bfd" />
-          <KPICard label="正常运行" value={String(stats.healthy)} unit="台" color={STATUS_COLORS.normal} />
-          <KPICard label="预警风机" value={String(stats.warning)} unit="台" color={STATUS_COLORS.warning} />
-          <KPICard label="故障风机" value={String(stats.faulty)} unit="台" color={STATUS_COLORS.fault} trend={stats.faulty > 0 ? 'up' : undefined} />
-          <KPICard label="MTBF" value="2,340" unit="h" color="#39d2c0" />
-          <KPICard label="MTTR" value="4.2" unit="h" color="#a371f7" />
+          <KPICard label="风机可用率" value={avail} unit="%" color="#388bfd" />
+          <KPICard label="正常运行" value={String(healthy)} unit="台" color="#3fb950" />
+          <KPICard label="预警风机" value={String(warning)} unit="台" color="#d29922" />
+          <KPICard label="故障风机" value={String(faulty)} unit="台" color="#f85149" trend={faulty > 0 ? 'up' : undefined} />
+          <KPICard label="MTBF" value={mtbfHours != null ? Math.round(mtbfHours).toLocaleString() : '--'} unit="h" color="#39d2c0" />
+          <KPICard label="MTTR" value={fmtMttr(mttrHours)} unit={`h${mttrSource}`} color="#a371f7" />
         </div>
       </div>
 
@@ -160,12 +118,7 @@ export default function DashboardPage() {
           </div>
         )}
         <div className="absolute inset-0 z-0">
-          <TurbineMap
-            turbines={summary.turbines}
-            selectedId={selectedId}
-            onSelect={handleSelectTurbine}
-            onFarmChange={setActiveFarm}
-          />
+          <TurbineMap turbines={summary.turbines} selectedId={selectedId} onSelect={setSelectedId} />
         </div>
         <div className="relative z-[700]">
           <FilterPanel filters={filters} onChange={setFilters} />
@@ -182,26 +135,26 @@ export default function DashboardPage() {
                   <h3 className="font-bold text-sm">{detail.name}</h3>
                   <p className="text-[10px] text-text-muted">{detail.region} · {detail.model}</p>
                 </div>
-                <button onClick={closeDetail}
+                <button onClick={() => { setSelectedId(null); setDetail(null); }}
                   className="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors">✕</button>
               </div>
               <div className="flex-1 overflow-auto p-5 space-y-4">
                 {/* HI Gauge */}
                 <div className="text-center py-3">
                   <div className="inline-flex items-center justify-center w-24 h-24 rounded-full border-4 relative" style={{
-                    borderColor: hiColor(detail.hi_value),
-                    boxShadow: `0 0 24px ${detail.status === 'normal' ? 'rgba(63,185,80,0.3)' : detail.status === 'warning' ? 'rgba(210,153,34,0.3)' : 'rgba(248,81,73,0.3)'}`,
+                    borderColor: detail.hi_value >= 80 ? '#3fb950' : detail.hi_value >= 60 ? '#d29922' : '#f85149',
+                    boxShadow: `0 0 24px ${detail.hi_value >= 80 ? 'rgba(63,185,80,0.3)' : detail.hi_value >= 60 ? 'rgba(210,153,34,0.3)' : 'rgba(248,81,73,0.3)'}`,
                     borderRightColor: 'transparent', borderBottomColor: 'transparent', transform: 'rotate(-45deg)',
                   }}>
                     <div style={{ transform: 'rotate(45deg)' }}>
-                      <p className="text-2xl font-mono font-bold" style={{ color: hiColor(detail.hi_value) }}>
+                      <p className="text-2xl font-mono font-bold" style={{ color: detail.hi_value >= 80 ? '#3fb950' : detail.hi_value >= 60 ? '#d29922' : '#f85149' }}>
                         {detail.hi_value.toFixed(0)}
                       </p>
                       <p className="text-[9px] text-text-muted">HI</p>
                     </div>
                   </div>
                   <p className={`text-xs font-medium mt-2 ${detail.status === 'normal' ? 'text-accent-green' : detail.status === 'warning' ? 'text-accent-yellow' : 'text-accent-red'}`}>
-                    {turbineStatusText(detail.status)}
+                    {detail.status === 'normal' ? '● 正常运行' : detail.status === 'warning' ? '● 预警状态' : '● 故障状态'}
                   </p>
                 </div>
 
@@ -209,7 +162,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-2.5">
                   {[
                     ['额定功率', `${detail.power_mw} MW`, '#58a6ff'],
-                    ['上次维护', detail.last_maintenance ? new Date(detail.last_maintenance).toLocaleDateString('zh-CN') : '--', '#8b949e'],
+                    ['上次维护', detail.last_maintenance ? new Date(detail.last_maintenance).toLocaleDateString('zh-CN') : '暂无维护记录', '#8b949e'],
                   ].map(([l, v, c]) => (
                     <div key={l as string} className="industrial-card rounded-lg p-3">
                       <p className="text-[10px] text-text-muted mb-0.5">{l}</p>
@@ -221,7 +174,6 @@ export default function DashboardPage() {
                 {/* Quick Actions */}
                 <div className="space-y-2 pt-1">
                   <Link to={`/turbine/${detail.id}`}
-                    data-action="view-turbine-detail"
                     className="block w-full text-center py-2.5 rounded-lg text-xs font-medium transition-all"
                     style={{ background: 'rgba(56,139,253,0.1)', border: '1px solid rgba(56,139,253,0.3)', color: '#388bfd' }}>
                     查看单机详情 →
@@ -240,14 +192,22 @@ export default function DashboardPage() {
 
       {/* ── Bottom Charts ── */}
       <div className="flex-shrink-0 px-6 pb-4">
-        <div className="grid grid-cols-3 gap-3" style={{ height: '180px' }}>
-          <QuickList turbines={scopedTurbines} selectedId={selectedId} onSelect={handleSelectTurbine} />
-          <HIChartPanel turbines={scopedTurbines} />
-          <HealthPiePanel healthy={stats.healthy} warning={stats.warning} faulty={stats.faulty} />
+        <div className="grid grid-cols-4 gap-3" style={{ height: '180px' }}>
+          <QuickList turbines={summary.turbines} selectedId={selectedId} onSelect={setSelectedId} />
+          <HIChartPanel turbines={summary.turbines} />
+          <HealthPiePanel healthy={healthy} warning={warning} faulty={faulty} />
+          <div className="rounded-xl border border-border-default bg-bg-card overflow-hidden">
+            <AIPanel pageType="dashboard" pageData={{ total: summary.total, healthy, warning, faulty, avgHi: summary.turbines.length > 0 ? (summary.turbines.reduce((s, t) => s + t.hi_value, 0) / summary.turbines.length).toFixed(1) : 0, mtbfHours: mtbfHours != null ? Math.round(mtbfHours) : null, mttrHours }} />
+          </div>
         </div>
       </div>
 
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        turbine_id: selectedId ?? undefined,
+        turbine_name: detail?.name,
+        total_turbines: summary.total,
+        healthy, warning, faulty,
+      }} />
     </div>
   );
 }
@@ -277,16 +237,13 @@ function QuickList({ turbines, selectedId, onSelect }: { turbines: TurbineDetail
       <div className="flex-1 overflow-auto space-y-0.5">
         {turbines.slice(0, 8).map((t) => (
           <div key={t.id} onClick={() => onSelect(t.id)}
-            data-turbine-id={t.id}
-            data-turbine-name={t.name}
-            data-action="select-turbine"
             className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[11px] transition-all ${
               selectedId === t.id ? 'bg-bg-hover' : 'hover:bg-bg-hover/50'
             }`}>
-            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: turbineStatusColor(t) }} />
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.status === 'normal' ? '#3fb950' : t.status === 'warning' ? '#d29922' : '#f85149' }} />
             <span className="w-14 font-medium truncate">{t.name}</span>
             <span className="text-text-muted flex-1 truncate text-[10px]">{t.model}</span>
-            <span className="font-mono font-bold text-[12px]" style={{ color: hiColor(t.hi_value) }}>
+            <span className="font-mono font-bold text-[12px]" style={{ color: t.hi_value >= 80 ? '#3fb950' : t.hi_value >= 60 ? '#d29922' : '#f85149' }}>
               {t.hi_value.toFixed(0)}
             </span>
           </div>
@@ -310,16 +267,11 @@ function HIChartPanel({ turbines }: { turbines: TurbineDetail[] }) {
       yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: 'rgba(56,139,253,0.08)' } }, axisLabel: { color: '#54657e', fontSize: 9 } },
       series: [{
         type: 'bar', barWidth: 14,
-        data: data.map((t) => ({ value: t.hi_value, itemStyle: { color: hiColor(t.hi_value), borderRadius: [3, 3, 0, 0] } })),
+        data: data.map((t) => ({ value: t.hi_value, itemStyle: { color: t.hi_value >= 80 ? '#3fb950' : t.hi_value >= 60 ? '#d29922' : '#f85149', borderRadius: [3, 3, 0, 0] } })),
         markLine: { silent: true, symbol: 'none', lineStyle: { color: '#f85149', type: 'dashed', width: 1 }, label: { color: '#f85149', fontSize: 8 }, data: [{ yAxis: 60, label: { formatter: '告警线' } }] },
       }],
     });
-    const resize = () => chart.resize();
-    window.addEventListener('resize', resize);
-    return () => {
-      window.removeEventListener('resize', resize);
-      chart.dispose();
-    };
+    return () => chart.dispose();
   }, [turbines]);
   return (
     <div className="industrial-card rounded-xl p-3 flex flex-col overflow-hidden">
@@ -342,18 +294,13 @@ function HealthPiePanel({ healthy, warning, faulty }: { healthy: number; warning
         itemStyle: { borderRadius: 4, borderColor: '#080c12', borderWidth: 3 },
         label: { show: false },
         data: [
-          { value: healthy, name: '正常', itemStyle: { color: STATUS_COLORS.normal } },
-          { value: warning, name: '预警', itemStyle: { color: STATUS_COLORS.warning } },
-          { value: faulty, name: '故障', itemStyle: { color: STATUS_COLORS.fault } },
+          { value: healthy, name: '正常', itemStyle: { color: '#3fb950' } },
+          { value: warning, name: '预警', itemStyle: { color: '#d29922' } },
+          { value: faulty, name: '故障', itemStyle: { color: '#f85149' } },
         ],
       }],
     });
-    const resize = () => chart.resize();
-    window.addEventListener('resize', resize);
-    return () => {
-      window.removeEventListener('resize', resize);
-      chart.dispose();
-    };
+    return () => chart.dispose();
   }, [healthy, warning, faulty]);
   return (
     <div className="industrial-card rounded-xl p-3 flex flex-col overflow-hidden">

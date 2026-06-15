@@ -73,17 +73,40 @@ interface PersonalPreferences {
   autoOpenCopilot: boolean;
 }
 
-interface AIPreset {
-  name: string;
-  model: string;
-  baseUrl: string;
+interface AIModelOption {
+  value: string;
+  label: string;
+  provider: string;
+  note: string;
+  requiresKey: boolean;
 }
 
-const aiPresets: AIPreset[] = [
-  { name: '通义千问', model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-  { name: 'DeepSeek', model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com' },
-  { name: '自定义', model: '', baseUrl: '' },
+const aiModelOptions: AIModelOption[] = [
+  { value: 'qwen-plus', label: '通义千问 qwen-plus', provider: '通义千问 DashScope', note: '中文运维总结，质量/成本均衡', requiresKey: true },
+  { value: 'qwen-turbo', label: '通义千问 qwen-turbo', provider: '通义千问 DashScope', note: '更快更便宜，适合页面摘要', requiresKey: true },
+  { value: 'qwen3.6-flash', label: '通义千问 qwen3.6-flash', provider: '通义千问 DashScope', note: '轻量快速模型', requiresKey: true },
+  { value: 'deepseek-v4-flash', label: 'DeepSeek deepseek-v4-flash', provider: 'DeepSeek', note: '低成本通用对话', requiresKey: true },
+  { value: 'deepseek-chat', label: 'DeepSeek deepseek-chat', provider: 'DeepSeek', note: '历史稳定配置', requiresKey: true },
+  { value: 'deepseek-reasoner', label: 'DeepSeek deepseek-reasoner', provider: 'DeepSeek', note: '推理任务更强', requiresKey: true },
+  { value: 'glm-5-flash', label: '智谱 GLM-5-Flash', provider: '智谱GLM', note: '中文场景低成本', requiresKey: true },
+  { value: 'kimi-k2.6', label: 'Kimi kimi-k2.6', provider: 'Kimi Moonshot', note: '长上下文友好', requiresKey: true },
+  { value: 'gpt-4o-mini', label: 'OpenAI gpt-4o-mini', provider: 'OpenAI', note: '轻量多用途', requiresKey: true },
+  { value: 'gpt-4.1', label: 'OpenAI gpt-4.1', provider: 'OpenAI', note: '高质量通用模型', requiresKey: true },
+  { value: 'gpt-4', label: 'OpenAI gpt-4', provider: 'OpenAI', note: '历史配置', requiresKey: true },
+  { value: 'gpt-3.5-turbo', label: 'OpenAI gpt-3.5-turbo', provider: 'OpenAI', note: '历史配置', requiresKey: true },
+  { value: 'gemini-2.5-flash', label: 'Gemini gemini-2.5-flash', provider: 'Google Gemini', note: '免费层友好', requiresKey: true },
+  { value: 'gemini-3.5-flash', label: 'Gemini gemini-3.5-flash', provider: 'Google Gemini', note: '新一代快速模型', requiresKey: true },
+  { value: 'ollama-local', label: 'Ollama qwen2.5', provider: 'Ollama本地模型', note: '本地运行，不需要API Key', requiresKey: false },
 ];
+
+const getModelOption = (model: string) => aiModelOptions.find((option) => option.value === model);
+const normalizeModelPreference = (model?: string) => {
+  const aliases: Record<string, string> = {
+    'qwen3.5-flash': 'qwen3.6-flash',
+    'deepseek-v3': 'deepseek-chat',
+  };
+  return aliases[model || ''] || model || 'qwen-plus';
+};
 
 const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'overview', label: '总览', desc: '系统状态与最近操作' },
@@ -92,7 +115,6 @@ const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'alerts', label: '告警规则', desc: 'HI阈值和通知方式' },
   { key: 'pipeline', label: '数据源管理', desc: 'SCADA/振动/图像/气象' },
   { key: 'personnel', label: '人员管理', desc: '维护人员和负载' },
-  { key: 'logs', label: '操作日志', desc: '本次配置变更记录' },
 ];
 
 const sourceIcons: Record<string, string> = {
@@ -118,7 +140,7 @@ const statusTone = (status: string) => {
     case 'error':
       return 'border-accent-red/40 bg-accent-red/10 text-accent-red';
     default:
-      return 'border-border-default bg-bg-secondary text-text-muted';
+      return 'border-border-default bg-navy-900 text-text-muted';
   }
 };
 
@@ -147,12 +169,12 @@ export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [hiThreshold, setHiThreshold] = useState('70');
-  const [emailEnabled, setEmailEnabled] = useState(true);
-  const [emailAddress, setEmailAddress] = useState(user?.email || '');
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailAddress, setEmailAddress] = useState('');
   const [wechatEnabled, setWechatEnabled] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState(user?.model_preference || 'qwen-plus');
-  const [baseUrl, setBaseUrl] = useState(user?.api_base_url || '');
+  const [apiBaseUrl, setApiBaseUrl] = useState('');
+  const [model, setModel] = useState(user?.model_preference || 'gpt-4');
   const [personalForm, setPersonalForm] = useState<PersonalForm>({
     displayName: user?.username || '',
     email: user?.email || '',
@@ -184,34 +206,27 @@ export default function SettingsPage() {
   const [personForm, setPersonForm] = useState({ name: '', skills: '', region: '陕北', email: '' });
   const [aiTestStatus, setAiTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [aiTestMessage, setAiTestMessage] = useState('');
-  const [logs, setLogs] = useState<ActivityLog[]>([
-    {
-      id: 1,
-      time: new Date().toLocaleString('zh-CN'),
-      action: '打开系统设置',
-      result: '加载当前配置',
-      level: 'info',
-    },
-  ]);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+
+  const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
+    setLogs((prev) => [
+      { id: Date.now(), time: new Date().toLocaleString('zh-CN'), action, result, level },
+      ...prev,
+    ].slice(0, 20));
+  };
+
   useEffect(() => {
-    api.get('/settings/thresholds').then(({ data }) => {
-      if (data.length > 0) {
-        const config = data[0] as ThresholdConfig;
-        setHiThreshold(String(config.hi_threshold));
-        setEmailEnabled(config.email_enabled);
-        setEmailAddress(config.email_address || '');
-        setWechatEnabled(config.wechat_enabled);
-      }
-    });
     if (!user) fetchMe();
+    addLog('打开系统设置', '开始加载配置...', 'info');
     loadThresholds();
     refreshPipeline();
     refreshPersonnel();
+    loadPreferences();
   }, []);
 
   useEffect(() => {
-    if (user?.model_preference) setModel(user.model_preference);
-    if (user?.api_base_url) setBaseUrl(user.api_base_url);
+    if (user?.model_preference) setModel(normalizeModelPreference(user.model_preference));
+    if (user?.api_base_url) setApiBaseUrl(user.api_base_url);
     if (user) {
       setPersonalForm((prev) => ({
         ...prev,
@@ -221,13 +236,6 @@ export default function SettingsPage() {
     }
     if (user?.role === 'admin') setUnlocked(true);
   }, [user]);
-
-  const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
-    setLogs((prev) => [
-      { id: Date.now(), time: new Date().toLocaleString('zh-CN'), action, result, level },
-      ...prev,
-    ].slice(0, 12));
-  };
 
   const loadThresholds = async () => {
     const { data } = await api.get<ThresholdConfig[]>('/settings/thresholds');
@@ -267,25 +275,50 @@ export default function SettingsPage() {
       hi_threshold: Number(hiThreshold),
       email_enabled: emailEnabled,
       email_address: emailEnabled ? emailAddress || null : null,
-      wechat_enabled: wechatEnabled,
     });
     setThresholdSaved(true);
     addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
     setTimeout(() => setThresholdSaved(false), 2200);
   };
 
-  const savePersonalSettings = () => {
-    setPersonalSaved(true);
-    addLog('保存个人设置', `${personalForm.displayName || user?.username || '当前账号'} 的工作偏好已更新`);
-    setTimeout(() => setPersonalSaved(false), 2200);
+  const loadPreferences = async () => {
+    try {
+      const { data } = await api.get('/settings/preferences');
+      if (data && typeof data === 'object') {
+        if (data.displayName) setPersonalForm(prev => ({ ...prev, displayName: data.displayName }));
+        if (data.landingPage) setPersonalForm(prev => ({ ...prev, landingPage: data.landingPage }));
+        if (data.digestFrequency) setPersonalForm(prev => ({ ...prev, digestFrequency: data.digestFrequency }));
+        if (typeof data.desktopDigest === 'boolean') setPersonalPrefs(prev => ({ ...prev, desktopDigest: data.desktopDigest }));
+        if (typeof data.compactWorkspace === 'boolean') setPersonalPrefs(prev => ({ ...prev, compactWorkspace: data.compactWorkspace }));
+        if (typeof data.riskFirst === 'boolean') setPersonalPrefs(prev => ({ ...prev, riskFirst: data.riskFirst }));
+        if (typeof data.autoOpenCopilot === 'boolean') setPersonalPrefs(prev => ({ ...prev, autoOpenCopilot: data.autoOpenCopilot }));
+      }
+    } catch { /* preferences not yet saved */ }
+  };
+
+  const savePersonalSettings = async () => {
+    try {
+      const payload = { ...personalForm, ...personalPrefs };
+      await api.put('/settings/preferences', payload);
+      setPersonalSaved(true);
+      // Sync landing page preference to localStorage for App.tsx routing
+      if (personalForm.landingPage) localStorage.setItem('landingPage', personalForm.landingPage);
+      if (typeof personalPrefs.autoOpenCopilot === 'boolean') localStorage.setItem('autoOpenCopilot', String(personalPrefs.autoOpenCopilot));
+      addLog('保存个人设置', `${personalForm.displayName || user?.username || '当前账号'} 的工作偏好已同步到服务器`);
+      setTimeout(() => setPersonalSaved(false), 2200);
+    } catch {
+      setPersonalSaved(true);
+      addLog('保存个人设置(本地)', `服务器不可用，已保存到本地`);
+      setTimeout(() => setPersonalSaved(false), 2200);
+    }
   };
 
   const saveProfile = async () => {
-    const payload: { api_key?: string; model_preference: string; api_base_url?: string } = {
+    const payload: Record<string, string> = {
       model_preference: model,
-      api_base_url: baseUrl.trim() || undefined,
     };
     if (apiKey.trim()) payload.api_key = apiKey.trim();
+    if (apiBaseUrl.trim()) payload.api_base_url = apiBaseUrl.trim();
 
     try {
       setProfileError('');
@@ -293,12 +326,12 @@ export default function SettingsPage() {
       await fetchMe();
       setApiKey('');
       setProfileSaved(true);
-      addLog('保存AI设置', `模型: ${model}`);
+      addLog('保存AI设置', `默认模型: ${model}`);
       setTimeout(() => setProfileSaved(false), 2200);
     } catch (error) {
       const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      setProfileError(detail || 'AI设置保存失败');
-      addLog('保存AI设置', detail || '保存失败', 'error');
+      setProfileError(detail || 'AI设置保存失败，请检查密钥供应商和模型是否匹配');
+      addLog('保存AI设置', detail || 'AI设置保存失败', 'error');
     }
   };
 
@@ -306,17 +339,22 @@ export default function SettingsPage() {
     setAiTestStatus('testing');
     setAiTestMessage('');
     try {
-      const key = apiKey.trim() || user?.api_key || '';
-      const mdl = model.trim() || 'qwen-plus';
-      const url = baseUrl.trim() || user?.api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-      const { data } = await api.post('/ai/test-connection', { api_key: key, model: mdl, base_url: url });
-      setAiTestStatus(data.status === 'success' ? 'success' : 'error');
-      setAiTestMessage(data.message);
-      addLog('测试AI连接', data.message);
-    } catch {
+      const { data } = await api.post('/ai/test-connection', {
+        api_key: apiKey || user?.api_key || '',
+        model: model,
+        base_url: user?.api_base_url || '',
+      });
+      setAiTestStatus('success');
+      const message = data.success
+        ? `已连接 · ${data.model || model} (${data.latency_ms || 0}ms)`
+        : (data.message || 'AI服务连接失败');
+      setAiTestMessage(message);
+      addLog('测试AI连接', message);
+    } catch (e: any) {
       setAiTestStatus('error');
-      setAiTestMessage('连接测试失败，请检查密钥、模型ID和地址');
-      addLog('测试AI连接', '连接测试失败', 'error');
+      const msg = e?.response?.data?.detail || 'AI服务请求失败，请确认已保存密钥、模型和网络可用';
+      setAiTestMessage(msg);
+      addLog('测试AI连接', msg, 'error');
     }
   };
 
@@ -473,15 +511,15 @@ export default function SettingsPage() {
               <AISettingsSection
                 user={user}
                 apiKey={apiKey}
+                apiBaseUrl={apiBaseUrl}
                 model={model}
-                baseUrl={baseUrl}
                 profileSaved={profileSaved}
                 profileError={profileError}
                 aiTestStatus={aiTestStatus}
                 aiTestMessage={aiTestMessage}
                 onApiKeyChange={setApiKey}
+                onApiBaseUrlChange={setApiBaseUrl}
                 onModelChange={setModel}
-                onBaseUrlChange={setBaseUrl}
                 onSave={saveProfile}
                 onTestAi={testAiConnection}
               />
@@ -530,11 +568,12 @@ export default function SettingsPage() {
                 onRemove={removePerson}
               />
             )}
-            {activeSection === 'logs' && <LogsSection logs={logs} />}
           </main>
         </div>
       </div>
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        active_section: activeSection,
+      }} />
     </div>
   );
 }
@@ -595,7 +634,7 @@ function OverviewSection({
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-sm font-medium">告警区间</h4>
@@ -615,7 +654,7 @@ function OverviewSection({
           </div>
         </div>
 
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium">最近操作</h4>
             <button onClick={() => onNavigate('logs')} className="text-xs text-accent-blue hover:underline">查看全部</button>
@@ -639,7 +678,7 @@ function OverviewTile({ label, value, hint, tone }: { label: string; value: stri
     blue: 'bg-accent-blue',
   }[tone];
   return (
-    <div className="rounded-lg border border-border-default bg-bg-secondary/70 p-4">
+    <div className="rounded-lg border border-border-default bg-navy-900/70 p-4">
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${dot}`} />
         <span className="text-xs text-text-muted">{label}</span>
@@ -680,7 +719,7 @@ function PersonalSettingsSection({
     >
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h4 className="text-sm font-medium">账号资料</h4>
@@ -731,7 +770,7 @@ function PersonalSettingsSection({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">工作台偏好</h4>
             <p className="mt-1 text-xs text-text-muted">决定进入系统后的默认视图和日常摘要节奏。</p>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -785,7 +824,7 @@ function PersonalSettingsSection({
         </div>
 
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">账号状态</h4>
             <div className="mt-4 grid gap-3">
               <InfoLine label="账号ID" value={user?.id ? String(user.id) : '-'} />
@@ -794,7 +833,7 @@ function PersonalSettingsSection({
               <InfoLine label="权限角色" value={user?.role || '-'} />
             </div>
           </div>
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">本次偏好预览</h4>
             <div className="mt-4 space-y-3 text-xs text-text-secondary">
               <p>默认进入：{landingPageLabel(form.landingPage)}</p>
@@ -812,53 +851,69 @@ function PersonalSettingsSection({
 function AISettingsSection({
   user,
   apiKey,
+  apiBaseUrl,
   model,
-  baseUrl,
   profileSaved,
   profileError,
   aiTestStatus,
   aiTestMessage,
   onApiKeyChange,
+  onApiBaseUrlChange,
   onModelChange,
-  onBaseUrlChange,
   onSave,
   onTestAi,
 }: {
   user: CurrentUser | null;
   apiKey: string;
+  apiBaseUrl: string;
   model: string;
-  baseUrl: string;
   profileSaved: boolean;
   profileError: string;
   aiTestStatus: 'idle' | 'testing' | 'success' | 'error';
   aiTestMessage: string;
   onApiKeyChange: (value: string) => void;
+  onApiBaseUrlChange: (value: string) => void;
   onModelChange: (value: string) => void;
-  onBaseUrlChange: (value: string) => void;
   onSave: () => void;
   onTestAi: () => void;
 }) {
-  const hasSavedKey = Boolean(user?.api_key);
   const hasTypedKey = Boolean(apiKey.trim());
-  const canSave = hasTypedKey || (hasSavedKey && (model !== (user?.model_preference || '') || baseUrl !== (user?.api_base_url || '')));
-  const canTest = Boolean((hasTypedKey || hasSavedKey) && model.trim() && baseUrl.trim());
+  const hasSavedKey = Boolean(user?.api_key);
+  const hasKey = hasSavedKey || hasTypedKey;
+  const hasUnsavedAIChanges = hasTypedKey || (user?.model_preference && normalizeModelPreference(user.model_preference) !== model);
+  const canTestAISettings = aiTestStatus !== 'testing' && hasKey;
+  const keyStatusTone = hasKey
+    ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+    : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow';
+  const keyStatusLabel = hasKey ? '密钥已配置' : '本地兜底';
 
-  const handlePreset = (presetName: string) => {
-    const preset = aiPresets.find(p => p.name === presetName);
-    if (preset) {
-      onModelChange(preset.model);
-      onBaseUrlChange(preset.baseUrl);
-    }
+  const aiPresets = [
+    { name: '通义千问', model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+    { name: 'DeepSeek', model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
+    { name: '智谱GLM', model: 'glm-5-flash', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+    { name: 'Kimi', model: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1' },
+    { name: 'Gemini', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+    { name: 'Ollama本地', model: 'ollama-local', baseUrl: 'http://localhost:11434/v1' },
+  ];
+
+  const handlePreset = (name: string) => {
+    const preset = aiPresets.find(p => p.name === name);
+    if (!preset) return;
+    onModelChange(preset.model);
+    onApiKeyChange('');
   };
 
   return (
     <SectionShell
       title="AI设置"
-      description="配置 API Key、模型ID和接口地址。预设可快速填充常见供应商。"
+      description="配置智能总结、故障分析和运维助手实际调用的模型；保存后由后端按模型路由到对应供应商。"
       actions={
         <>
           {profileSaved && <span className="text-xs text-accent-green">AI设置已保存</span>}
-          <button onClick={onSave} className="industrial-btn industrial-btn-primary">
+          <button
+            onClick={onSave}
+            className="industrial-btn industrial-btn-primary"
+          >
             保存AI设置
           </button>
         </>
@@ -866,21 +921,17 @@ function AISettingsSection({
     >
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h4 className="text-sm font-medium">连接配置</h4>
-                <p className="mt-1 text-xs text-text-muted">密钥不在前端回显；所有字段自由填写，支持任意 OpenAI 兼容接口。</p>
+                <h4 className="text-sm font-medium">模型与密钥</h4>
+                <p className="mt-1 text-xs text-text-muted">密钥不在前端回显；输入新密钥后会通过后端个人配置接口保存。</p>
               </div>
-              <span className={`rounded-full border px-2 py-1 text-[10px] ${
-                hasSavedKey ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
-                  : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow'
-              }`}>
-                {hasSavedKey ? '已配置' : '未配置'}
+              <span className={`rounded-full border px-2 py-1 text-[10px] ${keyStatusTone}`}>
+                {keyStatusLabel}
               </span>
             </div>
-
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <label className="block">
                 <span className="text-xs text-text-muted">API Key</span>
                 <input
@@ -896,55 +947,53 @@ function AISettingsSection({
                 <span className="text-xs text-text-muted">默认模型</span>
                 <input
                   type="text"
+                  placeholder="qwen-plus"
                   value={model}
                   onChange={(e) => onModelChange(e.target.value)}
-                  placeholder="qwen-plus"
                   className="industrial-input mt-1 w-full"
                 />
-              </label>
-              <label className="block">
-                <span className="text-xs text-text-muted">Base URL</span>
-                <input
-                  type="text"
-                  value={baseUrl}
-                  onChange={(e) => onBaseUrlChange(e.target.value)}
-                  placeholder="https://api.openai.com/v1"
-                  className="industrial-input mt-1 w-full"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-text-muted">预设</span>
-                <select
-                  onChange={(e) => handlePreset(e.target.value)}
-                  defaultValue=""
-                  className="industrial-input mt-1 w-full"
-                >
-                  <option value="" disabled>选择预设...</option>
-                  {aiPresets.map(p => (
-                    <option key={p.name} value={p.name}>{p.name}{p.baseUrl ? ` — ${p.model}` : ''}</option>
-                  ))}
-                </select>
               </label>
             </div>
-
+            <div className="mt-4">
+              <label className="block">
+                <span className="text-xs text-text-muted">自定义API地址 (可选，自建代理或Ollama时填写)</span>
+                <input
+                  type="text"
+                  placeholder={user?.api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1'}
+                  value={apiBaseUrl}
+                  onChange={(e) => onApiBaseUrlChange(e.target.value)}
+                  className="industrial-input mt-1 w-full text-xs"
+                />
+              </label>
+            </div>
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <InfoLine label="当前账号" value={user?.username || '-'} />
+              <InfoLine label="实际模型ID" value={model || 'qwen-plus'} />
+            </div>
+            <div className="mt-3 rounded-md border border-border-default bg-bg-card px-3 py-2 text-xs text-text-secondary">
+              {hasKey
+                ? `使用模型 ${model || 'qwen-plus'}，调用远程模型可能按供应商规则计费。`
+                : '当前未配置AI服务密钥，后端不会调用远程收费模型，使用本地兜底结果，不产生AI调用费用。'}
+            </div>
             {profileError && (
               <div className="mt-3 rounded-md border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
                 {profileError}
               </div>
             )}
           </div>
+
         </div>
 
         <div className="space-y-5">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">AI服务检查</h4>
             <p className="mt-1 text-xs text-text-muted">
-              用当前表单中的密钥和地址测试连接，无需先保存。
+              {hasUnsavedAIChanges ? '当前模型或密钥尚未保存，请先保存AI设置再测试。' : '测试当前已保存的密钥供应商和模型是否匹配并可用。'}
             </p>
             <button
               onClick={onTestAi}
-              disabled={!canTest || aiTestStatus === 'testing'}
-              className={`industrial-btn mt-4 w-full ${!canTest ? 'cursor-not-allowed opacity-50' : ''}`}
+              className={`industrial-btn mt-4 w-full ${!canTestAISettings ? 'cursor-not-allowed opacity-50' : ''}`}
+              disabled={!canTestAISettings}
             >
               {aiTestStatus === 'testing' ? '测试中...' : '测试AI连接'}
             </button>
@@ -955,7 +1004,7 @@ function AISettingsSection({
             )}
           </div>
 
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">快捷预设</h4>
             <div className="mt-4 space-y-2">
               {aiPresets.filter(p => p.name !== '自定义').map(p => (
@@ -978,7 +1027,7 @@ function AISettingsSection({
 
 function ToggleRow({ title, desc, checked, onChange }: { title: string; desc: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="flex items-start justify-between gap-4 rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+    <label className="flex items-start justify-between gap-4 rounded-lg border border-border-default bg-navy-900/60 p-4">
       <span>
         <span className="block text-sm font-medium text-text-primary">{title}</span>
         <span className="mt-1 block text-xs text-text-muted">{desc}</span>
@@ -1071,7 +1120,7 @@ function AlertSection({
       }
     >
       <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h4 className="text-sm font-medium">健康指数阈值</h4>
@@ -1111,9 +1160,9 @@ function AlertSection({
           </p>
         </div>
 
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <h4 className="text-sm font-medium">通知方式</h4>
-          <p className="mt-1 text-xs text-text-muted">保存后由后端记录邮件和企业微信通知开关。</p>
+          <p className="mt-1 text-xs text-text-muted">配置邮件通知，用于工单派发和故障告警（需配置SMTP）。</p>
           <div className="mt-4 space-y-3">
             <label className="flex items-center justify-between rounded-md border border-border-default bg-bg-card px-3 py-2">
               <span className="text-sm">邮件通知</span>
@@ -1127,18 +1176,6 @@ function AlertSection({
                 className="industrial-input w-full"
               />
             )}
-            <label className="flex items-center justify-between rounded-md border border-border-default bg-bg-card px-3 py-2">
-              <span className="text-sm">企业微信通知</span>
-              <input type="checkbox" checked={wechatEnabled} onChange={(e) => onWechatEnabledChange(e.target.checked)} />
-            </label>
-            <div className="rounded-md border border-border-default bg-bg-card px-3 py-2">
-              <p className="text-sm">扩展触发项</p>
-              <div className="mt-2 grid gap-2 text-xs text-text-secondary">
-                <span>RUL低于90天：建议维护提醒</span>
-                <span>新故障产生：推送故障诊断摘要</span>
-                <span>工单超期：提醒责任人与管理员</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -1167,7 +1204,7 @@ function PipelineSection({
     >
       <div className="grid gap-3 xl:grid-cols-2">
         {pipeline?.sources.map((source) => (
-          <div key={source.type} className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div key={source.type} className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-md border border-border-default bg-bg-card text-xs font-semibold text-accent-blue">
@@ -1190,31 +1227,11 @@ function PipelineSection({
             <p className={`mt-3 text-xs ${source.real_data_available ? 'text-accent-green' : 'text-accent-yellow'}`}>
               {source.note}
             </p>
-            <div className="mt-4 flex items-center justify-between">
-              <span className={`text-xs ${
-                testResults[source.type] === 'testing' ? 'text-accent-blue' :
-                testResults[source.type] === 'success' ? 'text-accent-green' :
-                testResults[source.type] === 'error' ? 'text-accent-red' : 'text-text-muted'
-              }`}>
-                {testResults[source.type] === 'testing' ? '正在测试...' :
-                 testResults[source.type] === 'success' ? '连接测试完成' :
-                 testResults[source.type] === 'error' ? '连接失败' : '等待操作'}
-              </span>
-              <button onClick={() => onTest(source.type)} className="industrial-btn">测试连接</button>
-            </div>
           </div>
         ))}
       </div>
-
-      {pipeline?.errors && pipeline.errors.length > 0 && (
-        <div className="mt-5 rounded-lg border border-accent-red/30 bg-accent-red/5 p-4">
-          <p className="text-sm font-medium text-accent-red">管道错误 ({pipeline.errors.length})</p>
-          <div className="mt-2 space-y-1">
-            {pipeline.errors.map((error, index) => (
-              <p key={index} className="font-mono text-xs text-text-muted">{error}</p>
-            ))}
-          </div>
-        </div>
+      {pipeline?.overall_status !== 'healthy' && (
+        <p className="mt-3 text-xs text-accent-red">管道异常: {pipeline?.errors?.join('; ')}</p>
       )}
     </SectionShell>
   );
@@ -1271,7 +1288,7 @@ function PersonnelSection({
       }
     >
       {!unlocked ? (
-        <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+        <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
           <p className="text-sm font-medium">需要管理员校验</p>
           <p className="mt-1 text-xs text-text-muted">当前角色：{userRole || '-'}，请输入管理员密码后编辑人员信息。</p>
           <div className="mt-4 flex max-w-md gap-2">
@@ -1289,7 +1306,7 @@ function PersonnelSection({
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="rounded-lg border border-border-default bg-bg-secondary/60 p-4">
+          <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <h4 className="text-sm font-medium">{editingId ? '编辑人员' : '新增人员'}</h4>
             <div className="mt-4 space-y-3">
               <input placeholder="姓名" value={personForm.name} onChange={(e) => onFormChange({ ...personForm, name: e.target.value })} className="industrial-input w-full" />
@@ -1308,7 +1325,7 @@ function PersonnelSection({
             {personnelError && <p className="mt-3 text-xs text-accent-red">{personnelError}</p>}
           </div>
 
-          <div className="min-w-0 rounded-lg border border-border-default bg-bg-secondary/60">
+          <div className="min-w-0 rounded-lg border border-border-default bg-navy-900/60">
             <div className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
               <span>姓名</span>
               <span>技能</span>
@@ -1343,16 +1360,6 @@ function PersonnelSection({
           </div>
         </div>
       )}
-    </SectionShell>
-  );
-}
-
-function LogsSection({ logs }: { logs: ActivityLog[] }) {
-  return (
-    <SectionShell title="操作日志" description="展示本次进入系统设置后的配置变更、连接测试和人员维护记录。">
-      <div className="rounded-lg border border-border-default bg-bg-secondary/60">
-        {logs.map((log) => <LogRow key={log.id} log={log} />)}
-      </div>
     </SectionShell>
   );
 }

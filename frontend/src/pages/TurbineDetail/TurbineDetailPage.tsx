@@ -97,7 +97,8 @@ function statusText(status: string) {
 }
 
 function datasetLabel(datasetId: string | null | undefined) {
-  if (!datasetId) return '真实巡检图像数据集';
+  if (!datasetId) return '真实数据集';
+  if (datasetId.includes('care_reference_waveforms')) return 'CARE 参考波形';
   if (datasetId.includes('mendeley_blade_vibration_faults')) return 'Mendeley 叶片振动';
   if (datasetId.includes('mendeley')) return 'Mendeley 叶片振动';
   if (datasetId.includes('nrel')) return 'NREL 振动数据';
@@ -1254,7 +1255,17 @@ export default function TurbineDetailPage() {
         </div>
       </div>
 
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        turbine_id: id ? Number(id) : undefined,
+        turbine_name: turbine?.name,
+        turbine_status: turbine?.status,
+        hi_value: turbine?.hi_value,
+        power_mw: turbine?.power_mw,
+        fault_count: faults.length,
+        recent_faults: faults.slice(0, 5).map(f => f.fault_type),
+        has_vibration: !!vibration?.rms,
+        has_blade_images: bladeImages.length > 0,
+      }} />
     </div>
   );
 }
