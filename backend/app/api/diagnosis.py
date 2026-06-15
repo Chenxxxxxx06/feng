@@ -13,7 +13,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import BladeImage, Fault, FaultSignal, SCADARecord, Turbine, VibrationData
+from app.models import BladeImage, Fault, FaultSignal, SCADARecord, Turbine, VibrationData, WorkOrder
 from app.schemas import (
     FaultResponse, FaultDetailResponse, FaultSignalResponse,
     BladeDiagnosisRequest, BladeDiagnosisResponse,
@@ -24,6 +24,7 @@ from app.schemas import (
 from app.api.auth import get_current_user
 from app.services.blade_yolo_service import BladeModelUnavailable, blade_yolo_service
 from app.services.care_monitoring_metrics import ANOMALY_STATUS_IDS, CARE_DATASET_ID
+from app.services.diagnosis_orchestrator import build_signal_insights, build_troubleshooting_steps
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -236,6 +237,44 @@ def _severity_from_priority(priority: str) -> str:
     if priority == "low":
         return "low"
     return "medium"
+
+
+def _processing_status(fault: Fault, work_order: WorkOrder | None) -> str:
+    if work_order:
+        if work_order.status in {"completed", "closed"}:
+            return "closed"
+        if work_order.status == "cancelled":
+            return "failed"
+        if work_order.status in {"in_progress", "review"}:
+            return "processing"
+        if work_order.status == "assigned":
+            return "assigned"
+        return "pending"
+    if fault.status in {"closed", "resolved"}:
+        return "closed"
+    return "pending"
+
+
+def _priority_from_fault(fault: Fault, work_order: WorkOrder | None) -> str:
+    if work_order and work_order.priority:
+        return work_order.priority
+    if fault.confidence >= 0.9:
+        return "urgent"
+    if fault.confidence >= 0.8:
+        return "high"
+    if fault.confidence < 0.6:
+        return "low"
+    return "medium"
+
+
+def _fault_status_note(work_order: WorkOrder | None) -> str:
+    if not work_order:
+        return "未关联工单"
+    if work_order.status == "cancelled":
+        return "关联工单已取消"
+    if work_order.status in {"completed", "closed"}:
+        return "关联工单已完成"
+    return "已关联工单"
 
 
 def _care_fault_type(turbine: Turbine, vibration_payload: dict | None = None) -> str:
@@ -540,6 +579,66 @@ async def _care_fault_detail(db: AsyncSession, fault_id: int) -> FaultDetailResp
         troubleshooting_steps=detection["troubleshooting_steps"],
     )
 
+
+def _fault_response(
+    fault: Fault,
+    turbine_name: str,
+    turbine_region: str | None,
+    work_order: WorkOrder | None,
+) -> FaultResponse:
+    processing_status = _processing_status(fault, work_order)
+    processing_started_at = None
+    closed_at = None
+    failed_at = None
+    if work_order:
+        if work_order.status in {"assigned", "in_progress", "review", "completed", "closed"}:
+            processing_started_at = work_order.created_at
+        if work_order.status in {"completed", "closed"}:
+            closed_at = work_order.completed_at or work_order.updated_at
+        if work_order.status == "cancelled":
+            failed_at = work_order.cancelled_at or work_order.updated_at
+
+    return FaultResponse(
+        id=fault.id,
+        turbine_id=fault.turbine_id,
+        turbine_name=turbine_name,
+        turbine_region=turbine_region or "",
+        detected_at=fault.detected_at,
+        discovered_at=fault.detected_at,
+        processing_started_at=processing_started_at,
+        closed_at=closed_at,
+        failed_at=failed_at,
+        handler=work_order.assignee if work_order else None,
+        processing_status=processing_status,
+        priority=_priority_from_fault(fault, work_order),
+        work_order_id=work_order.id if work_order else None,
+        work_order_title=work_order.title if work_order else None,
+        last_action_at=work_order.updated_at if work_order else fault.detected_at,
+        maintenance_cost_estimate=work_order.cost_estimate if work_order else None,
+        maintenance_cost_actual=work_order.cost_actual if work_order else None,
+        status_note=_fault_status_note(work_order),
+        fault_type=fault.fault_type,
+        confidence=fault.confidence,
+        status=fault.status,
+        details=fault.details,
+    )
+
+
+async def _latest_workorders_by_fault(db: AsyncSession, fault_ids: list[int]) -> dict[int, WorkOrder]:
+    if not fault_ids:
+        return {}
+    result = await db.execute(
+        select(WorkOrder)
+        .where(WorkOrder.fault_id.in_(fault_ids))
+        .order_by(WorkOrder.fault_id.asc(), WorkOrder.created_at.desc())
+    )
+    mapping: dict[int, WorkOrder] = {}
+    for work_order in result.scalars().all():
+        if work_order.fault_id is not None and work_order.fault_id not in mapping:
+            mapping[work_order.fault_id] = work_order
+    return mapping
+
+
 @router.get("/faults", response_model=list[FaultResponse])
 async def list_faults(
     turbine_id: int | None = Query(None),
@@ -564,19 +663,11 @@ async def list_faults(
     q = q.where(Turbine.source_dataset.is_not(None))
     q = q.order_by(Fault.detected_at.desc())
     result = await db.execute(q)
+    rows = result.all()
+    workorders = await _latest_workorders_by_fault(db, [fault.id for fault, _, _, _ in rows])
     db_items = [
-        FaultResponse(
-            id=fault.id,
-            turbine_id=fault.turbine_id,
-            turbine_name=turbine_name,
-            turbine_region=region or "",
-            detected_at=fault.detected_at,
-            fault_type=fault.fault_type,
-            confidence=fault.confidence,
-            status=fault.status,
-            details=fault.details,
-        )
-        for fault, turbine_name, region, source_dataset in result.all()
+        _fault_response(fault, turbine_name, region, workorders.get(fault.id))
+        for fault, turbine_name, region, source_dataset in rows
     ]
     return care_items + db_items
 
@@ -587,14 +678,14 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
         return await _care_fault_detail(db, fault_id)
 
     result = await db.execute(
-        select(Fault, Turbine.name)
+        select(Fault, Turbine.name, Turbine.region)
         .join(Turbine, Turbine.id == Fault.turbine_id)
         .where(Fault.id == fault_id)
     )
     row = result.one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Fault not found")
-    fault, turbine_name = row
+    fault, turbine_name, turbine_region = row
     if not fault:
         raise HTTPException(status_code=404, detail="Fault not found")
 
@@ -602,17 +693,16 @@ async def get_fault_detail(fault_id: int, db: AsyncSession = Depends(get_db)):
         select(FaultSignal).where(FaultSignal.fault_id == fault_id).order_by(FaultSignal.contribution_score.desc())
     )
     signals = sig_result.scalars().all()
+    workorders = await _latest_workorders_by_fault(db, [fault.id])
+    signal_insights = build_signal_insights(signals, fault.fault_type, fault.turbine_id)
+    troubleshooting_steps = await build_troubleshooting_steps(db, fault.fault_type, signal_insights)
 
+    base = _fault_response(fault, turbine_name, turbine_region, workorders.get(fault.id))
     return FaultDetailResponse(
-        id=fault.id,
-        turbine_id=fault.turbine_id,
-        turbine_name=turbine_name,
-        detected_at=fault.detected_at,
-        fault_type=fault.fault_type,
-        confidence=fault.confidence,
-        status=fault.status,
-        details=fault.details,
+        **base.model_dump(),
         signals=[FaultSignalResponse.model_validate(s) for s in signals],
+        signal_insights=signal_insights,
+        troubleshooting_steps=troubleshooting_steps,
     )
 
 
