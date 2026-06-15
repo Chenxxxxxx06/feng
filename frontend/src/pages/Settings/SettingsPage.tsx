@@ -342,11 +342,12 @@ export default function SettingsPage() {
       const { data } = await api.post('/ai/test-connection', {
         api_key: apiKey || user?.api_key || '',
         model: model,
-        base_url: user?.api_base_url || '',
+        base_url: apiBaseUrl || user?.api_base_url || '',
       });
-      setAiTestStatus('success');
-      const message = data.success
-        ? `已连接 · ${data.model || model} (${data.latency_ms || 0}ms)`
+      const ok = data.status === 'success';
+      setAiTestStatus(ok ? 'success' : 'error');
+      const message = ok
+        ? `已连接 · ${data.model || model}`
         : (data.message || 'AI服务连接失败');
       setAiTestMessage(message);
       addLog('测试AI连接', message);
