@@ -116,14 +116,23 @@ def _performance_score(scada: list[dict]) -> dict:
 
     issues = 0
     total = max(len(scada), 1)
+    power_values = [abs(r.get("power_kw", 0) or 0) for r in scada]
+    normalized_power = bool(power_values) and max(power_values) <= 1.5
 
     for r in scada:
         wind = r.get("wind_speed_ms", 0) or 0
         power = r.get("power_kw", 0) or 0
 
-        # Low power at rated wind (>10 m/s wind but <50% rated power)
-        if wind > 10 and power < 500:
-            issues += 2
+        if normalized_power:
+            # CARE imports normalized active power as p.u.
+            if wind > 10 and power < 0.35:
+                issues += 2
+            elif wind > 8 and power < 0.25:
+                issues += 1
+        else:
+            # Low power at rated wind (>10 m/s wind but <500 kW)
+            if wind > 10 and power < 500:
+                issues += 2
 
         # High generator temperature
         gen_temp = r.get("gen_temperature_c", 80) or 80

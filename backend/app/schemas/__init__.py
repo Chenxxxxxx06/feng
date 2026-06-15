@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     role: str
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
+    api_base_url: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -183,11 +184,17 @@ class VibrationPreviewResponse(BaseModel):
     timestamp: datetime
     duration_seconds: float
     sample_rate_hz: int
+    sample_count: Optional[int] = None
     rms: float
     waveform: list[float]
     spectrum: list[float]
     peak_frequencies: list[dict]
     fault_detected: bool
+    quality: Optional[dict] = None
+    source_dataset: Optional[str] = None
+    data_source: Optional[str] = None
+    waveform_path: Optional[str] = None
+    peak_freq_hz: Optional[float] = None
     algorithm_status: str
     message: str
 
@@ -370,7 +377,8 @@ class DataSourceTestRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    model_preference: Optional[str] = Field(default=None, max_length=64)
+    api_base_url: Optional[str] = Field(default=None, max_length=512)
+    model_preference: Optional[str] = Field(default=None, max_length=128)
 
     model_config = {"protected_namespaces": ()}
 
