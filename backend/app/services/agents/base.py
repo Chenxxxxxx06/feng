@@ -23,12 +23,14 @@ class AgentBase:
     """Base agent with LLM calling and JSON parsing."""
 
     def __init__(self, name: str, system_prompt: str, model: str = "qwen-max",
-                 api_key: str | None = None, api_provider: str | None = None):
+                 api_key: str | None = None, api_provider: str | None = None,
+                 api_base_url: str | None = None):
         self.name = name
         self.system_prompt = system_prompt
         self.model = model
         self.api_key = api_key
         self.api_provider = api_provider
+        self.api_base_url = api_base_url
 
     async def run(self, **kwargs) -> AgentResult:
         t0 = time.time()
@@ -48,7 +50,11 @@ class AgentBase:
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},
         ]
-        return await asyncio.to_thread(chat, messages, self.model, self.api_key, self.api_provider, 0.3, 2048)
+        return await asyncio.to_thread(
+            chat, messages, self.model, self.api_key,
+            self.api_provider if not self.api_base_url else None,
+            base_url=self.api_base_url, temperature=0.3, max_tokens=2048,
+        )
 
     def _parse_json(self, text: str) -> dict:
         text = text.strip()

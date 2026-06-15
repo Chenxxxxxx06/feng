@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     role: str
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
+    api_base_url: Optional[str] = None
     model_preference: str
     is_active: bool
 
@@ -183,11 +184,17 @@ class VibrationPreviewResponse(BaseModel):
     timestamp: datetime
     duration_seconds: float
     sample_rate_hz: int
+    sample_count: Optional[int] = None
     rms: float
     waveform: list[float]
     spectrum: list[float]
     peak_frequencies: list[dict]
     fault_detected: bool
+    quality: Optional[dict] = None
+    source_dataset: Optional[str] = None
+    data_source: Optional[str] = None
+    waveform_path: Optional[str] = None
+    peak_freq_hz: Optional[float] = None
     algorithm_status: str
     message: str
 
@@ -269,9 +276,17 @@ class WorkOrderUpdate(BaseModel):
     cost_actual: Optional[float] = None
     downtime_hours: Optional[float] = None
 
-class MaintenanceRecordCreate(BaseModel):
-    action_type: str = Field(min_length=1, max_length=32)
+class WorkOrderEmailRequest(BaseModel):
+    recipient_user_ids: list[int] = []
+    recipient_emails: list[str] = []
+    subject: Optional[str] = None
     content: Optional[str] = None
+    use_preview_template: bool = True
+
+class MaintenanceRecordCreate(BaseModel):
+    action_type: str = Field(default="progress", min_length=1, max_length=32)
+    content: Optional[str] = None
+    status: Optional[str] = None
 
 class MaintenanceRecordResponse(BaseModel):
     id: int
@@ -288,21 +303,16 @@ class MaintenanceRecordResponse(BaseModel):
 
 class NotificationLogResponse(BaseModel):
     id: int
-    work_order_id: int
+    work_order_id: Optional[int] = None
     recipient_email: str
     subject: Optional[str] = None
+    channel: str
     status: str
-    sent_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}
-
-class WorkOrderEmailRequest(BaseModel):
-    recipient_user_ids: list[int] = []
-    recipient_emails: list[str] = []
-    subject: Optional[str] = None
-    content: Optional[str] = None
-    use_preview_template: bool = True
 
 class WorkOrderResponse(BaseModel):
     id: int
@@ -367,9 +377,16 @@ class DataSourceTestRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = None
-    model_preference: Optional[str] = Field(default=None, max_length=64)
+    api_base_url: Optional[str] = Field(default=None, max_length=512)
+    model_preference: Optional[str] = Field(default=None, max_length=128)
 
     model_config = {"protected_namespaces": ()}
+
+
+class AITestConnectionRequest(BaseModel):
+    api_key: str
+    model: str
+    base_url: str
 
 
 # --- AI ---
@@ -436,3 +453,31 @@ class PersonnelResponse(BaseModel):
     region: str
     load: int
     email: str
+
+
+# --- Agent Execute ---
+class AgentExecuteRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=512)
+    current_page: Optional[str] = None
+    dry_run: bool = False
+
+class AgentAtomicStep(BaseModel):
+    order: int
+    skill: str
+    params: dict = Field(default_factory=dict)
+    reason: str = ""
+
+class AgentSceneSkill(BaseModel):
+    skill: str
+    params: dict = Field(default_factory=dict)
+
+class AgentExecuteResponse(BaseModel):
+    intent_type: str
+    confidence: float
+    entities: dict = Field(default_factory=dict)
+    scene_skills: list[AgentSceneSkill] = Field(default_factory=list)
+    atomic_steps: list[AgentAtomicStep] = Field(default_factory=list)
+    explanation: str = ""
+    follow_up_analysis: Optional[str] = None
+    requires_clarification: bool = False
+    clarification_question: Optional[str] = None
