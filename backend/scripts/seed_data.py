@@ -139,7 +139,9 @@ async def seed():
         if not await check_existing_data():
             print("\n⚠️ 数据库为空，创建默认管理员用户...")
             await create_default_admin()
-        
+
+        await seed_knowledge_base()
+
         print("\n" + "=" * 60)
         print("🎉 数据库配置完成！")
         print("=" * 60)
@@ -147,8 +149,11 @@ async def seed():
 
     # Check if database already has data
     if await check_existing_data():
-        print("⚠️ 数据库中已存在数据，跳过初始化")
-        print("   如果需要重新初始化，请先清空数据库")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await seed_knowledge_base()
+        print("⚠️ 数据库中已存在数据，跳过演示数据初始化")
+        print("   已补充知识库数据（如有新增）")
         return
 
     # Create tables
@@ -270,16 +275,30 @@ async def seed():
         print("\n⚠️ 创建故障记录...")
         fault_count = 0
         fault_objs = []
+        handler_names = ["张工", "李工", "王工"]
         for i, t in enumerate(turbine_objs[:8]):  # First 8 turbines have faults
             ft = random.choice(FAULT_TYPES)
             confidence = round(random.uniform(0.72, 0.96), 2)
+            fault_status = "open" if i < 3 else "closed"
+            detected_hours_ago = random.randint(1, 168)
 
             f = Fault(
                 turbine_id=t.id,
-                detected_at=now - timedelta(hours=random.randint(1, 168)),
+                detected_at=now - timedelta(hours=detected_hours_ago),
                 fault_type=ft,
                 confidence=confidence,
-                status="open" if i < 3 else "closed",
+                status=fault_status,
+                processing_status="pending" if fault_status == "open" else "closed",
+                priority=random.choice(["urgent", "high", "medium", "low"]),
+                handler=random.choice(handler_names) if fault_status == "open" else handler_names[i % 3],
+                discovered_at=now - timedelta(hours=detected_hours_ago),
+                processing_started_at=now - timedelta(hours=detected_hours_ago - random.randint(1, 4)) if fault_status != "open" else None,
+                closed_at=now - timedelta(hours=random.randint(1, 48)) if fault_status == "closed" else None,
+                last_action_at=now - timedelta(hours=random.randint(1, 12)),
+                work_order_title=f"{t.name}-{ft}维修工单" if fault_status != "open" else None,
+                maintenance_cost_estimate=round(random.uniform(5000, 50000), 2),
+                maintenance_cost_actual=round(random.uniform(5000, 50000), 2) if fault_status == "closed" else None,
+                status_note="已自动检测，待人工确认" if fault_status == "open" else "检修完成，风机恢复正常运行",
                 details={
                     "root_cause": f"基于振动分析和SCADA数据的{ft}诊断",
                     "recommendation": f"建议检查{ft}相关部件，安排振动复测",
@@ -343,6 +362,7 @@ async def seed():
                 assignee=random.choice(tech_objs).username if random.random() > 0.3 else None,
                 cost_estimate=template["cost"],
                 cost_actual=template["cost"] * random.uniform(0.8, 1.2) if random.random() > 0.5 else None,
+                due_date=now + timedelta(days=random.randint(1, 90)),
             )
             db.add(wo)
             wo_count += 1
