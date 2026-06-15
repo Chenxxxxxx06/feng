@@ -282,25 +282,8 @@ function DiagnosisTopology({
     return component === focusedComponent ? 0.86 : 0.13;
   };
   const componentStrokeWidth = (component: TurbineComponentKey) => (focusedComponent === component ? 2.6 : 1.4);
-  const leftRows = causes.length ? causes : [{
-    id: 'empty-cause',
-    label: '暂无故障原因',
-    detail: '等待诊断信号',
-    priority: 'low',
-    score: 0,
-    component: selectedComponent || 'gearbox',
-  }];
-  const rightRows = faults.length ? faults : [{
-    id: -1,
-    label: '暂无故障记录',
-    turbineLabel: turbine?.name || '--',
-    component: selectedComponent || 'gearbox',
-    confidence: 0,
-    priority: 'low',
-    processingStatus: 'pending',
-    workOrderTitle: null,
-    selected: false,
-  }];
+  const leftRows = causes;
+  const rightRows = faults;
 
   return (
     <section className="bg-bg-card border border-border-default rounded-lg overflow-hidden">
@@ -336,6 +319,9 @@ function DiagnosisTopology({
             </filter>
           </defs>
 
+          {leftRows.length === 0 && (
+            <text x={310} y={200} fill="#8b949e" fontSize="12" textAnchor="middle">暂无故障原因 · 运行自动检测获取信号</text>
+          )}
           {leftRows.map((cause, index) => {
             const y = 48 + index * 70;
             const point = COMPONENT_POINTS[cause.component];
@@ -353,6 +339,9 @@ function DiagnosisTopology({
             );
           })}
 
+          {rightRows.length === 0 && (
+            <text x={480} y={200} fill="#8b949e" fontSize="12" textAnchor="middle">暂无故障记录</text>
+          )}
           {rightRows.map((fault, index) => {
             const y = 48 + index * 70;
             const point = COMPONENT_POINTS[fault.component];
@@ -726,11 +715,11 @@ export default function DiagnosisPage() {
     || selected?.signal_insights
     || selected?.signals?.map((s) => ({
       sensor_name: s.sensor_name,
-      value: '待接入',
-      normal_range: '待接入',
+      value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
+      normal_range: `优先级${priorityLabelValue(s.priority)}`,
       contribution_score: s.contribution_score,
       priority: s.priority,
-      finding: '该信号由诊断模型标记为故障相关因素',
+      finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
     }))
     || [];
 
@@ -1094,8 +1083,8 @@ export default function DiagnosisPage() {
                 <p className="text-text-muted mb-1">模型状态</p>
                 <p className="font-medium text-text-secondary truncate">
                   {monitorMode === 'group'
-                    ? (batchResult?.success ? (batchResult?.records?.[0]?.algorithm_status || '分析完成') : '同步中')
-                    : autoResult?.algorithm_status || '同步中'}
+                    ? (batchResult?.success ? (batchResult?.records?.[0]?.algorithm_status || '--') : '同步中')
+                    : autoResult?.algorithm_status || '--'}
                 </p>
               </div>
             </div>
