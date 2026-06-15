@@ -14,7 +14,6 @@ from app.schemas import (
     AISummaryRequest, AISummaryResponse,
     AIFaultAnalysisRequest, AIFaultAnalysisResponse,
     AICopilotRequest, AICopilotResponse,
-    AITestConnectionRequest,
 )
 from app.api.auth import get_current_user
 from app.services.qwen_client import summarize_page, diagnose_fault, copilot_chat
@@ -40,7 +39,6 @@ async def generate_summary(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
         )
         return AISummaryResponse(**summary)
     except Exception as e:
@@ -122,7 +120,6 @@ async def analyze_fault(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
         )
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
@@ -163,27 +160,6 @@ async def copilot_endpoint(
             "warning_count": sum(1 for t in turbines if t.status == "warning"),
             "fault_count": sum(1 for t in turbines if t.status == "fault"),
         })
-
-        # Auto-inject maintenance plan when user is on prediction page
-        if page_context.get("page_type") == "prediction":
-            from app.services.maintenance_planner import (
-                generate_maintenance_plan,
-                build_plan_summary_for_llm,
-            )
-            plan = await generate_maintenance_plan(db=db, top_n=10)
-            if plan:
-                page_context["maintenance_plan_summary"] = build_plan_summary_for_llm(plan)
-                page_context["maintenance_plan_top_items"] = [
-                    {
-                        "turbine": t["turbine_name"],
-                        "component": t["component"],
-                        "rul_days": t["rul_days"],
-                        "action": t["action"],
-                        "priority": t["priority"],
-                        "cost": t["cost_estimate"],
-                    }
-                    for t in plan[:5]
-                ]
     except Exception as e:
         logger.warning(f"Failed to enhance context: {e}")
 
@@ -197,7 +173,6 @@ async def copilot_endpoint(
                 page_type=page_context.get("page_type", "unknown"),
                 api_key=current_user.api_key,
                 api_provider=current_user.api_provider,
-                base_url=current_user.api_base_url,
             )
             logger.info(f"Screenshot analyzed: {screenshot_description[:100]}...")
         except Exception as e:
@@ -212,12 +187,11 @@ async def copilot_endpoint(
             model=current_user.model_preference,
             api_key=current_user.api_key,
             api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
         )
         # Trigger knowledge extraction in background
         from app.services.knowledge_extractor import try_extract_knowledge
         all_messages = data.messages + [{"role": "assistant", "content": reply}]
-        background_tasks.add_task(try_extract_knowledge, all_messages, current_user.api_key, current_user.api_provider, current_user.api_base_url)
+        background_tasks.add_task(try_extract_knowledge, all_messages, current_user.api_key, current_user.api_provider)
 
         return AICopilotResponse(reply=reply)
     except Exception as e:
@@ -225,120 +199,6 @@ async def copilot_endpoint(
         return AICopilotResponse(
             reply="抱歉, AI服务暂时不可用。请稍后重试。"
         )
-
-
-@router.post("/analyze-maintenance-plan")
-async def analyze_maintenance_plan(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Use AI to analyze the current maintenance plan and generate recommendations.
-
-    Fetches the latest maintenance plan, formats it for the LLM, and returns
-    strategic analysis: top priorities, cost optimization, scheduling suggestions.
-    """
-    from app.services.maintenance_planner import generate_maintenance_plan, build_plan_summary_for_llm
-    from app.services.qwen_client import _build_system_prompt, chat
-
-    # Generate the plan
-    plan = await generate_maintenance_plan(db=db)
-
-    if not plan:
-        return {
-            "analysis": "当前所有风机部件状态良好，无紧急维修建议。建议保持常规巡检计划。",
-            "plan": [],
-        }
-
-    plan_summary = build_plan_summary_for_llm(plan)
-
-    system_prompt = _build_system_prompt(
-        "你是风场运维调度专家。根据维修计划数据，给出战略性的运维建议。\n\n"
-        "要求:\n"
-        "1. 分析最关键的3项维修任务，解释为什么它们优先级最高\n"
-        "2. 评估整体风险 — 如果不及时处理，哪些可能演变成重大故障\n"
-        "3. 给出调度建议 — 如何安排人力物力和停机窗口以减少发电损失\n"
-        "4. 成本优化 — 批量采购备件或合并停机窗口能否降低成本\n"
-        "5. 回复专业且具体，引用数据中的风机名称和数字\n"
-        "6. 300字以内"
-    )
-
-    user_prompt = f"""{plan_summary}
-
-请根据以上维修计划，给出你的运维调度分析和建议。"""
-
-    try:
-        analysis = chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            model=current_user.model_preference,
-            api_key=current_user.api_key,
-            api_provider=current_user.api_provider if not current_user.api_base_url else None,
-            base_url=current_user.api_base_url,
-            temperature=0.5,
-            max_tokens=800,
-        )
-    except Exception as e:
-        logger.warning(f"AI maintenance analysis failed: {e}")
-        analysis = _fallback_maintenance_analysis(plan)
-
-    return {
-        "analysis": analysis,
-        "plan": plan[:10],  # top 10 for the frontend
-        "total_plan_items": len(plan),
-    }
-
-
-def _fallback_maintenance_analysis(plan: list[dict]) -> str:
-    """Fallback analysis when LLM is unavailable."""
-    if not plan:
-        return "当前无需紧急维修。"
-
-    urgent = [t for t in plan if t["priority"] == "urgent"]
-    high = [t for t in plan if t["priority"] == "high"]
-    total_cost = sum(t["cost_estimate"] for t in plan)
-
-    parts = ["## 运维调度分析 (本地分析)\n"]
-    parts.append(f"维修计划共 {len(plan)} 项，预估总费用 ¥{total_cost:,.0f}。")
-
-    if urgent:
-        parts.append(f"\n### 🔴 紧急项 ({len(urgent)}项)")
-        for t in urgent[:3]:
-            parts.append(f"- {t['turbine_name']} {t['component']}: RUL仅{t['rul_days']:.0f}天, 建议 {t['action']}")
-
-    if high:
-        parts.append(f"\n### 🟡 高优先级 ({len(high)}项)")
-        for t in high[:3]:
-            parts.append(f"- {t['turbine_name']} {t['component']}: RUL {t['rul_days']:.0f}天")
-
-    parts.append(f"\n### 建议")
-    if urgent:
-        parts.append(f"1. 立即组建 {urgent[0]['crew_size']}人维修班组处理紧急项")
-    parts.append(f"2. 合并高优先级项的备件采购以降低成本")
-    parts.append(f"3. 计划停机窗口建议: 将同区域风机集中在一个维护窗口")
-
-    return "\n".join(parts)
-
-
-@router.post("/test-connection")
-async def test_ai_connection(data: AITestConnectionRequest):
-    """Test AI connection with ad-hoc credentials (no save required)."""
-    try:
-        from app.services.qwen_client import get_client
-        client = get_client(data.api_key, data.base_url)
-        response = client.chat.completions.create(
-            model=data.model,
-            messages=[{"role": "user", "content": "Respond with exactly one word: ok"}],
-            max_tokens=10,
-            temperature=0,
-        )
-        reply = response.choices[0].message.content.strip().lower()
-        if "ok" in reply:
-            return {"status": "success", "message": f"连接成功，模型 {data.model} 响应正常", "model": data.model}
-        return {"status": "unexpected", "message": f"模型响应异常: {reply[:100]}", "model": data.model}
-    except Exception as e:
-        return {"status": "error", "message": f"连接失败: {str(e)[:200]}", "model": data.model}
 
 
 def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:

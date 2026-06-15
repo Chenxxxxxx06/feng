@@ -38,7 +38,7 @@
 | 🔍 **故障诊断** | 自动故障检测 + 批量检测 | 实时诊断工作台 + 振动频谱分析 |
 | 📈 **预测决策** | RUL 剩余寿命 + 成本对比 | 维修时机优化 + 经济效益分析 |
 | 📋 **工单管理** | 全生命周期流转 | 邮件通知 + 人员指派 + 优先级管理 |
-| 📚 **故障百科** | 21种故障知识节点 | 9大分类 + 双视图知识图谱(运维拓扑/知识网络) |
+| 📚 **故障百科** | 21种故障知识节点 | 9大分类 + 知识图谱可视化 + Demo模式 |
 | 🤖 **AI 助手** | Copilot 悬浮对话 | Qwen多模型 + 截图识图 + 预设提示词 |
 | 🧠 **多Agent诊断** | 智能调度诊断 | Orchestrator → Data + Knowledge → Synthesizer |
 | 🌱 **知识自增长** | 对话→知识自动提取 | QualityGate → Extract → Dedup → Ingest |
@@ -151,7 +151,6 @@ Copilot 诊断对话 → QualityGate → Extract (LLM) → Dedup (LLM) → Auto-
 # 1. 后端
 cd backend
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-venv\Scripts\activate.bat
 python -m scripts.seed_data          # 初始化数据库 + 21个知识节点
 python -m app.main                    # 启动 → http://localhost:8000
 
@@ -278,18 +277,12 @@ feng/
 
 ## 📈 版本历史
 
-### v2.1 (2026-06-13) 🆕
-- ✅ **知识图谱重构**: 双视图架构 — 运维拓扑(风机→故障→工单→人员) + 知识网络(症状/根因/方案/备件)
-- ✅ **移除 Demo 模式**: 图谱 100% 实时 DB 数据，无硬编码假数据
-- ✅ **图谱统计栏**: 活跃故障/预警风机/待处理工单/运维人员实时计数
-- ✅ **筛选功能**: 按区域/严重度/状态过滤拓扑图，支持"仅活跃"模式
-
-### v2.0 (2026-06-12)
+### v2.0 (2026-06-12) 🆕
 - ✅ **故障百科**: 21 节点知识图谱 + 9 大分类
 - ✅ **多 Agent 诊断**: Orchestrator → Data + Knowledge → Synthesizer
 - ✅ **知识自增长**: Copilot 对话 → LLM 提取 → 自动入库
 - ✅ **API Key 全链路贯通**: 用户密钥 → 所有 LLM 调用
-- ✅ **知识图谱实时数据**: 从DB动态生成，关联真实风机/工单/故障记录
+- ✅ **Demo 模式**: 知识图谱示例开关
 - ✅ **部署方案**: 阿里云完整部署指南
 
 ### v1.5 (2026-06-11)

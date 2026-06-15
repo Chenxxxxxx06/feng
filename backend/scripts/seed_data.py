@@ -147,6 +147,11 @@ async def seed():
         print("=" * 60)
         return
 
+    # Create tables first (needed before check_existing_data can query)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print("✅ 数据表创建完成")
+
     # Check if database already has data
     if await check_existing_data():
         async with engine.begin() as conn:
@@ -155,11 +160,6 @@ async def seed():
         print("⚠️ 数据库中已存在数据，跳过演示数据初始化")
         print("   已补充知识库数据（如有新增）")
         return
-
-    # Create tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("✅ 数据表创建完成")
 
     async with async_session() as db:
         now = datetime.now(timezone.utc)

@@ -35,8 +35,8 @@ ORCHESTRATOR_PROMPT = """
 
 
 class OrchestratorAgent(AgentBase):
-    def __init__(self, model: str = "qwen-max", api_key: str | None = None, api_provider: str | None = None, api_base_url: str | None = None):
-        super().__init__(name="orchestrator", system_prompt=ORCHESTRATOR_PROMPT, model=model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
+    def __init__(self, model: str = "qwen-max", api_key: str | None = None, api_provider: str | None = None):
+        super().__init__(name="orchestrator", system_prompt=ORCHESTRATOR_PROMPT, model=model, api_key=api_key, api_provider=api_provider)
 
     def needs_data_agent(self, result: dict) -> bool:
         return any(d.get("agent") == "data_agent" for d in result.get("dispatch", []))
