@@ -22,6 +22,19 @@ from app.models import RULPrediction, Turbine, Fault, WorkOrder
 
 logger = logging.getLogger(__name__)
 
+# ── Urgency scoring weights (configurable) ──
+URGENCY_WEIGHTS = {
+    "rul": 0.40,       # RUL remaining life
+    "hi": 0.25,        # Health index
+    "fault": 0.20,     # Active faults
+    "maintenance": 0.15,  # Maintenance gap
+}
+URGENCY_THRESHOLDS = {
+    "urgent": 70,   # >= 70 → urgent priority
+    "high": 45,     # >= 45 → high priority
+    "medium": 25,   # >= 25 → medium priority
+}
+
 # ── Component maintenance config ──
 COMPONENT_CONFIG = {
     "齿轮箱": {
@@ -132,8 +145,9 @@ async def generate_maintenance_plan(
         fault_score = _score_faults(faults_by_turbine.get(r.turbine_id, []), r.component)
         maint_score = _score_maintenance_gap(turbine, now)
 
+        w = URGENCY_WEIGHTS
         urgency = round(
-            0.40 * rul_score + 0.25 * hi_score + 0.20 * fault_score + 0.15 * maint_score,
+            w["rul"] * rul_score + w["hi"] * hi_score + w["fault"] * fault_score + w["maintenance"] * maint_score,
             1,
         )
 
@@ -148,11 +162,12 @@ async def generate_maintenance_plan(
         ]
 
         # Priority label
-        if urgency >= 70:
+        ut = URGENCY_THRESHOLDS
+        if urgency >= ut["urgent"]:
             priority = "urgent"
-        elif urgency >= 45:
+        elif urgency >= ut["high"]:
             priority = "high"
-        elif urgency >= 25:
+        elif urgency >= ut["medium"]:
             priority = "medium"
         else:
             priority = "low"

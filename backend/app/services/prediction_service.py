@@ -364,6 +364,21 @@ def _component_offset(comp_key: str, maint_days: float, hi: float) -> float:
     return base.get(comp_key, 0.0) + maint_penalty + scatter
 
 
+# ── Cost parameters (configurable per deployment) ──
+COST_PARAMS = {
+    "electricity_price_cny_per_kwh": 0.40,  # Grid feed-in tariff (adjust to local rate)
+    "failure_prob_healthy_slope": 0.005,     # Per-HI-point below 90
+    "failure_prob_warning_slope": 0.01,      # Per-HI-point below 90 in warning zone
+    "failure_prob_fault_slope": 0.015,       # Per-HI-point below 70 in fault zone
+    "risk_high_threshold": 0.40,
+    "risk_medium_threshold": 0.15,
+    "optimal_window_high_days": 3,
+    "optimal_window_medium_days": 14,
+    "optimal_window_low_days": 45,
+    "repair_failure_extra_factor": 0.3,       # Extra repair cost multiplier on failure
+}
+
+
 # ── Cost Comparison ──
 
 async def calculate_cost_comparison(
@@ -373,63 +388,54 @@ async def calculate_cost_comparison(
 ) -> CostComparisonResponse:
     """Compare immediate vs delayed repair cost using real turbine data.
 
-    Now driven by actual turbine power rating, current HI, and fault-type
-    specifics rather than hard-coded constants.
+    Uses configurable parameters (COST_PARAMS) + real turbine power/HI from DB.
     """
     config = FAULT_COST_CONFIG.get(
         data.fault_type,
         {"base": 50_000, "multiplier": 1.0, "downtime_days": 3, "label": data.fault_type},
     )
+    cp = COST_PARAMS
 
     power_mw = turbine.power_mw or 2.0
     hi = turbine.hi_value or 85.0
 
-    # ── Immediate repair cost ──
-    # Scales with turbine power and fault severity
+    # ── Immediate repair cost (scales with turbine power) ──
     immediate = config["base"] * (power_mw / 2.0) * config["multiplier"]
 
-    # ── Failure probability ──
-    # Derived from health index: lower HI → higher probability
+    # ── Failure probability (data-driven from HI) ──
     if hi >= 90:
-        failure_prob = 0.05 + (90 - hi) * 0.005
+        failure_prob = 0.05 + (90 - hi) * cp["failure_prob_healthy_slope"]
     elif hi >= 70:
-        failure_prob = 0.10 + (90 - hi) * 0.01
+        failure_prob = 0.10 + (90 - hi) * cp["failure_prob_warning_slope"]
     elif hi >= 50:
-        failure_prob = 0.30 + (70 - hi) * 0.015
+        failure_prob = 0.30 + (70 - hi) * cp["failure_prob_fault_slope"]
     else:
         failure_prob = 0.60
-
     failure_prob = round(min(0.95, max(0.02, failure_prob)), 3)
 
-    # ── Downtime loss per day ──
-    # Revenue lost per day = power * 24h * electricity price (~0.5 ¥/kWh)
-    daily_loss = power_mw * 1000 * 24 * 0.5
+    # ── Downtime loss per day (turbine power × 24h × electricity price) ──
+    daily_loss = power_mw * 1000 * 24 * cp["electricity_price_cny_per_kwh"]
 
     # ── Delayed repair cost ──
-    # If failure occurs during delay, cost = immediate repair + downtime × days
     downtime_days = config["downtime_days"]
-    failure_extra_cost = failure_prob * (daily_loss * downtime_days + immediate * 0.3)
+    failure_extra_cost = failure_prob * (
+        daily_loss * downtime_days + immediate * cp["repair_failure_extra_factor"]
+    )
     delayed = immediate + failure_extra_cost
 
     # ── Estimated saving ──
     saving = delayed - immediate
 
     # ── Risk level ──
-    if failure_prob > 0.4:
+    if failure_prob > cp["risk_high_threshold"]:
         risk_level = "high"
-    elif failure_prob > 0.15:
+    elif failure_prob > cp["risk_medium_threshold"]:
         risk_level = "medium"
     else:
         risk_level = "low"
 
     # ── Optimal window ──
-    # Suggest maintenance within N days based on HI degradation rate
-    if risk_level == "high":
-        optimal_days = 3
-    elif risk_level == "medium":
-        optimal_days = 14
-    else:
-        optimal_days = 45
+    optimal_days = cp[f"optimal_window_{risk_level}_days"]
 
     # ── Recommendation ──
     if risk_level == "high":
