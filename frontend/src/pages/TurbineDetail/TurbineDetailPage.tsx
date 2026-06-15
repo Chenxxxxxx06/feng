@@ -97,7 +97,8 @@ function statusText(status: string) {
 }
 
 function datasetLabel(datasetId: string | null | undefined) {
-  if (!datasetId) return '真实巡检图像数据集';
+  if (!datasetId) return '真实数据集';
+  if (datasetId.includes('care_reference_waveforms')) return 'CARE 参考波形';
   if (datasetId.includes('mendeley_blade_vibration_faults')) return 'Mendeley 叶片振动';
   if (datasetId.includes('mendeley')) return 'Mendeley 叶片振动';
   if (datasetId.includes('nrel')) return 'NREL 振动数据';
