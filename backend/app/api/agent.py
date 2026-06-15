@@ -300,3 +300,70 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
                 reason=f"{skill_name}.{d['skill']}",
             ))
     return steps
+
+
+@router.post("/agent/task")
+async def agent_task(
+    request: AICopilotRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent task endpoint — delegates to multi-agent diagnose for complex analysis.
+
+    Frontend CopilotFAB 'Agent任务' mode target.
+    """
+    # Extract last user message as the task description
+    user_msgs = [m for m in request.messages if m.get("role") == "user"]
+    task_desc = user_msgs[-1].get("content", "") if user_msgs else "分析当前风场状态"
+
+    # Try to identify turbine_id from page_context
+    turbine_id = None
+    if request.page_context:
+        turbine_id = request.page_context.get("turbine_id")
+        if not turbine_id:
+            turbine_id = request.page_context.get("selectedTurbineId")
+
+    from app.models import Turbine, Fault, SCADARecord
+    from sqlalchemy import select, func
+
+    # Gather context
+    report_parts: list[str] = [f"## Agent任务报告\n\n**任务**: {task_desc}\n"]
+
+    # Fleet overview
+    total = (await db.execute(select(func.count(Turbine.id)))).scalar() or 0
+    healthy = (await db.execute(select(func.count(Turbine.id)).where(Turbine.status == "normal"))).scalar() or 0
+    warning = (await db.execute(select(func.count(Turbine.id)).where(Turbine.status == "warning"))).scalar() or 0
+    faulty = (await db.execute(select(func.count(Turbine.id)).where(Turbine.status == "fault"))).scalar() or 0
+    report_parts.append(f"**全场状态**: {total}台风机, {healthy}正常/{warning}预警/{faulty}故障")
+
+    if turbine_id:
+        turbine = await db.get(Turbine, turbine_id)
+        if turbine:
+            report_parts.append(f"\n**目标风机**: {turbine.name} (HI: {turbine.hi_value:.0f}, 状态: {turbine.status})")
+            faults = (await db.execute(
+                select(Fault).where(Fault.turbine_id == turbine_id).order_by(Fault.detected_at.desc()).limit(3)
+            )).scalars().all()
+            if faults:
+                report_parts.append(f"**关联故障**: {len(faults)}条")
+                for f in faults:
+                    report_parts.append(f"- {f.fault_type} (置信度{f.confidence:.0%})")
+
+    # Try AI analysis
+    try:
+        from app.services.qwen_client import copilot_chat
+        ai_reply = copilot_chat(
+            messages=[{"role": "user", "content": task_desc}],
+            page_context=request.page_context or {},
+            model=current_user.model_preference,
+            api_key=current_user.api_key,
+            api_provider=current_user.api_provider,
+        )
+        report_parts.append(f"\n### AI分析结果\n{ai_reply}")
+    except Exception:
+        report_parts.append("\n### 建议\nAI服务暂不可用，请检查API密钥配置。")
+
+    return {
+        "success": True,
+        "report": "\n".join(report_parts),
+        "message": "Agent任务分析完成",
+    }

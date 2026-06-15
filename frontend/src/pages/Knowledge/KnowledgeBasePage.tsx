@@ -4,6 +4,23 @@ import kbData from '../../data/fault-kb.json';
 import api from '../../services/api';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
+// API response type — maps backend FaultKnowledgeNode to frontend FaultNode
+function mapApiNode(n: any): FaultNode {
+  return {
+    id: String(n.id || n.fault_type),
+    fault_type: n.fault_type,
+    category: n.category || '其他',
+    icon: n.icon || '⚠️',
+    severity: n.severity || 'medium',
+    symptoms: (n.symptoms || []).map((s: any) => typeof s === 'string' ? { indicator: s, threshold: '', unit: '' } : s),
+    root_causes: n.root_causes || [],
+    solutions: (n.solutions || []).map((s: any) => typeof s === 'string' ? { action: s, difficulty: 'medium', downtime_hours: 4 } : s),
+    related_faults: (n.related_faults || []).map((r: any) => typeof r === 'string' ? { id: r, name: r, probability: 0.5 } : r),
+    spare_parts: (n.spare_parts || []).map((p: any) => typeof p === 'string' ? { name: p, quantity: 1, est_cost: 0 } : p),
+    cases: n.cases || [],
+  };
+}
+
 interface FaultNode {
   id: string; fault_type: string; category: string; icon: string;
   severity: string; symptoms: { indicator: string; threshold: string; unit: string }[];
@@ -24,7 +41,7 @@ const CAT_COLORS: Record<string, string> = {
   spare_part: '#a371f7', turbine: '#58a6ff', fault_record: '#db6d28', workorder: '#f7b73c', personnel: '#79c0ff',
 };
 
-const CATEGORIES = ['全部', ...Array.from(new Set((kbData.nodes as FaultNode[]).map(n => n.category)))];
+// CATEGORIES computed dynamically below from nodes
 
 // Demo graph data — shows what the real graph looks like without needing DB seed
 const DEMO_GRAPH: GraphData = {
@@ -89,12 +106,31 @@ export default function KnowledgeBasePage() {
   const [severityFilter, setSeverityFilter] = useState('');
   const [detail, setDetail] = useState<FaultNode | null>(null);
   const [copilotMsg, setCopilotMsg] = useState('');
+  const [kbNodes, setKbNodes] = useState<FaultNode[]>([]);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [graphNode, setGraphNode] = useState<{ name: string; category: string } | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInst = useRef<echarts.ECharts | null>(null);
 
-  const nodes = kbData.nodes as FaultNode[];
+  // Fetch knowledge base from API, fallback to local JSON
+  useEffect(() => {
+    api.get('/knowledge-base')
+      .then(({ data }) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setKbNodes(data.map(mapApiNode));
+        } else {
+          setKbNodes(kbData.nodes as FaultNode[]);
+        }
+      })
+      .catch(() => { setKbNodes(kbData.nodes as FaultNode[]); });
+  }, []);
+
+  const nodes = kbNodes.length > 0 ? kbNodes : (kbData.nodes as FaultNode[]);
+
+  const CATEGORIES = useMemo(() =>
+    ['全部', ...Array.from(new Set(nodes.map(n => n.category)))],
+    [nodes],
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
