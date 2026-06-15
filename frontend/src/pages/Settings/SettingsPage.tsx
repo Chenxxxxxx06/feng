@@ -94,8 +94,6 @@ const aiModelOptions: AIModelOption[] = [
   { value: 'gpt-4.1', label: 'OpenAI gpt-4.1', provider: 'OpenAI', note: '高质量通用模型', requiresKey: true },
   { value: 'gpt-4', label: 'OpenAI gpt-4', provider: 'OpenAI', note: '历史配置', requiresKey: true },
   { value: 'gpt-3.5-turbo', label: 'OpenAI gpt-3.5-turbo', provider: 'OpenAI', note: '历史配置', requiresKey: true },
-  { value: 'claude-sonnet-4-6', label: 'Claude claude-sonnet-4-6', provider: 'Claude', note: '高质量分析', requiresKey: true },
-  { value: 'claude-haiku-4-5', label: 'Claude claude-haiku-4-5', provider: 'Claude', note: '快速低成本', requiresKey: true },
   { value: 'gemini-2.5-flash', label: 'Gemini gemini-2.5-flash', provider: 'Google Gemini', note: '免费层友好', requiresKey: true },
   { value: 'gemini-3.5-flash', label: 'Gemini gemini-3.5-flash', provider: 'Google Gemini', note: '新一代快速模型', requiresKey: true },
   { value: 'ollama-local', label: 'Ollama qwen2.5', provider: 'Ollama本地模型', note: '本地运行，不需要API Key', requiresKey: false },
@@ -106,8 +104,6 @@ const normalizeModelPreference = (model?: string) => {
   const aliases: Record<string, string> = {
     'qwen3.5-flash': 'qwen3.6-flash',
     'deepseek-v3': 'deepseek-chat',
-    'claude-sonnet-4': 'claude-sonnet-4-6',
-    'claude-4': 'claude-sonnet-4-6',
   };
   return aliases[model || ''] || model || 'qwen-plus';
 };
@@ -350,27 +346,22 @@ export default function SettingsPage() {
     setAiTestStatus('testing');
     setAiTestMessage('');
     try {
-      const { data } = await api.post('/ai/summary', {
-        page_type: 'settings',
-        page_data: { model, has_api_key: Boolean(apiKey || user?.api_key) },
+      const { data } = await api.post('/ai/test-connection', {
+        api_key: apiKey || user?.api_key || '',
+        model: model,
+        base_url: user?.api_base_url || '',
       });
       setAiTestStatus('success');
-      const mode = data.mode;
-      const provider = data.provider || getModelOption(model)?.provider || 'AI服务';
-      const actualModel = data.model || model;
-      const message = mode === 'remote'
-        ? `已连接 ${provider} · ${actualModel}`
-        : mode === 'provider_mismatch'
-          ? `模型与密钥不匹配：当前密钥属于 ${data.api_provider || '其他供应商'}，不能用于 ${provider}`
-          : mode === 'key_unbound'
-            ? '已有密钥未绑定供应商，请重新输入密钥并保存'
-            : `未配置密钥，当前使用本地兜底，不产生AI调用费用`;
+      const message = data.success
+        ? `已连接 · ${data.model || model} (${data.latency_ms || 0}ms)`
+        : (data.message || 'AI服务连接失败');
       setAiTestMessage(message);
       addLog('测试AI连接', message);
-    } catch {
+    } catch (e: any) {
       setAiTestStatus('error');
-      setAiTestMessage('AI服务请求失败，请确认已保存密钥、模型和网络可用');
-      addLog('测试AI连接', 'AI服务请求失败', 'error');
+      const msg = e?.response?.data?.detail || 'AI服务请求失败，请确认已保存密钥、模型和网络可用';
+      setAiTestMessage(msg);
+      addLog('测试AI连接', msg, 'error');
     }
   };
 
@@ -933,7 +924,6 @@ function AISettingsSection({
     { name: '智谱GLM', model: 'glm-5-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
     { name: 'Kimi Moonshot', model: 'kimi-k2.6', cost: '有密钥时按供应商Token计费', state: '已接入' },
     { name: 'Google Gemini', model: 'gemini-2.5-flash / gemini-3.5-flash', cost: '有密钥时按供应商Token计费', state: '已接入' },
-    { name: 'Claude', model: 'claude-sonnet-4-6 / claude-haiku-4-5', cost: '有密钥时按供应商Token计费', state: '已接入' },
     { name: 'OpenAI', model: 'gpt-4o-mini / gpt-4.1 / gpt-4', cost: '有密钥时按供应商Token计费', state: '已接入' },
     { name: 'Ollama本地模型', model: 'qwen / llama / deepseek', cost: '软件免费，消耗本机算力', state: '适合演示兜底' },
   ];

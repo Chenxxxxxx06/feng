@@ -68,8 +68,6 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
     "gpt-4.1": AIModelConfig("OpenAI", "OpenAI gpt-4.1", "gpt-4.1", settings.OPENAI_BASE_URL),
     "gpt-4": AIModelConfig("OpenAI", "OpenAI gpt-4", "gpt-4", settings.OPENAI_BASE_URL),
     "gpt-3.5-turbo": AIModelConfig("OpenAI", "OpenAI gpt-3.5-turbo", "gpt-3.5-turbo", settings.OPENAI_BASE_URL),
-    "claude-sonnet-4-6": AIModelConfig("Claude", "Claude claude-sonnet-4-6", "claude-sonnet-4-6", api_style="anthropic"),
-    "claude-haiku-4-5": AIModelConfig("Claude", "Claude claude-haiku-4-5", "claude-haiku-4-5-20251001", api_style="anthropic"),
     "gemini-2.5-flash": AIModelConfig("Google Gemini", "Gemini gemini-2.5-flash", "gemini-2.5-flash", api_style="gemini"),
     "gemini-3.5-flash": AIModelConfig("Google Gemini", "Gemini gemini-3.5-flash", "gemini-3.5-flash", api_style="gemini"),
     "ollama-local": AIModelConfig("Ollama本地模型", "Ollama qwen2.5", "qwen2.5", "http://localhost:11434/v1", requires_api_key=False),
@@ -78,8 +76,6 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
 MODEL_ALIASES = {
     "qwen3.5-flash": "qwen3.6-flash",
     "deepseek-v3": "deepseek-chat",
-    "claude-sonnet-4": "claude-sonnet-4-6",
-    "claude-4": "claude-sonnet-4-6",
 }
 
 
@@ -208,9 +204,6 @@ def chat(
     if config.api_style == "gemini":
         return _gemini_chat(config, api_key or "", messages, temperature, max_tokens)
 
-    if config.api_style == "anthropic":
-        return _anthropic_chat(config, api_key or "", messages, temperature, max_tokens)
-
     client = get_client(api_key, config.base_url)
     response = client.chat.completions.create(
         model=config.model_id,
@@ -274,44 +267,6 @@ def _gemini_chat(
     return text
 
 
-def _anthropic_chat(
-    config: AIModelConfig,
-    api_key: str,
-    messages: list[dict],
-    temperature: float,
-    max_tokens: int,
-) -> str:
-    system_prompt, conversation = _split_system_messages(messages)
-    payload: dict = {
-        "model": config.model_id,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "messages": [
-            {
-                "role": "assistant" if message.get("role") == "assistant" else "user",
-                "content": str(message.get("content", "")),
-            }
-            for message in conversation
-        ],
-    }
-    if system_prompt:
-        payload["system"] = system_prompt
-
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    with httpx.Client(timeout=30) as client:
-        response = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-    text = "".join(part.get("text", "") for part in data.get("content", []) if part.get("type") == "text").strip()
-    if not text:
-        raise ValueError("Claude response did not include text")
-    return text
-
-
 def summarize_page(
     page_type: str,
     page_data: dict,
@@ -365,7 +320,7 @@ def summarize_page(
         return parsed
     except Exception as e:
         logger.warning(f"AI summary failed, using fallback: {e}")
-        fallback = fallback_summary(page_type)
+        fallback = fallback_summary(page_type, page_data)
         fallback_mode = model_status["mode"] if model_status["mode"] in {"key_unbound", "provider_mismatch"} else "local_fallback"
         fallback.update({**model_status, "mode": fallback_mode, "billing": "no_remote_charge"})
         return fallback
@@ -554,48 +509,83 @@ def describe_screenshot(
     return response.choices[0].message.content
 
 
-def fallback_summary(page_type: str) -> dict:
-    """Local fallback when Qwen API is unavailable.
+def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
+    """Data-aware local fallback when AI API is unavailable.
 
-    Args:
-        page_type: Type of page to summarize
-
-    Returns:
-        Fallback summary dict
+    Uses actual page_data to generate contextually relevant summaries
+    rather than static hardcoded text. Falls back to generic text when
+    no data is provided.
     """
-    summaries = {
-        "dashboard": {
-            "conclusions": [
-                "当前风场整体运行正常, 在线率96.5%",
-                "3台风机健康指数处于预警区间, 建议重点关注",
-                "陕北区域风速较大, 发电效率较高",
-            ],
-            "suggestions": [
-                "优先检修风机A-003, 其齿轮箱HI值持续下降",
-                "关中区域近期风速偏低, 可安排例行维护",
-            ],
-        },
-        "diagnosis": {
-            "conclusions": [
-                "检测到轴承早期磨损信号",
-                "故障置信度为87%, 建议安排振动复测",
-                "相比上月同类故障, 本次异常信号强度较弱",
-            ],
-            "suggestions": [
-                "建议48小时内安排轴承振动复测",
-                "备件库存充足, 无需额外采购",
-            ],
-        },
-        "prediction": {
-            "conclusions": [
-                "全场RUL预测显示2台风机发电机剩余寿命不足6个月",
-                "叶片整体寿命状况良好, 平均RUL > 3年",
-                "齿轮箱维护成本对比: 立即检修比延迟检修节省5万元",
-            ],
-            "suggestions": [
-                "建议本月内安排发电机预防性更换",
-                "齿轮箱建议立即检修, 避免连锁故障",
-            ],
-        },
+    data = page_data or {}
+
+    if page_type == "dashboard":
+        total = data.get("total", 0)
+        healthy = data.get("healthy", 0)
+        warning = data.get("warning", 0)
+        faulty = data.get("faulty", 0)
+        avg_hi = data.get("avgHi", "--")
+        mtbf = data.get("mtbfHours")
+
+        conclusions = []
+        if total > 0:
+            online_pct = ((healthy + warning) / total * 100) if total > 0 else 100
+            conclusions.append(f"当前风场共{total}台风机，在线率{online_pct:.1f}%")
+        if warning > 0:
+            conclusions.append(f"{warning}台风机处于预警状态，健康指数偏低需关注")
+        if faulty > 0:
+            conclusions.append(f"{faulty}台风机处于故障状态，需立即处理")
+        if not conclusions:
+            conclusions.append("风场运行数据正常，暂无异常")
+
+        suggestions = []
+        if faulty > 0:
+            suggestions.append(f"优先处理{faulty}台故障风机，避免停机损失扩大")
+        if warning > 0:
+            suggestions.append(f"对{warning}台预警风机安排近期巡检，检查HI下降原因")
+        if mtbf and mtbf > 0:
+            suggestions.append(f"当前MTBF约{mtbf:.0f}h，合理安排预防性维护可进一步提高可靠性")
+        if not suggestions:
+            suggestions.append("保持当前运维频率，持续监测HI变化趋势")
+
+        return {"conclusions": conclusions, "suggestions": suggestions}
+
+    if page_type == "diagnosis":
+        fault_type = data.get("faultType") or data.get("fault_type", "")
+        confidence = data.get("confidence", 0)
+        turbine_name = data.get("turbineName", "")
+        conclusions = []
+        if fault_type and confidence:
+            conclusions.append(f"检测到{turbine_name or '风机'}存在{fault_type}异常信号")
+            conclusions.append(f"故障置信度{confidence:.0%}，建议安排现场确认")
+            conclusions.append("以上结论基于SCADA历史数据规则引擎分析")
+        else:
+            conclusions.append("故障诊断模块需要接入风机SCADA数据进行分析")
+        suggestions = [
+            "建议48小时内安排针对性检查",
+            "检查相关备件库存，确认供应充足",
+        ]
+        return {"conclusions": conclusions, "suggestions": suggestions}
+
+    if page_type == "prediction":
+        avg_rul = data.get("avgRulDays")
+        critical = data.get("criticalCount", 0)
+        imminent = data.get("imminentCount", 0)
+        conclusions = []
+        if avg_rul:
+            conclusions.append(f"全场风机平均剩余寿命约{avg_rul:.0f}天")
+        if critical:
+            conclusions.append(f"{critical}台风机RUL不足90天，处于关键风险区")
+        if imminent:
+            conclusions.append(f"{imminent}台风机RUL不足30天，需紧急处理")
+        suggestions = []
+        if imminent:
+            suggestions.append("紧急安排RUL<30天的风机维修，避免非计划停机")
+        if not conclusions:
+            conclusions.append("RUL预测数据待刷新，请点击刷新按钮更新")
+            suggestions.append("刷新RUL预测以获取最新剩余寿命评估")
+        return {"conclusions": conclusions, "suggestions": suggestions}
+
+    return {
+        "conclusions": ["AI服务暂不可用，请检查API密钥配置"],
+        "suggestions": ["前往设置页面配置AI模型密钥以启用智能总结"],
     }
-    return summaries.get(page_type, summaries["dashboard"])

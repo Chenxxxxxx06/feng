@@ -844,12 +844,7 @@ async def get_vibration_data(
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
 
-    q = select(VibrationData).where(VibrationData.turbine_id == turbine_id)
-    if component:
-        q = q.where(VibrationData.component == component)
-    q = q.order_by(VibrationData.timestamp.desc())
-    result = await db.execute(q)
-    record = result.scalars().first()
+    record = await _select_vibration_record(db, turbine_id, component)
     if not record:
         raise HTTPException(status_code=404, detail="No imported vibration data for this turbine")
 
