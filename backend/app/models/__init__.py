@@ -155,32 +155,6 @@ class WorkOrder(Base):
     downtime_hours = Column(Float, nullable=True)
 
 
-class MaintenanceRecord(Base):
-    __tablename__ = "maintenance_records"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
-    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action_type = Column(String(32), nullable=False)
-    content = Column(Text, nullable=True)
-    before_status = Column(String(16), nullable=True)
-    after_status = Column(String(16), nullable=True)
-    extra = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
-class NotificationLog(Base):
-    __tablename__ = "notification_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=True, index=True)
-    recipient_email = Column(String(128), nullable=False)
-    subject = Column(String(256), nullable=True)
-    channel = Column(String(32), default="email")
-    status = Column(String(16), nullable=False)
-    error_message = Column(Text, nullable=True)
-    sent_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
 class MaintenancePersonnel(Base):
     __tablename__ = "maintenance_personnel"
     id = Column(Integer, primary_key=True, index=True)

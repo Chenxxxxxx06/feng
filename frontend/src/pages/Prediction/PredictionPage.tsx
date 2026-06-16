@@ -58,7 +58,7 @@ function exportRULToCSV(predictions: RULPrediction[]) {
 
 function StatCard({ label, value, sub, color = 'text-text-primary' }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
-    <div className="bg-bg-card border border-border-default rounded-lg p-4 flex flex-col justify-center">
+    <div className="premium-card rounded-2xl p-4 flex flex-col justify-center">
       <p className="text-[11px] text-text-muted mb-1">{label}</p>
       <p className={`text-2xl font-mono font-bold ${color}`}>{value}</p>
       {sub && <p className="text-[10px] text-text-muted mt-1">{sub}</p>}
@@ -74,7 +74,7 @@ function RefreshRULButton({ onDone }: { onDone: () => void }) {
     catch (e: any) { alert(e?.response?.data?.detail || '刷新失败'); }
     finally { setSpinning(false); }
   };
-  return <button onClick={handleRefresh} disabled={spinning} className="px-3 py-1 border border-border-default rounded text-xs text-text-secondary hover:text-accent-blue disabled:opacity-50">{spinning ? '⏳ 刷新中...' : '🔄 刷新 RUL'}</button>;
+  return <button onClick={handleRefresh} disabled={spinning} className="ops-btn px-3 py-1 text-xs disabled:opacity-50">{spinning ? '刷新中...' : '刷新 RUL'}</button>;
 }
 
 // ── Calendar ──
@@ -120,11 +120,11 @@ export default function PredictionPage() {
   useEffect(() => {
     if (!rulChartRef.current || !sortedPredictions.length) return;
     const chart = echarts.init(rulChartRef.current, 'dark');
-    chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'axis' }, legend: { top: 0, textStyle: { color: '#8b949e', fontSize: 11 } }, grid: { top: 35, right: 30, bottom: 40, left: 60 },
-      xAxis: { type: 'category', data: sortedPredictions.map(p => `${p.turbine_name}-${p.component}`), axisLabel: { color: '#5c6975', fontSize: 9, rotate: 30 } },
-      yAxis: { type: 'value', name: '剩余天数', axisLabel: { color: '#5c6975' } },
+    chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'axis' }, legend: { top: 0, textStyle: { color: '#94A3B8', fontSize: 11 } }, grid: { top: 35, right: 30, bottom: 40, left: 60 },
+      xAxis: { type: 'category', data: sortedPredictions.map(p => `${p.turbine_name}-${p.component}`), axisLabel: { color: '#64748B', fontSize: 9, rotate: 30 } },
+      yAxis: { type: 'value', name: '剩余天数', axisLabel: { color: '#64748B' } },
       series: [{ type: 'bar', data: sortedPredictions.map(p => ({ value: p.remaining_life_days, itemStyle: { color: rulColor(p.remaining_life_days), borderRadius: [3, 3, 0, 0] } })),
-        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#f85149', type: 'dashed', width: 1 }, data: [{ yAxis: 90, label: { formatter: '告警线', color: '#f85149', fontSize: 9 } }] } }] });
+        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#EF4444', type: 'dashed', width: 1 }, data: [{ yAxis: 90, label: { formatter: '告警线', color: '#EF4444', fontSize: 9 } }] } }] });
     const hr = () => chart.resize(); window.addEventListener('resize', hr);
     return () => { window.removeEventListener('resize', hr); chart.dispose(); };
   }, [sortedPredictions]);
@@ -134,10 +134,10 @@ export default function PredictionPage() {
     const chart = echarts.init(regionChartRef.current, 'dark');
     const regions = Object.entries(summary.by_region);
     chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'axis' }, grid: { top: 20, right: 60, bottom: 30, left: 60 },
-      xAxis: { type: 'category', data: regions.map(([r]) => r), axisLabel: { color: '#5c6975', fontSize: 11 } },
-      yAxis: [{ type: 'value', name: '平均RUL(天)', axisLabel: { color: '#5c6975' }, splitLine: { lineStyle: { color: '#21262d' } } }, { type: 'value', name: '预测数', axisLabel: { color: '#5c6975' }, splitLine: { show: false } }],
+      xAxis: { type: 'category', data: regions.map(([r]) => r), axisLabel: { color: '#64748B', fontSize: 11 } },
+      yAxis: [{ type: 'value', name: '平均RUL(天)', axisLabel: { color: '#64748B' }, splitLine: { lineStyle: { color: '#0D2447' } } }, { type: 'value', name: '预测数', axisLabel: { color: '#64748B' }, splitLine: { show: false } }],
       series: [{ name: '平均RUL', type: 'bar', data: regions.map(([, v]) => ({ value: v.avg_rul, itemStyle: { color: rulColor(v.avg_rul), borderRadius: [3, 3, 0, 0] } })) },
-        { name: '预测数', type: 'line', yAxisIndex: 1, data: regions.map(([, v]) => v.count), lineStyle: { color: '#58a6ff' }, itemStyle: { color: '#58a6ff' }, symbol: 'circle', symbolSize: 6 }] });
+        { name: '预测数', type: 'line', yAxisIndex: 1, data: regions.map(([, v]) => v.count), lineStyle: { color: '#3B82F6' }, itemStyle: { color: '#3B82F6' }, symbol: 'circle', symbolSize: 6 }] });
     const hr = () => chart.resize(); window.addEventListener('resize', hr);
     return () => { window.removeEventListener('resize', hr); chart.dispose(); };
   }, [summary]);
@@ -177,13 +177,20 @@ export default function PredictionPage() {
   const riskClass = (r: CostComparison) => r.risk_level === 'high' ? 'text-accent-red bg-accent-red/10 border-accent-red/30' : r.risk_level === 'medium' ? 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/30' : 'text-accent-green bg-accent-green/10 border-accent-green/30';
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden ops-page">
       <div className="flex-1 overflow-auto p-6 space-y-5">
-        <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">预测性维护决策</h2><RefreshRULButton onDone={loadData}/></div>
+        <div className="ops-header flex items-center justify-between">
+          <div>
+            <p className="ops-eyebrow">预测决策与维护排程</p>
+            <h2 className="ops-title gradient-text">预测性维护决策</h2>
+            <p className="ops-subtitle">汇总剩余寿命、维修计划、成本对比和排程结果，帮助优先处理高风险任务。</p>
+          </div>
+          <RefreshRULButton onDone={loadData}/>
+        </div>
 
         {loading && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><svg className="animate-spin w-8 h-8 text-accent-blue" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span className="text-sm">加载预测数据...</span></div></div>}
-        {error && !loading && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3"><span className="text-3xl">⚠️</span><p className="text-accent-red text-sm">{error}</p><button onClick={loadData} className="px-4 py-2 border border-border-default rounded text-xs hover:text-accent-blue">重试</button></div></div>}
-        {!loading && !error && predictions.length === 0 && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><span className="text-3xl">📊</span><p className="text-sm">暂无 RUL 预测数据</p><p className="text-xs">请点击「刷新 RUL」生成预测数据</p><RefreshRULButton onDone={loadData}/></div></div>}
+        {error && !loading && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3"><span className="ops-status-dot text-accent-red" /><p className="text-accent-red text-sm">{error}</p><button onClick={loadData} className="ops-btn px-4 py-2 text-xs">重试</button></div></div>}
+        {!loading && !error && predictions.length === 0 && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><span className="ops-status-dot text-accent-blue" /><p className="text-sm">暂无 RUL 预测数据</p><p className="text-xs">请点击「刷新 RUL」生成预测数据</p><RefreshRULButton onDone={loadData}/></div></div>}
 
         {!loading && !error && summary && (
           <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
@@ -199,12 +206,12 @@ export default function PredictionPage() {
         {!loading && !error && predictions.length > 0 && (<>
           {/* RUL Chart + Compact Maintenance Plan */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-bg-card border border-border-default rounded-lg p-4">
+            <div className="lg:col-span-2 ops-panel p-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2"><h3 className="text-sm font-medium">剩余寿命预测 (RUL)</h3>
                 <div className="flex items-center gap-2">
-                  {SORT_OPTIONS.map(opt => <button key={opt.key} onClick={() => setSortKey(opt.key)} className={`px-2 py-1 rounded border text-[10px] transition-colors ${sortKey === opt.key ? 'border-accent-blue text-accent-blue bg-accent-blue/10' : 'border-border-default text-text-muted hover:text-text-secondary'}`}>{opt.label}</button>)}
-                  <select value={chartLimit} onChange={e => setChartLimit(Number(e.target.value))} className="bg-bg-secondary border border-border-default rounded px-2 py-1 text-[10px] text-text-secondary focus:outline-none focus:border-accent-blue"><option value={10}>10条</option><option value={20}>20条</option><option value={40}>40条</option><option value={100}>全部</option></select>
-                  <button onClick={() => exportRULToCSV(predictions)} className="px-3 py-1 border border-border-default rounded text-xs text-text-secondary hover:text-accent-blue">⬇ CSV</button>
+                  {SORT_OPTIONS.map(opt => <button key={opt.key} onClick={() => setSortKey(opt.key)} className={`ops-btn px-2 py-1 text-[10px] ${sortKey === opt.key ? 'ops-btn-primary' : ''}`}>{opt.label}</button>)}
+                  <select value={chartLimit} onChange={e => setChartLimit(Number(e.target.value))} className="px-2 py-1 text-[10px] text-text-secondary"><option value={10}>10条</option><option value={20}>20条</option><option value={40}>40条</option><option value={100}>全部</option></select>
+                  <button onClick={() => exportRULToCSV(predictions)} className="ops-btn px-3 py-1 text-xs">导出 CSV</button>
                 </div>
               </div>
               <div ref={rulChartRef} style={{ height: 300 }}/>
@@ -214,9 +221,9 @@ export default function PredictionPage() {
 
             {/* Compact Maintenance Plan — top 8, minimal columns */}
             {maintPlan && maintPlan.plan.length > 0 && (
-              <div className="bg-bg-card border border-border-default rounded-lg p-3 flex flex-col">
+              <div className="ops-panel p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-medium">🔧 维修计划</h3>
+                  <h3 className="text-xs font-medium">维修计划</h3>
                   <span className="text-[9px] text-text-muted">{maintPlan.total}项 · <span className="text-accent-red">{maintPlan.urgent_count}急</span> <span className="text-accent-yellow">{maintPlan.high_count}高</span></span>
                 </div>
                 <div className="flex-1 overflow-auto text-[10px]">
@@ -230,7 +237,7 @@ export default function PredictionPage() {
                           <td className="py-1">{t.turbine_name}<span className="text-[8px] text-text-muted ml-0.5">{t.region}</span></td>
                           <td className="py-1">{t.component}</td>
                           <td className="py-1 text-right"><span className="font-mono" style={{ color: rulColor(t.rul_days) }}>{t.rul_days.toFixed(0)}天</span></td>
-                          <td className="py-1 text-right"><div className="flex items-center justify-end gap-1"><div className="w-6 h-1 bg-bg-hover rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${t.urgency_score}%`, backgroundColor: t.urgency_score >= 70 ? '#f85149' : t.urgency_score >= 45 ? '#d29922' : '#58a6ff' }}/></div><span className="font-mono text-[9px]">{t.urgency_score.toFixed(0)}</span></div></td>
+                          <td className="py-1 text-right"><div className="flex items-center justify-end gap-1"><div className="w-6 h-1 bg-bg-hover rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${t.urgency_score}%`, backgroundColor: t.urgency_score >= 70 ? '#EF4444' : t.urgency_score >= 45 ? '#F59E0B' : '#3B82F6' }}/></div><span className="font-mono text-[9px]">{t.urgency_score.toFixed(0)}</span></div></td>
                           <td className="py-1"><span className={`px-1 py-0.5 rounded text-[8px] ${t.priority === 'urgent' ? 'bg-accent-red/20 text-accent-red' : t.priority === 'high' ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-blue/20 text-accent-blue'}`}>{t.action.length > 6 ? t.action.slice(0, 5) + '…' : t.action}</span></td>
                         </tr>
                       ))}
@@ -240,14 +247,14 @@ export default function PredictionPage() {
                 <div className="mt-2 pt-2 border-t border-border-default flex items-center justify-between gap-2">
                   <span className="text-[9px] text-text-muted">预估 ¥{maintPlan.total_cost_estimate.toLocaleString()}</span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setShowFullPlan(!showFullPlan)} className="px-2 py-0.5 border border-border-default rounded text-[9px] text-text-muted hover:text-accent-blue">{showFullPlan ? '收起完整' : `全部 ${maintPlan.total} 项`}</button>
-                    <button onClick={handleAIAnalysis} disabled={aiLoading} className="px-2 py-0.5 bg-accent-purple/20 border border-accent-purple/40 rounded text-[9px] text-accent-purple hover:bg-accent-purple/30 disabled:opacity-50">{aiLoading ? '🤖...' : '🤖AI分析'}</button>
+                    <button onClick={() => setShowFullPlan(!showFullPlan)} className="ops-btn px-2 py-0.5 text-[9px]">{showFullPlan ? '收起完整' : `全部 ${maintPlan.total} 项`}</button>
+                    <button onClick={handleAIAnalysis} disabled={aiLoading} className="rounded border border-accent-purple/40 bg-accent-purple/15 px-2 py-0.5 text-[9px] font-semibold text-accent-purple hover:bg-accent-purple/25 disabled:opacity-50">AI 分析</button>
                   </div>
                 </div>
                 {aiAnalysis && (
-                  <div className="mt-2 p-2 bg-accent-purple/5 border border-accent-purple/20 rounded text-[10px] text-text-secondary max-h-[200px] overflow-auto relative">
-                    <button onClick={() => setAiAnalysis(null)} className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center rounded text-[10px] text-text-muted hover:text-accent-red hover:bg-accent-red/10">✕</button>
-                    <span className="text-accent-purple font-medium text-xs">🤖 AI 运维分析：</span>
+                  <div className="mt-2 rounded border border-accent-purple/20 bg-accent-purple/5 p-2 text-[10px] text-text-secondary max-h-[200px] overflow-auto relative">
+                    <button onClick={() => setAiAnalysis(null)} className="absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded text-[10px] text-text-muted hover:text-accent-red hover:bg-accent-red/10">×</button>
+                    <span className="text-accent-purple font-medium text-xs">AI 运维分析：</span>
                     <p className="mt-1 whitespace-pre-line leading-relaxed mr-4">{aiAnalysis.analysis}</p>
                   </div>
                 )}
@@ -260,32 +267,32 @@ export default function PredictionPage() {
             <MaintenanceCalendar workOrders={workOrders} rulItems={predictions} turbines={turbines}
               scheduledTasks={scheduledTasks} conflicts={conflicts}
               onAutoSchedule={handleAutoSchedule} onScheduleItem={handleScheduleItem} scheduling={scheduling}/>
-            <div className="bg-bg-card border border-border-default rounded-lg p-4"><h3 className="text-sm font-medium mb-3">高风险部件列表</h3>
-              <div className="overflow-auto max-h-[280px]">{highRisk.length === 0 ? <p className="text-xs text-text-muted py-8 text-center">暂无高风险部件 ✅</p> : <table className="w-full text-xs"><thead><tr className="text-text-muted border-b border-border-default"><th className="text-left py-2">风机</th><th className="text-left py-2">部件</th><th className="text-right py-2">HI</th><th className="text-right py-2">RUL</th><th className="text-right py-2">置信区间</th><th className="text-right py-2">风险</th></tr></thead>
+            <div className="ops-panel p-4"><h3 className="text-sm font-medium mb-3">高风险部件列表</h3>
+              <div className="overflow-auto max-h-[280px]">{highRisk.length === 0 ? <p className="text-xs text-text-muted py-8 text-center">暂无高风险部件</p> : <table className="w-full text-xs"><thead><tr className="text-text-muted border-b border-border-default"><th className="text-left py-2">风机</th><th className="text-left py-2">部件</th><th className="text-right py-2">HI</th><th className="text-right py-2">RUL</th><th className="text-right py-2">置信区间</th><th className="text-right py-2">风险</th></tr></thead>
                 <tbody>{highRisk.slice(0, 12).map((p, i) => { const hi = turbineHiMap.get(p.turbine_id); return <tr key={i} className="border-b border-border-default hover:bg-bg-hover"><td className="py-2">{p.turbine_name}</td><td className="py-2">{p.component}</td><td className="py-2 text-right"><span className="font-mono" style={{ color: hi ? hiColor(hi) : undefined }}>{hi?.toFixed(0) ?? '--'}</span></td><td className="py-2 text-right font-mono">{p.remaining_life_days.toFixed(0)} 天</td><td className="py-2 text-right font-mono text-text-muted">{p.confidence_lower.toFixed(0)}–{p.confidence_upper.toFixed(0)}</td><td className="py-2 text-right"><span className={`px-1.5 py-0.5 rounded text-[10px] ${p.remaining_life_days < 30 ? 'bg-accent-red/20 text-accent-red' : p.remaining_life_days < 90 ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-blue/20 text-accent-blue'}`}>{p.remaining_life_days < 30 ? '紧急' : p.remaining_life_days < 90 ? '近期' : '计划'}</span></td></tr>; })}</tbody></table>}
               </div>
             </div>
           </div>
 
           {/* Cost Comparison */}
-          <div className="bg-bg-card border border-border-default rounded-lg p-4"><h3 className="text-sm font-medium mb-3">维护成本对比</h3>
+          <div className="ops-panel p-4"><h3 className="text-sm font-medium mb-3">维护成本对比</h3>
             <div className="flex gap-3 mb-4 flex-wrap">
-              <select value={costTurbineId ?? ''} onChange={e => setCostTurbineId(e.target.value ? Number(e.target.value) : null)} className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue min-w-[200px]"><option value="" disabled>选择风机</option>{turbines.map(t => <option key={t.id} value={t.id}>{t.name} — {t.model || '未知型号'} ({t.region})</option>)}</select>
-              <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue">{FAULT_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
-              <button onClick={handleCostCompare} disabled={!costTurbineId || costLoading} className="px-4 py-2 bg-accent-blue text-white rounded text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">{costLoading ? '计算中...' : '计算对比'}</button>
+              <select value={costTurbineId ?? ''} onChange={e => setCostTurbineId(e.target.value ? Number(e.target.value) : null)} className="min-w-[200px] px-3 py-2 text-sm text-text-primary"><option value="" disabled>选择风机</option>{turbines.map(t => <option key={t.id} value={t.id}>{t.name} — {t.model || '未知型号'} ({t.region})</option>)}</select>
+              <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="px-3 py-2 text-sm text-text-primary">{FAULT_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
+              <button onClick={handleCostCompare} disabled={!costTurbineId || costLoading} className="ops-btn ops-btn-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">{costLoading ? '计算中...' : '计算对比'}</button>
             </div>
             {selectedTurbine && <p className="text-[11px] text-text-muted -mt-2 mb-3">当前: {selectedTurbine.name} · {selectedTurbine.power_mw}MW · HI {selectedTurbine.hi_value}</p>}
             {costResult && <div>
               <div className="grid grid-cols-3 lg:grid-cols-6 gap-4">
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">立即检修</p><p className="text-xl font-mono font-bold text-accent-red">¥{costResult.immediate_repair_cost.toLocaleString()}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">延迟检修</p><p className="text-xl font-mono font-bold text-accent-yellow">¥{costResult.delayed_repair_cost.toLocaleString()}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">每日停机损失</p><p className="text-xl font-mono font-bold text-text-primary">¥{costResult.downtime_loss_per_day.toLocaleString()}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">故障概率</p><p className="text-xl font-mono font-bold text-text-primary">{(costResult.failure_probability * 100).toFixed(1)}%</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">风险等级</p><p className={`inline-flex items-center justify-center min-w-12 rounded border px-2 py-1 text-lg font-bold ${riskClass(costResult)}`}>{riskLabel(costResult)}</p></div>
-                <div className="bg-bg-hover rounded p-3 text-center"><p className="text-xs text-text-muted mb-1">预计节省</p><p className={`text-xl font-mono font-bold ${costResult.estimated_saving >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>¥{costResult.estimated_saving.toLocaleString()}</p></div>
+                <div className="ops-panel rounded-2xl p-3 text-center"><p className="text-xs text-text-muted mb-1">立即检修</p><p className="text-xl font-mono font-bold text-accent-red">¥{costResult.immediate_repair_cost.toLocaleString()}</p></div>
+                <div className="ops-panel rounded-2xl p-3 text-center"><p className="text-xs text-text-muted mb-1">延迟检修</p><p className="text-xl font-mono font-bold text-accent-yellow">¥{costResult.delayed_repair_cost.toLocaleString()}</p></div>
+                <div className="ops-panel rounded-2xl p-3 text-center"><p className="text-xs text-text-muted mb-1">每日停机损失</p><p className="text-xl font-mono font-bold text-text-primary">¥{costResult.downtime_loss_per_day.toLocaleString()}</p></div>
+                <div className="ops-panel rounded-2xl p-3 text-center"><p className="text-xs text-text-muted mb-1">故障概率</p><p className="text-xl font-mono font-bold text-text-primary">{(costResult.failure_probability * 100).toFixed(1)}%</p></div>
+                <div className="ops-panel rounded-2xl p-3 text-center"><p className="text-xs text-text-muted mb-1">风险等级</p><p className={`inline-flex items-center justify-center min-w-12 rounded border px-2 py-1 text-lg font-bold ${riskClass(costResult)}`}>{riskLabel(costResult)}</p></div>
+                <div className="ops-panel rounded-2xl p-3 text-center"><p className="text-xs text-text-muted mb-1">预计节省</p><p className={`text-xl font-mono font-bold ${costResult.estimated_saving >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>¥{costResult.estimated_saving.toLocaleString()}</p></div>
               </div>
               <p className="mt-3 p-3 bg-accent-green/10 border border-accent-green/30 rounded text-xs text-accent-green">{costResult.recommendation}</p>
-              <div className="mt-3 grid grid-cols-2 lg:grid-cols-5 gap-2">{costResult.cost_drivers.map(d => <div key={d} className="rounded border border-border-default bg-bg-secondary px-3 py-2 text-xs text-text-secondary">{d}</div>)}</div>
+              <div className="mt-3 grid grid-cols-2 lg:grid-cols-5 gap-2">{costResult.cost_drivers.map(d => <div key={d} className="form-input px-3 py-2 text-xs text-text-secondary">{d}</div>)}</div>
             </div>}
           </div>
 
@@ -307,10 +314,10 @@ export default function PredictionPage() {
       {/* Full Maintenance Plan Modal */}
       {showFullPlan && maintPlan && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60" onClick={() => setShowFullPlan(false)}>
-          <div className="bg-bg-card border border-border-default rounded-xl shadow-2xl w-[90vw] max-w-5xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="premium-card rounded-2xl shadow-2xl w-[90vw] max-w-5xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-border-default flex-shrink-0">
               <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">🔧 完整维修计划</h2>
+                <h2 className="text-base font-semibold">完整维修计划</h2>
                 <span className="text-xs text-text-muted">{maintPlan.total}项 · 紧急 {maintPlan.urgent_count} · 高优先 {maintPlan.high_count} · 总预估 ¥{maintPlan.total_cost_estimate.toLocaleString()}</span>
               </div>
               <button onClick={() => { setShowFullPlan(false); setAiAnalysis(null); }} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-hover text-text-muted hover:text-accent-red text-lg">✕</button>
@@ -325,7 +332,7 @@ export default function PredictionPage() {
                     <td className="py-1.5">{t.component}</td>
                     <td className="py-1.5 text-right"><span className="font-mono" style={{ color: rulColor(t.rul_days) }}>{t.rul_days.toFixed(0)}天</span></td>
                     <td className="py-1.5 text-right"><span className="font-mono" style={{ color: hiColor(t.hi_value) }}>{t.hi_value.toFixed(0)}</span></td>
-                    <td className="py-1.5 text-right"><div className="flex items-center justify-end gap-1.5"><div className="w-10 h-1.5 bg-bg-hover rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${t.urgency_score}%`, backgroundColor: t.urgency_score >= 70 ? '#f85149' : t.urgency_score >= 45 ? '#d29922' : '#58a6ff' }}/></div><span className="font-mono text-[10px]">{t.urgency_score.toFixed(0)}</span></div></td>
+                    <td className="py-1.5 text-right"><div className="flex items-center justify-end gap-1.5"><div className="w-10 h-1.5 bg-bg-hover rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${t.urgency_score}%`, backgroundColor: t.urgency_score >= 70 ? '#EF4444' : t.urgency_score >= 45 ? '#F59E0B' : '#3B82F6' }}/></div><span className="font-mono text-[10px]">{t.urgency_score.toFixed(0)}</span></div></td>
                     <td className="py-1.5"><span className={`px-1.5 py-0.5 rounded text-[10px] ${t.priority === 'urgent' ? 'bg-accent-red/20 text-accent-red' : t.priority === 'high' ? 'bg-accent-yellow/20 text-accent-yellow' : t.priority === 'medium' ? 'bg-accent-blue/20 text-accent-blue' : 'bg-accent-green/20 text-accent-green'}`}>{t.action}</span></td>
                     <td className="py-1.5 text-right font-mono text-text-muted">{t.downtime_hours}h</td>
                     <td className="py-1.5 text-right font-mono">¥{t.cost_estimate.toLocaleString()}</td>
@@ -353,16 +360,16 @@ function SchedulePreviewModal({ items, conflicts, overflow, onConfirm, onCancel 
 
   return (
     <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60" onClick={onCancel}>
-      <div className="bg-bg-card border border-border-default rounded-xl shadow-2xl w-[95vw] max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="premium-card rounded-2xl shadow-2xl w-[95vw] max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border-default flex-shrink-0">
-          <div><h2 className="text-base font-semibold">📋 排程预览</h2><p className="text-[10px] text-text-muted mt-0.5">已选 {count}/{items.length} 项 · 溢出 {overflow.length}</p></div>
+          <div><h2 className="text-base font-semibold">排程预览</h2><p className="text-[10px] text-text-muted mt-0.5">已选 {count}/{items.length} 项 · 溢出 {overflow.length}</p></div>
           <div className="flex items-center gap-2">
-            <button onClick={toggleAll} className="px-3 py-1 border border-border-default rounded text-xs hover:text-accent-blue">{count === items.length ? '取消全选' : '全选'}</button>
-            <button onClick={onCancel} className="px-3 py-1 border border-border-default rounded text-xs text-text-muted hover:text-accent-red">取消</button>
-            <button onClick={() => onConfirm(items.filter((_, i) => checked[i]))} disabled={count === 0} className="px-4 py-1.5 bg-accent-blue text-white rounded text-xs hover:opacity-90 disabled:opacity-50">✅ 确认排程 ({count}项)</button>
+            <button onClick={toggleAll} className="ops-btn px-3 py-1 text-xs">{count === items.length ? '取消全选' : '全选'}</button>
+            <button onClick={onCancel} className="ops-btn px-3 py-1 text-xs">取消</button>
+            <button onClick={() => onConfirm(items.filter((_, i) => checked[i]))} disabled={count === 0} className="ops-btn ops-btn-primary px-4 py-1.5 text-xs disabled:opacity-50">确认排程 ({count}项)</button>
           </div>
         </div>
-        {overflow.length > 0 && <div className="mx-4 mt-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px] text-accent-red">⚠ {overflow.length} 项无法安排：{overflow.slice(0, 5).map((t: any) => `${t.turbine_name} ${t.component}`).join('、')}{overflow.length > 5 ? '等' : ''}</div>}
+        {overflow.length > 0 && <div className="mx-4 mt-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px] text-accent-red">{overflow.length} 项无法安排：{overflow.slice(0, 5).map((t: any) => `${t.turbine_name} ${t.component}`).join('、')}{overflow.length > 5 ? '等' : ''}</div>}
         <div className="flex-1 overflow-auto p-4">
           <table className="w-full text-[10px]">
             <thead><tr className="text-text-muted border-b border-border-default sticky top-0 bg-bg-card">
