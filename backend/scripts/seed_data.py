@@ -459,7 +459,7 @@ async def seed_knowledge_base():
     from pathlib import Path
     from app.models import FaultKnowledgeNode
 
-    kb_path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "fault-kb.json"
+    kb_path = Path(__file__).resolve().parents[1] / "app" / "data" / "fault-kb.json"
     if not kb_path.exists():
         print("   ⚠️  fault-kb.json 不存在, 跳过知识库初始化")
         return
