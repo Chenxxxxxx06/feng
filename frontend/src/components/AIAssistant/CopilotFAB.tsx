@@ -1,8 +1,11 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import api from '../../services/api';
 import { useCopilotStore } from '../../services/copilotStore';
+import { AgentExecutor } from '../../services/agent/AgentExecutor';
+import { SkillRegistry } from '../../services/agent/SkillRegistry';
+import type { ExecutionProgress } from '../../services/agent/types';
 import type { Message } from '../../services/copilotStore';
 
 const PANEL_W = 400;
@@ -42,6 +45,29 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const fabRef = useRef<HTMLButtonElement>(null);
   const fabDragging = useRef(false);
   const fabDragOffset = useRef({ x: 0, y: 0 });
+
+  // Agent executor — runs atomic skill steps in browser
+  const executor = useMemo(() => {
+    const shot = async () => {
+      try {
+        // Use a small element to avoid capturing the whole page (which may include the FAB itself)
+        const main = document.querySelector('main') || document.body;
+        const canvas = await html2canvas(main as HTMLElement, { scale: 0.5, logging: false });
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        return dataUrl.split(',')[1] || null;
+      } catch { return null; }
+    };
+    const registry = new SkillRegistry(
+      (path: string) => navigate(path),
+      async () => shot(),
+    );
+    return new AgentExecutor(registry, (p: ExecutionProgress) => {
+      const icon = p.status === 'running' ? '⏳' : p.status === 'done' ? '✅' : '❌';
+      const progressId = `step-${p.stepIndex}`;
+      useCopilotStore.getState().removeMessage(progressId);
+      addMessage({ role: 'assistant', content: `${icon} ${p.message}`, _progress: p.status === 'running', _progressId: progressId });
+    });
+  }, [navigate]);
 
 function renderMessageContent(text: string, isProgress?: boolean) {
   if (isProgress) return <span>{text}</span>;
@@ -267,36 +293,75 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       let reply: string;
 
       if (mode === 'agent') {
-        // Agent 任务模式 → 多Agent流水线: Orchestrator→Data+Knowledge→Synthesizer
-        const payload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
-        if (screenshot) payload.screenshot = screenshot;
-
-        // Show progress step
+        // Step 1: intent classify + plan
         const progressId = Date.now().toString();
         addMessage({ role: 'assistant', content: `🔍 分析意图中...`, _progress: true, _progressId: progressId });
 
-        const { data } = await api.post('/agent/diagnose', payload, { timeout: 120000 });
-
-        // Remove progress message, add formatted result
+        const execPayload: Record<string, unknown> = {
+          command: text,
+          current_page: baseContext.page_type || 'dashboard',
+        };
+        const { data: plan } = await api.post('/agent/execute', execPayload, { timeout: 30000 });
         useCopilotStore.getState().removeMessage(progressId);
 
-        const parts: string[] = [];
-        const trace = data.trace || {};
-        // Step trace
-        const steps: string[] = [];
-        if (trace.orchestrator_ms != null) steps.push(`🧠 意图分析 (${trace.orchestrator_ms}ms)`);
-        if (trace.data_agent_ms != null) steps.push(`📊 数据查询 (${trace.data_agent_ms}ms)`);
-        if (trace.knowledge_agent_ms != null) steps.push(`📚 知识检索 (${trace.knowledge_agent_ms}ms)`);
-        if (trace.synthesizer_ms != null) steps.push(`📝 汇总报告 (${trace.synthesizer_ms}ms)`);
-        if (steps.length > 0) parts.push(`> ${steps.join(' → ')}`);
+        const intentType = plan.intent_type || 'qa';
+        const planSteps: string[] = [];
+        planSteps.push(`🧠 意图分析: ${intentType} (${((plan.confidence || 0) * 100).toFixed(0)}%)`);
+        if (plan.explanation) planSteps.push(`💡 ${plan.explanation}`);
 
-        if (data.intent && data.intent.intent_type) {
-          parts.push(`**🎯 意图**: ${data.intent.intent_type} (置信度${(data.intent.confidence*100).toFixed(0)}%)`);
+        // Step 2: execute scene skills if action/mixed
+        if ((intentType === 'action' || intentType === 'mixed') && plan.atomic_steps?.length > 0) {
+          planSteps.push(`🔧 执行 ${plan.atomic_steps.length} 个操作步骤...`);
+          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
+
+          const execResult = await executor.executeSteps(plan.atomic_steps);
+          useCopilotStore.getState().removeMessage(progressId);
+
+          if (!execResult.success) {
+            reply = `> ${planSteps.join('\n> ')}\n\n❌ ${execResult.message}`;
+          } else {
+            // Step 3: for mixed intent, analyze the result page
+            if (intentType === 'mixed' && plan.follow_up_analysis) {
+              addMessage({ role: 'assistant', content: `📝 分析执行结果...`, _progress: true, _progressId: progressId });
+              const diagPayload: Record<string, unknown> = {
+                messages: [...allMsgs, { role: 'system', content: plan.follow_up_analysis }],
+                page_context: baseContext,
+              };
+              try {
+                const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 60000 });
+                useCopilotStore.getState().removeMessage(progressId);
+                const diagParts = planSteps.slice();
+                if (diag.report) diagParts.push(diag.report);
+                else if (diag.message) diagParts.push(diag.message);
+                reply = diagParts.join('\n\n');
+              } catch {
+                useCopilotStore.getState().removeMessage(progressId);
+                reply = planSteps.join('\n') + '\n\n✅ 操作已完成';
+              }
+            } else {
+              reply = planSteps.join('\n') + '\n\n✅ 操作已完成';
+            }
+          }
+        } else {
+          // qa/diagnosis: route to multi-agent pipeline
+          planSteps.push(`📊 查询知识库与分析...`);
+          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
+
+          const diagPayload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
+          if (screenshot) diagPayload.screenshot = screenshot;
+          try {
+            const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 120000 });
+            useCopilotStore.getState().removeMessage(progressId);
+            const parts = planSteps.slice();
+            if (diag.report) parts.push(diag.report);
+            else if (diag.message) parts.push(diag.message);
+            else parts.push(JSON.stringify(diag));
+            reply = parts.join('\n\n');
+          } catch {
+            useCopilotStore.getState().removeMessage(progressId);
+            reply = planSteps.join('\n') + '\n\n抱歉，AI分析服务暂不可用。';
+          }
         }
-        if (data.data_summary) parts.push(`**📊 数据摘要**:\n${data.data_summary}`);
-        if (data.knowledge_matches) parts.push(`**📚 知识匹配**:\n${data.knowledge_matches}`);
-        if (data.report) parts.push(data.report);
-        reply = parts.join('\n\n') || JSON.stringify(data);
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
         const payload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };

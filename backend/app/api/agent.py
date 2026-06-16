@@ -55,7 +55,7 @@ async def multi_agent_diagnose(
     api_key = current_user.api_key
     api_provider = current_user.api_provider
     api_base_url = current_user.api_base_url
-    agent_model = current_user.model_preference or "qwen-max"
+    agent_model = "qwen-turbo"  # fast model for intent routing
     orchestrator = OrchestratorAgent(model=agent_model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
     orch_result = await orchestrator.run(user_message=user_msg, turbine_list=turbine_list)
 
@@ -157,7 +157,7 @@ async def execute_agent_command(
     api_key = current_user.api_key
     api_provider = current_user.api_provider
     api_base_url = current_user.api_base_url
-    agent_model = current_user.model_preference or "qwen-max"
+    agent_model = "qwen-turbo"  # fast model for intent routing
 
     router = IntentRouterAgent(
         model=agent_model, api_key=api_key,
@@ -235,6 +235,11 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "screenshot", "params": {}},
         ],
         "NavigateToWorkOrder": [
+            {"skill": "navigate", "params": {"path": "/workorder"}},
+            {"skill": "wait", "params": {"ms": "800"}},
+            {"skill": "screenshot", "params": {}},
+        ],
+        "GoToWorkOrder": [
             {"skill": "navigate", "params": {"path": "/workorder"}},
             {"skill": "wait", "params": {"ms": "800"}},
             {"skill": "screenshot", "params": {}},
