@@ -452,12 +452,15 @@ export default function KnowledgeBasePage() {
               show: Boolean(edgeLabel),
               formatter: edgeLabel,
               fontSize: 9,
-              color,
-              backgroundColor: 'rgba(8,12,18,0.72)',
-              borderColor: 'rgba(255,255,255,0.06)',
-              borderWidth: 1,
-              borderRadius: 3,
-              padding: [2, 4],
+              color: isTopo ? '#dbeafe' : '#e9edf5',
+              fontWeight: 600,
+              textShadowColor: 'rgba(0,0,0,0.75)',
+              textShadowBlur: isTopo ? 4 : 0,
+              backgroundColor: isTopo ? 'transparent' : 'rgba(8,12,18,0.88)',
+              borderColor: isTopo ? 'transparent' : color,
+              borderWidth: isTopo ? 0 : 1,
+              borderRadius: isTopo ? 0 : 4,
+              padding: isTopo ? [0, 0] : [3, 6],
             },
             lineStyle: {
               color,
@@ -811,8 +814,18 @@ export default function KnowledgeBasePage() {
         <KnowledgeDetailDrawer
           detail={detail}
           nodes={nodes}
-          onClose={() => setDetail(null)}
+          editingNode={formMode === 'edit' ? formNode : null}
+          categories={categories.filter(c => c !== ALL_CATEGORY)}
+          saving={formSaving}
+          error={formError}
+          onClose={() => {
+            closeKnowledgeForm();
+            setDetail(null);
+          }}
           onEdit={openEditForm}
+          onEditChange={setFormNode}
+          onCancelEdit={closeKnowledgeForm}
+          onSaveEdit={handleSaveKnowledgeNode}
           onDelete={handleDeleteNode}
           onVerify={handleVerifyNode}
           onReject={handleRejectNode}
@@ -822,7 +835,7 @@ export default function KnowledgeBasePage() {
         />
       )}
 
-      {formMode && formNode && (
+      {formMode === 'create' && formNode && (
         <KnowledgeNodeForm
           mode={formMode}
           node={formNode}
@@ -875,8 +888,15 @@ function KnowledgeCard({ node, active, onClick }: { node: FaultNode; active: boo
 function KnowledgeDetailDrawer({
   detail,
   nodes,
+  editingNode,
+  categories,
+  saving,
+  error,
   onClose,
   onEdit,
+  onEditChange,
+  onCancelEdit,
+  onSaveEdit,
   onDelete,
   onVerify,
   onReject,
@@ -886,8 +906,15 @@ function KnowledgeDetailDrawer({
 }: {
   detail: FaultNode;
   nodes: FaultNode[];
+  editingNode: FaultNode | null;
+  categories: string[];
+  saving: boolean;
+  error: string;
   onClose: () => void;
   onEdit: (node: FaultNode) => void;
+  onEditChange: (node: FaultNode | null) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (node: FaultNode) => void;
   onDelete: (node: FaultNode) => void;
   onVerify: (node: FaultNode) => void;
   onReject: (node: FaultNode) => void;
@@ -896,9 +923,23 @@ function KnowledgeDetailDrawer({
   onSelectDetail: (node: FaultNode) => void;
 }) {
   const pending = isPendingReview(detail);
+  if (editingNode) {
+    return (
+      <KnowledgeNodeForm
+        mode="edit"
+        node={editingNode}
+        categories={categories}
+        saving={saving}
+        error={error}
+        onChange={onEditChange}
+        onClose={onCancelEdit}
+        onSave={onSaveEdit}
+      />
+    );
+  }
 
   return (
-    <div className="w-[440px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
+    <div className="w-[520px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
       <div className="sticky top-0 z-10 border-b border-border-subtle bg-bg-card/95 p-5 backdrop-blur-sm">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -1122,7 +1163,7 @@ function KnowledgeNodeForm({
     : [node.category, ...categories];
 
   return (
-    <div className="w-[460px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
+    <div className="w-[520px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
       <div className="sticky top-0 z-20 border-b border-border-subtle bg-bg-card/95 p-5 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div>
@@ -1225,7 +1266,7 @@ function KnowledgeNodeForm({
                 <input className="form-input" type="date" value={item.date} onChange={e => updateListItem('cases', node.cases, index, { ...item, date: e.target.value })} />
                 <RemoveButton onClick={() => removeListItem('cases', node.cases, index)} />
               </div>
-              <textarea className="form-input min-h-[64px]" placeholder="案例摘要" value={item.summary} onChange={e => updateListItem('cases', node.cases, index, { ...item, summary: e.target.value })} />
+              <textarea className="form-input min-h-[112px] w-full resize-y" placeholder="案例摘要" value={item.summary} onChange={e => updateListItem('cases', node.cases, index, { ...item, summary: e.target.value })} />
               <div className="grid grid-cols-[1fr_86px_86px] gap-2">
                 <input className="form-input" placeholder="处理结果" value={item.resolution} onChange={e => updateListItem('cases', node.cases, index, { ...item, resolution: e.target.value })} />
                 <input className="form-input" type="number" min="0" placeholder="成本" value={item.total_cost} onChange={e => updateListItem('cases', node.cases, index, { ...item, total_cost: Number(e.target.value) || 0 })} />
@@ -1273,7 +1314,7 @@ function FormSection({ title, onAdd, children }: { title: string; onAdd: () => v
     <section className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">{title}</h3>
-        <button onClick={onAdd} className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-accent-blue hover:border-accent-blue/50">添加</button>
+        <button onClick={onAdd} className="px-1 py-1 text-[10px] font-medium text-accent-blue hover:text-blue-300">添加</button>
       </div>
       <div className="space-y-2">{children}</div>
     </section>
@@ -1282,7 +1323,7 @@ function FormSection({ title, onAdd, children }: { title: string; onAdd: () => v
 
 function RemoveButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="h-9 rounded border border-border-subtle text-text-muted hover:border-accent-red/40 hover:text-accent-red">x</button>
+    <button onClick={onClick} className="h-9 px-2 text-sm font-medium text-text-muted hover:text-accent-red">x</button>
   );
 }
 
