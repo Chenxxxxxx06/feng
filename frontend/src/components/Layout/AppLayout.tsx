@@ -6,7 +6,7 @@ const navItems = [
   { path: '/diagnosis', icon: '◇', label: '故障诊断' },
   { path: '/prediction', icon: '◎', label: '预测决策' },
   { path: '/workorder', icon: '▣', label: '维修工单' },
-  { path: '/knowledge', icon: '📚', label: '故障百科' },
+  { path: '/knowledge', icon: '▤', label: '故障百科' },
   { path: '/settings', icon: '⚙', label: '系统设置' },
 ];
 
@@ -44,7 +44,9 @@ export default function AppLayout() {
                 }`}
                 style={active ? { background: 'rgba(56,139,253,0.08)' } : {}}
               >
-                <span className={`text-base ${active ? 'text-accent-blue' : ''}`}>{item.icon}</span>
+                <span className={`flex h-5 w-5 shrink-0 items-center justify-center font-mono text-[15px] leading-none ${active ? 'text-accent-blue' : 'text-text-secondary'}`}>
+                  {item.icon}
+                </span>
                 {item.label}
               </NavLink>
             );
