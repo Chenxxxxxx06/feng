@@ -350,6 +350,7 @@ def summarize_page(
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
     base_url: Optional[str] = None,
+    raise_on_error: bool = False,
 ) -> dict:
     """Generate AI summary for a page.
 
@@ -374,8 +375,8 @@ def summarize_page(
         "根据当前页面数据, 生成简洁的分析报告。\n\n"
         "输出格式必须是JSON:\n"
         "{\n"
-        '  "conclusions": ["3条关键结论, 每条25字以内"],\n'
-        '  "suggestions": ["2条可执行建议, 每条30字以内"]\n'
+        '  "conclusions": ["4到5条关键结论, 每条60字以内"],\n'
+        '  "suggestions": ["3到4条可执行建议, 每条60字以内"]\n'
         "}\n"
         "只输出JSON, 不要其他文字。"
     )
@@ -383,7 +384,7 @@ def summarize_page(
     user_prompt = f"""页面类型: {page_type}
 当前数据: {json.dumps(page_data, ensure_ascii=False)}
 
-请分析页面数据, 输出3条关键结论和2条建议。"""
+请分析页面数据, 输出4到5条关键结论和3到4条建议。"""
 
     # Use system-level API key + provider as fallback when user hasn't configured
     effective_key = api_key or settings.DASHSCOPE_API_KEY or None
@@ -394,6 +395,8 @@ def summarize_page(
     # failures for 15+ seconds before falling back.
     if _is_placeholder_key(effective_key) or _is_placeholder_key(api_key):
         logger.info("AI summary: API key is a placeholder, using local fallback immediately")
+        if raise_on_error:
+            raise ValueError("API key not configured")
         fallback = fallback_summary(page_type, page_data)
         fallback.update({**model_status, "mode": "local_fallback", "billing": "no_remote_charge"})
         return fallback
@@ -402,7 +405,7 @@ def summarize_page(
         result = chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=effective_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
+        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=effective_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=768)
 
         # Try to parse JSON from response
         result = result.strip()
@@ -413,6 +416,8 @@ def summarize_page(
         return parsed
     except Exception as e:
         logger.warning(f"AI summary failed, using fallback: {e}")
+        if raise_on_error:
+            raise
         fallback = fallback_summary(page_type, page_data)
         fallback_mode = model_status["mode"] if model_status["mode"] in {"key_unbound", "provider_mismatch"} else "local_fallback"
         fallback.update({**model_status, "mode": fallback_mode, "billing": "no_remote_charge"})
@@ -639,6 +644,7 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
         faulty = data.get("faulty", 0)
         avg_hi = data.get("avgHi", "--")
         mtbf = data.get("mtbfHours")
+        mttr = data.get("mttrHours")
 
         conclusions = []
         if total > 0:
@@ -648,6 +654,10 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
             conclusions.append(f"{warning}台风机处于预警状态，健康指数偏低需关注")
         if faulty > 0:
             conclusions.append(f"{faulty}台风机处于故障状态，需立即处理")
+        if avg_hi not in (None, "--", 0, "0"):
+            conclusions.append(f"全场平均健康指数约{avg_hi}，可作为巡检优先级排序依据")
+        if mtbf and mtbf > 0:
+            conclusions.append(f"当前MTBF约{mtbf:.0f}h，反映全场平均故障间隔水平")
         if not conclusions:
             conclusions.append("风场运行数据正常，暂无异常")
 
@@ -658,8 +668,11 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
             suggestions.append(f"对{warning}台预警风机安排近期巡检，检查HI下降原因")
         if mtbf and mtbf > 0:
             suggestions.append(f"当前MTBF约{mtbf:.0f}h，合理安排预防性维护可进一步提高可靠性")
+        if mttr and mttr > 0:
+            suggestions.append(f"当前MTTR约{mttr:.1f}h，建议复盘长耗时维修环节")
         if not suggestions:
             suggestions.append("保持当前运维频率，持续监测HI变化趋势")
+        suggestions.append("结合地图分布和HI趋势筛选重点风机，形成下一轮巡检清单")
 
         return {"conclusions": conclusions, "suggestions": suggestions}
 

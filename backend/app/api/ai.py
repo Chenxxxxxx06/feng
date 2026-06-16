@@ -50,7 +50,7 @@ def _classify_ai_error(exc: Exception) -> tuple[str, str]:
 
     if status_code in (401, 403) or any(token in lower for token in ("invalid api key", "unauthorized", "forbidden", "authentication")):
         return "upstream_auth_failed", "AI供应商鉴权失败，请检查 API KEY 是否正确、是否属于当前模型供应商。"
-    if status_code == 404 or "model_not_found" in lower or "model not found" in lower:
+    if status_code == 404 or any(token in lower for token in ("model_not_found", "model not found", "model does not exist", "model not exist", "invalid model")):
         return "model_not_found", "模型名称不可用，请检查系统设置中的模型ID或切换到供应商支持的模型。"
     if status_code == 429 or "rate limit" in lower or "quota" in lower or "insufficient" in lower:
         return "upstream_rate_limited", "AI供应商限流或额度不足，请稍后重试或检查账户余额/配额。"
@@ -200,28 +200,91 @@ def _json_line(payload: dict) -> str:
 @router.post("/summary", response_model=AISummaryResponse)
 async def generate_summary(
     data: AISummaryRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Generate AI summary for a page.
 
     Uses Qwen API with fallback to local summary.
     """
+    session_provider: Optional[AIProviderConfig] = None
+    if data.provider_config_id:
+        provider_result = await db.execute(
+            select(AIProviderConfig).where(
+                AIProviderConfig.id == data.provider_config_id,
+                AIProviderConfig.user_id == current_user.id,
+            )
+        )
+        session_provider = provider_result.scalar_one_or_none()
+        if not session_provider:
+            from app.services.qwen_client import fallback_summary
+            fallback = fallback_summary(data.page_type, data.page_data)
+            return AISummaryResponse(
+                **fallback,
+                status="error",
+                error_code="ai_provider_not_found",
+                error_message="当前选择的AI供应商配置不存在，请重新选择供应商。",
+                model_status={},
+            )
+        if not session_provider.enabled:
+            from app.services.qwen_client import fallback_summary
+            fallback = fallback_summary(data.page_type, data.page_data)
+            return AISummaryResponse(
+                **fallback,
+                status="error",
+                error_code="ai_provider_disabled",
+                error_message="当前选择的AI供应商已停用，请在系统设置中启用或选择其他供应商。",
+                model_status={},
+            )
+
+    effective_model = (data.model or session_provider.default_model) if session_provider else (data.model or current_user.model_preference)
+    effective_key = session_provider.api_key if session_provider else current_user.api_key
+    effective_provider = (session_provider.display_name or session_provider.provider) if session_provider else current_user.api_provider
+    effective_base_url = session_provider.base_url if session_provider else current_user.api_base_url
+    model_status = describe_model(
+        effective_model,
+        effective_key,
+        effective_provider,
+        effective_base_url,
+    )
+    if session_provider:
+        model_status.update({
+            "provider": session_provider.display_name or session_provider.provider,
+            "api_provider": session_provider.display_name or session_provider.provider,
+            "model": effective_model,
+            "has_api_key": bool(effective_key),
+        })
+
     try:
         summary = await asyncio.to_thread(
             summarize_page,
             data.page_type,
             data.page_data,
-            model=current_user.model_preference,
-            api_key=current_user.api_key,
-            api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
+            model=effective_model,
+            api_key=effective_key,
+            api_provider=effective_provider,
+            base_url=effective_base_url,
+            raise_on_error=True,
         )
-        return AISummaryResponse(**summary)
+        return AISummaryResponse(
+            **summary,
+            status="success",
+            model_status=model_status,
+        )
     except Exception as e:
-        logger.warning(f"AI summary failed, using fallback: {e}")
-        # Fallback to local summary
+        error_code, error_message = _classify_ai_error(e)
+        logger.warning(f"AI summary failed [{error_code}]: {_safe_ai_error_message(e)}")
         from app.services.qwen_client import fallback_summary
-        return AISummaryResponse(**fallback_summary(data.page_type, data.page_data))
+        fallback = fallback_summary(data.page_type, data.page_data)
+        fallback_mode = model_status["mode"] if model_status.get("mode") in {"key_unbound", "provider_mismatch"} else "local_fallback"
+        return AISummaryResponse(
+            **fallback,
+            status="error",
+            error_code=error_code,
+            error_message=error_message,
+            model_status={**model_status, "mode": fallback_mode},
+            warnings=["summary_ai_failed_local_fallback"],
+        )
 
 
 @router.post("/analyze-fault", response_model=AIFaultAnalysisResponse)
