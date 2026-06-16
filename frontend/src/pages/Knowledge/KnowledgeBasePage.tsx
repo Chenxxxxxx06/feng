@@ -53,6 +53,13 @@ interface GraphNode {
   downtime_days?: number;
 }
 
+interface GraphEdge {
+  source: string;
+  target: string;
+  label: string;
+  type?: string;
+}
+
 interface GraphData {
   stats?: {
     active_faults: number;
@@ -65,7 +72,7 @@ interface GraphData {
     regions?: string[];
   };
   nodes: GraphNode[];
-  edges: { source: string; target: string; label: string }[];
+  edges: GraphEdge[];
   fault_type?: string;
 }
 
@@ -165,6 +172,53 @@ const normalizeNode = (node: FaultNode): FaultNode => ({
 });
 
 const isPendingReview = (node: FaultNode) => node.source === 'ai_extracted' && !node.verified;
+
+const GRAPH_EDGE_COLOR: Record<string, string> = {
+  fault_record: '#58a6ff',
+  workorder: '#d29922',
+  personnel: '#79c0ff',
+  symptom: '#f0883e',
+  root_cause: '#f85149',
+  solution: '#3fb950',
+  spare_part: '#a371f7',
+  case_record: '#8b949e',
+  related_fault: '#d29922',
+  default: '#30363d',
+};
+
+const graphNodeSymbol = (view: 'topology' | 'knowledge', category: string) => {
+  if (view === 'topology') {
+    return {
+      turbine: 'circle',
+      fault_record: 'diamond',
+      workorder: 'roundRect',
+      personnel: 'triangle',
+    }[category] || 'circle';
+  }
+
+  return {
+    fault: 'roundRect',
+    symptom: 'circle',
+    root_cause: 'diamond',
+    solution: 'roundRect',
+    spare_part: 'rect',
+    case_record: 'triangle',
+  }[category] || 'circle';
+};
+
+const inferGraphEdgeType = (sourceCategory?: string, targetCategory?: string) => {
+  if (!sourceCategory || !targetCategory) return 'default';
+  if (sourceCategory === 'turbine' && targetCategory === 'fault_record') return 'fault_record';
+  if (sourceCategory === 'fault_record' && targetCategory === 'workorder') return 'workorder';
+  if (sourceCategory === 'workorder' && targetCategory === 'personnel') return 'personnel';
+  if (sourceCategory === 'fault' && targetCategory === 'symptom') return 'symptom';
+  if (sourceCategory === 'fault' && targetCategory === 'root_cause') return 'root_cause';
+  if (sourceCategory === 'fault' && targetCategory === 'solution') return 'solution';
+  if (sourceCategory === 'fault' && targetCategory === 'spare_part') return 'spare_part';
+  if (sourceCategory === 'fault' && targetCategory === 'case_record') return 'case_record';
+  if (sourceCategory === 'fault' && targetCategory === 'fault') return 'related_fault';
+  return 'default';
+};
 
 export default function KnowledgeBasePage() {
   const [search, setSearch] = useState('');
@@ -279,12 +333,14 @@ export default function KnowledgeBasePage() {
   const buildOption = useCallback((data: GraphData) => {
     const isTopo = graphView === 'topology';
     const cats = [...new Set(data.nodes.map(n => n.category))];
+    const nodeCategoryById = new Map(data.nodes.map(n => [n.id, n.category]));
 
     const nodeData = data.nodes.map(n => {
       let color = CAT_COLORS[n.category] || '#8b949e';
       let borderColor = 'transparent';
       let borderW = 0;
       let shadow = 0;
+      const isRoot = !isTopo && n.category === 'fault';
 
       if (isTopo) {
         if (n.category === 'turbine') {
@@ -302,17 +358,27 @@ export default function KnowledgeBasePage() {
         if (n.category === 'workorder') {
           color = STATUS_COLOR[n.status || 'pending'] || color;
         }
-      } else if (n.category === 'fault') {
+      } else if (isRoot) {
         color = STATUS_COLOR[n.severity || 'medium'] || color;
         borderColor = color;
         borderW = 3;
-        shadow = 12;
+        shadow = 18;
+      } else if (!isTopo) {
+        borderColor = 'rgba(233,237,245,0.18)';
+        borderW = 1;
+        shadow = 6;
       }
 
       return {
         ...n,
+        symbol: graphNodeSymbol(graphView, n.category),
         itemStyle: { color, borderColor, borderWidth: borderW, shadowBlur: shadow, shadowColor: color },
-        symbolSize: n.symbolSize,
+        symbolSize: isRoot ? Math.max(n.symbolSize, 62) : n.symbolSize,
+        label: {
+          color: isRoot ? '#ffffff' : '#c9d1d9',
+          fontSize: isRoot ? 12 : (isTopo ? 11 : 10),
+          fontWeight: isRoot ? 700 : 500,
+        },
       };
     });
 
@@ -340,9 +406,11 @@ export default function KnowledgeBasePage() {
         },
       },
       legend: [{
-        data: legendCats.map(c => ({ name: c, icon: 'circle' })),
+        data: legendCats.map(c => ({ name: c, icon: graphNodeSymbol(graphView, c) })),
         bottom: 0,
+        itemGap: 14,
         textStyle: { color: '#8b949e', fontSize: 10 },
+        formatter: (name: string) => graphCategoryLabel(name),
       }],
       series: [{
         type: 'graph',
@@ -350,20 +418,48 @@ export default function KnowledgeBasePage() {
         roam: true,
         draggable: true,
         force: {
-          repulsion: isTopo ? 350 : 200,
-          edgeLength: isTopo ? [120, 400] : [60, 180],
-          gravity: isTopo ? 0.06 : 0.12,
+          repulsion: isTopo ? 350 : 260,
+          edgeLength: isTopo ? [120, 400] : [90, 220],
+          gravity: isTopo ? 0.06 : 0.08,
+          friction: 0.18,
         },
         data: nodeData,
-        links: data.edges.map(e => ({
-          source: e.source,
-          target: e.target,
-          label: { show: true, formatter: e.label, fontSize: 9, color: '#8b949e' },
-        })),
+        links: data.edges.map(e => {
+          const type = e.type || inferGraphEdgeType(nodeCategoryById.get(e.source), nodeCategoryById.get(e.target));
+          const color = GRAPH_EDGE_COLOR[type] || GRAPH_EDGE_COLOR.default;
+          return {
+            source: e.source,
+            target: e.target,
+            label: {
+              show: Boolean(e.label),
+              formatter: e.label,
+              fontSize: 9,
+              color,
+              backgroundColor: 'rgba(8,12,18,0.72)',
+              borderColor: 'rgba(255,255,255,0.06)',
+              borderWidth: 1,
+              borderRadius: 3,
+              padding: [2, 4],
+            },
+            lineStyle: {
+              color,
+              opacity: isTopo ? 0.45 : 0.62,
+              width: isTopo ? 1 : 1.4,
+              curveness: isTopo ? 0.05 : 0.22,
+            },
+          };
+        }),
         categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#8b949e' } })),
-        lineStyle: { color: '#30363d', curveness: isTopo ? 0.05 : 0.25, opacity: 0.5 },
-        label: { show: true, fontSize: isTopo ? 11 : 10, color: '#c9d1d9' },
-        emphasis: { focus: 'adjacency', lineStyle: { width: 3, color: '#58a6ff' } },
+        lineStyle: { color: '#30363d', curveness: isTopo ? 0.05 : 0.22, opacity: 0.5 },
+        label: { show: true, formatter: '{b}' },
+        edgeSymbol: isTopo ? ['none', 'none'] : ['none', 'arrow'],
+        edgeSymbolSize: isTopo ? 0 : 7,
+        emphasis: {
+          focus: 'adjacency',
+          blurScope: 'coordinateSystem',
+          label: { show: true },
+          lineStyle: { width: 3 },
+        },
       }],
     };
   }, [graphView]);
@@ -502,6 +598,25 @@ export default function KnowledgeBasePage() {
   };
 
   const gStats = graphData?.stats;
+  const graphSummary = useMemo(() => {
+    if (!graphData?.nodes?.length) return null;
+    const count = (categoryName: string) => graphData.nodes.filter(n => n.category === categoryName).length;
+    if (graphView === 'topology') {
+      return [
+        { label: '风机', value: count('turbine'), color: CAT_COLORS.turbine },
+        { label: '故障事件', value: count('fault_record'), color: CAT_COLORS.fault_record },
+        { label: '工单', value: count('workorder'), color: CAT_COLORS.workorder },
+        { label: '人员', value: count('personnel'), color: CAT_COLORS.personnel },
+      ];
+    }
+    return [
+      { label: '症状', value: count('symptom'), color: CAT_COLORS.symptom },
+      { label: '根因', value: count('root_cause'), color: CAT_COLORS.root_cause },
+      { label: '方案', value: count('solution'), color: CAT_COLORS.solution },
+      { label: '备件', value: count('spare_part'), color: CAT_COLORS.spare_part },
+      { label: '案例', value: count('case_record'), color: CAT_COLORS.case_record },
+    ];
+  }, [graphData, graphView]);
 
   return (
     <div className="flex h-full bg-bg-deep">
@@ -617,6 +732,28 @@ export default function KnowledgeBasePage() {
           </div>
         </div>
 
+        {graphSummary && (
+          <div className="flex items-center gap-3 border-b border-border-subtle bg-bg-panel/40 px-4 py-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+              {graphView === 'topology' ? '拓扑概览' : '知识链路'}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {graphSummary.map(item => (
+                <span key={item.label} className="inline-flex items-center gap-1.5 rounded border border-border-subtle bg-bg-card/70 px-2 py-1 text-[10px] text-text-secondary">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: item.color }} />
+                  {item.label}
+                  <b className="font-semibold text-text-primary">{item.value}</b>
+                </span>
+              ))}
+            </div>
+            {graphView === 'knowledge' && selectedFaultType && (
+              <span className="ml-auto truncate text-[10px] text-text-muted">
+                以「{selectedFaultType}」为中心展开症状、根因、方案、备件与案例
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="flex min-h-0 flex-1">
           {graphLoading ? (
             <div className="flex flex-1 items-center justify-center">
@@ -632,7 +769,10 @@ export default function KnowledgeBasePage() {
             </div>
           ) : graphData && graphData.nodes.length > 0 ? (
             <>
-              <div ref={chartRef} className="flex-1" />
+              <div className="relative flex-1 overflow-hidden bg-[radial-gradient(circle_at_50%_35%,rgba(56,139,253,0.12),transparent_34%),linear-gradient(180deg,rgba(13,19,30,0.7),rgba(8,12,18,0.92))]">
+                <div className="pointer-events-none absolute inset-0 opacity-[0.14] [background-image:linear-gradient(rgba(233,237,245,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(233,237,245,0.08)_1px,transparent_1px)] [background-size:32px_32px]" />
+                <div ref={chartRef} className="relative h-full w-full" />
+              </div>
               {graphNode && <NodeInfoPanel node={graphNode} view={graphView} onViewKnowledge={switchToKnowledge} onClose={() => setGraphNode(null)} />}
             </>
           ) : (
@@ -864,40 +1004,59 @@ function KnowledgeDetailDrawer({
 
 function NodeInfoPanel({ node, view, onViewKnowledge, onClose }: { node: GraphNode; view: string; onViewKnowledge: (ft: string) => void; onClose: () => void }) {
   const color = CAT_COLORS[node.category] || '#8b949e';
+  const metrics = [
+    node.fault_count !== undefined && node.fault_count > 0 ? { label: '活跃故障', value: `${node.fault_count} 个`, tone: 'text-accent-red' } : null,
+    node.confidence !== undefined ? { label: '置信度', value: `${Math.round(node.confidence * 100)}%`, tone: 'text-accent-cyan' } : null,
+    node.downtime_hours !== undefined && node.downtime_hours > 0 ? { label: '预计停机', value: `${node.downtime_hours}h`, tone: 'text-accent-yellow' } : null,
+    node.est_cost !== undefined && node.est_cost > 0 ? { label: '预估成本', value: `¥${node.est_cost.toLocaleString()}`, tone: 'text-accent-yellow' } : null,
+    node.quantity !== undefined ? { label: '数量', value: `x${node.quantity}`, tone: 'text-text-primary' } : null,
+    node.total_cost !== undefined && node.total_cost > 0 ? { label: '案例成本', value: `¥${node.total_cost.toLocaleString()}`, tone: 'text-accent-yellow' } : null,
+    node.downtime_days !== undefined && node.downtime_days > 0 ? { label: '停机天数', value: `${node.downtime_days}天`, tone: 'text-accent-yellow' } : null,
+  ].filter(Boolean) as { label: string; value: string; tone: string }[];
+
   return (
-    <div className="w-56 flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card/95 p-4 text-xs">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ background: color }} />
-        <span className="text-[10px] font-medium uppercase text-text-muted">{graphCategoryLabel(node.category)}</span>
-        {node.active && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-red" />}
+    <div className="w-72 flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card/95 p-4 text-xs shadow-[-18px_0_36px_rgba(0,0,0,0.18)]">
+      <div className="mb-4 rounded-lg border border-border-subtle bg-bg-deep/70 p-3">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="h-3 w-3 flex-shrink-0 rounded-full shadow-[0_0_12px_currentColor]" style={{ background: color, color }} />
+          <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{graphCategoryLabel(node.category)}</span>
+          {node.active && <span className="ml-auto rounded-full border border-accent-red/30 bg-accent-red/10 px-2 py-0.5 text-[10px] text-accent-red">活跃</span>}
+        </div>
+
+        <p className="text-sm font-semibold leading-snug text-text-primary">{node.name}</p>
       </div>
 
-      <p className="mb-3 text-sm font-semibold leading-tight">{node.name}</p>
+      {metrics.length > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          {metrics.map(item => (
+            <div key={item.label} className="rounded-lg border border-border-subtle bg-bg-deep/55 px-2 py-2">
+              <p className="text-[10px] text-text-muted">{item.label}</p>
+              <p className={`mt-1 text-sm font-semibold ${item.tone}`}>{item.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
-      <div className="space-y-1.5 text-text-secondary">
+      <div className="space-y-1.5 rounded-lg border border-border-subtle bg-bg-deep/45 p-3 text-text-secondary">
         {node.status_icon && <div><span className="text-text-muted">状态:</span> {node.status_icon} {node.status_cn || node.status}</div>}
         {!node.status_icon && node.status_cn && <div><span className="text-text-muted">状态:</span> {node.status_cn}</div>}
         {!node.status_icon && !node.status_cn && node.status && <div><span className="text-text-muted">状态:</span> {node.status}</div>}
         {node.region && <div><span className="text-text-muted">区域:</span> {node.region}</div>}
-        {node.fault_count !== undefined && node.fault_count > 0 && <div><span className="text-text-muted">活跃故障:</span> <span className="text-accent-red">{node.fault_count} 个</span></div>}
         {node.detected_at && <div><span className="text-text-muted">发现:</span> {node.detected_at}</div>}
         {node.assignee && <div><span className="text-text-muted">负责人:</span> {node.assignee}</div>}
         {node.severity_cn && <div><span className="text-text-muted">严重度:</span> {node.severity_cn}</div>}
         {node.difficulty && <div><span className="text-text-muted">难度:</span> {DIFFICULTY[node.difficulty] || node.difficulty}</div>}
-        {node.downtime_hours !== undefined && node.downtime_hours > 0 && <div><span className="text-text-muted">停机:</span> {node.downtime_hours}h</div>}
-        {node.est_cost !== undefined && node.est_cost > 0 && <div><span className="text-text-muted">成本:</span> ¥{node.est_cost.toLocaleString()}</div>}
-        {node.quantity !== undefined && <div><span className="text-text-muted">数量:</span> x{node.quantity}</div>}
         {node.threshold && <div><span className="text-text-muted">阈值:</span> {node.threshold}{node.unit ? ` ${node.unit}` : ''}</div>}
-        {node.confidence !== undefined && <div><span className="text-text-muted">置信度:</span> {Math.round(node.confidence * 100)}%</div>}
+        {node.resolution && <div><span className="text-text-muted">处理结果:</span> {node.resolution}</div>}
       </div>
 
       {view === 'topology' && node.category === 'fault_record' && node.fault_type && (
-        <button onClick={() => onViewKnowledge(node.fault_type!)} className="mt-3 w-full rounded bg-accent-blue/10 py-1.5 text-[10px] text-accent-blue hover:bg-accent-blue/20">
+        <button onClick={() => onViewKnowledge(node.fault_type!)} className="mt-3 w-full rounded-lg border border-accent-blue/30 bg-accent-blue/10 py-2 text-[10px] font-medium text-accent-blue hover:bg-accent-blue/20">
           查看 {node.fault_type} 知识网络
         </button>
       )}
 
-      <button onClick={onClose} className="mt-2 w-full border-t border-border-subtle pt-2 text-[10px] text-text-muted hover:text-text-primary">关闭</button>
+      <button onClick={onClose} className="mt-2 w-full border-t border-border-subtle pt-3 text-[10px] text-text-muted hover:text-text-primary">关闭</button>
     </div>
   );
 }
