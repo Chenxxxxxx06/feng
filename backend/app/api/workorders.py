@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from smtplib import SMTPRecipientsRefused
@@ -347,7 +348,8 @@ async def _try_ai_analysis(
 
     try:
         anomalies = _detect_anomalies(scada_records, turbine.power_mw or 2.0)
-        diagnosis = diagnose_fault(
+        diagnosis = await asyncio.to_thread(
+            diagnose_fault,
             turbine_data,
             fault_data,
             model=user.model_preference,

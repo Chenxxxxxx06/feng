@@ -402,7 +402,8 @@ async def agent_task(
     # Try AI analysis
     try:
         from app.services.qwen_client import copilot_chat
-        ai_reply = copilot_chat(
+        ai_reply = await asyncio.to_thread(
+            copilot_chat,
             messages=[{"role": "user", "content": task_desc}],
             page_context=request.page_context or {},
             model=current_user.model_preference,

@@ -3,6 +3,7 @@
 Provides AI-powered analysis using Qwen API with fallback to local analysis.
 """
 
+import asyncio
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -35,7 +36,8 @@ async def generate_summary(
     Uses Qwen API with fallback to local summary.
     """
     try:
-        summary = summarize_page(
+        summary = await asyncio.to_thread(
+            summarize_page,
             data.page_type,
             data.page_data,
             model=current_user.model_preference,
@@ -117,7 +119,8 @@ async def analyze_fault(
     ]
 
     try:
-        diagnosis = diagnose_fault(
+        diagnosis = await asyncio.to_thread(
+            diagnose_fault,
             turbine_data,
             fault_data,
             model=current_user.model_preference,
@@ -172,7 +175,8 @@ async def copilot_endpoint(
     if data.screenshot:
         try:
             from app.services.qwen_client import describe_screenshot
-            screenshot_description = describe_screenshot(
+            screenshot_description = await asyncio.to_thread(
+                describe_screenshot,
                 screenshot_base64=data.screenshot,
                 page_type=page_context.get("page_type", "unknown"),
                 api_key=current_user.api_key,
@@ -184,7 +188,8 @@ async def copilot_endpoint(
             logger.warning(f"Screenshot analysis failed, proceeding text-only: {e}")
 
     try:
-        reply = copilot_chat(
+        reply = await asyncio.to_thread(
+            copilot_chat,
             messages=data.messages,
             page_context=page_context,
             knowledge_results=data.knowledge_results,
