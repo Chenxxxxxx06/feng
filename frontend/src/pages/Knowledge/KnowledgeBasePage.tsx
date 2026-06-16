@@ -416,7 +416,7 @@ export default function KnowledgeBasePage() {
         type: 'graph',
         layout: 'force',
         roam: true,
-        draggable: true,
+        draggable: false,
         force: {
           repulsion: isTopo ? 350 : 260,
           edgeLength: isTopo ? [120, 400] : [90, 220],
@@ -619,8 +619,8 @@ export default function KnowledgeBasePage() {
   }, [graphData, graphView]);
 
   return (
-    <div className="flex h-full bg-bg-deep">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 bg-bg-deep">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
         <div className="border-b border-border-subtle bg-bg-panel/90 p-4">
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
@@ -754,7 +754,7 @@ export default function KnowledgeBasePage() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-[560px] flex-1">
           {graphLoading ? (
             <div className="flex flex-1 items-center justify-center">
               <div className="flex flex-col items-center gap-3">
