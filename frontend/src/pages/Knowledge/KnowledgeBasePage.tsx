@@ -621,8 +621,8 @@ export default function KnowledgeBasePage() {
   return (
     <div className="flex h-full min-h-0 bg-bg-deep">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-        <div className="border-b border-border-subtle bg-bg-panel/90 p-4">
-          <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="border-b border-border-subtle bg-bg-panel/90 p-3">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-lg font-bold text-text-primary">故障百科</h1>
               <p className="mt-1 text-xs text-text-muted">沉淀故障症状、根因、方案和案例，并对 AI 抽取知识进行审核。</p>
@@ -632,16 +632,16 @@ export default function KnowledgeBasePage() {
             </button>
           </div>
 
-          <div className="mb-4 grid grid-cols-4 gap-3">
+          <div className="mt-3 grid grid-cols-4 gap-2">
             <SummaryTile label="知识节点" value={stats.total} tone="blue" />
             <SummaryTile label="高危知识" value={stats.high} tone="red" />
             <SummaryTile label="待审核" value={stats.pendingReview} tone="yellow" active={reviewFilter === 'pending'} onClick={() => setReviewFilter('pending')} />
             <SummaryTile label="AI 提取" value={stats.aiExtracted} tone="cyan" />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
-              className="min-w-[240px] flex-1 rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm placeholder-text-muted focus:border-accent-blue focus:outline-none"
+              className="min-w-[260px] flex-1 rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm placeholder-text-muted focus:border-accent-blue focus:outline-none"
               placeholder="搜索故障名称、症状、根因或方案"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -678,7 +678,6 @@ export default function KnowledgeBasePage() {
             )}
           </div>
         </div>
-
         {gStats && graphView === 'topology' && (
           <div className="flex items-center gap-4 border-b border-border-subtle bg-bg-deep/50 px-4 py-2">
             <StatBadge label="活跃故障" value={gStats.active_faults} color="text-accent-red" />
