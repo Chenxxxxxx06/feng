@@ -429,10 +429,19 @@ class AIProviderTestRequest(BaseModel):
 class AISummaryRequest(BaseModel):
     page_type: str = Field(min_length=1, max_length=64)
     page_data: dict
+    provider_config_id: Optional[int] = Field(default=None, gt=0)
+    model: Optional[str] = Field(default=None, max_length=128)
+
+    model_config = {"protected_namespaces": ()}
 
 class AISummaryResponse(BaseModel):
     conclusions: list[str]
     suggestions: list[str]
+    status: str = "success"
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    model_status: Optional[dict] = None
+    warnings: list[str] = Field(default_factory=list)
     provider: Optional[str] = None
     api_provider: Optional[str] = None
     model: Optional[str] = None
@@ -441,6 +450,8 @@ class AISummaryResponse(BaseModel):
     billing: Optional[str] = None
     requires_api_key: Optional[bool] = None
     has_api_key: Optional[bool] = None
+
+    model_config = {"protected_namespaces": ()}
 
 class AIFaultAnalysisRequest(BaseModel):
     turbine_id: int = Field(gt=0)
