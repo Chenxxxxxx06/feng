@@ -186,6 +186,13 @@ const GRAPH_EDGE_COLOR: Record<string, string> = {
   default: '#30363d',
 };
 
+const topologyEdgeLabel = (type: string, label: string) => {
+  if (type === 'fault_record') return label ? `发生 · ${label}` : '发生故障';
+  if (type === 'workorder') return label?.startsWith('工单') ? '生成工单' : '关联工单';
+  if (type === 'personnel') return '负责人';
+  return label || '关联';
+};
+
 const graphNodeSymbol = (view: 'topology' | 'knowledge', category: string) => {
   if (view === 'topology') {
     return {
@@ -210,6 +217,7 @@ const inferGraphEdgeType = (sourceCategory?: string, targetCategory?: string) =>
   if (!sourceCategory || !targetCategory) return 'default';
   if (sourceCategory === 'turbine' && targetCategory === 'fault_record') return 'fault_record';
   if (sourceCategory === 'fault_record' && targetCategory === 'workorder') return 'workorder';
+  if (sourceCategory === 'turbine' && targetCategory === 'workorder') return 'workorder';
   if (sourceCategory === 'workorder' && targetCategory === 'personnel') return 'personnel';
   if (sourceCategory === 'fault' && targetCategory === 'symptom') return 'symptom';
   if (sourceCategory === 'fault' && targetCategory === 'root_cause') return 'root_cause';
@@ -347,16 +355,25 @@ export default function KnowledgeBasePage() {
           color = STATUS_COLOR[n.status || 'normal'] || color;
           borderColor = color;
           borderW = 2;
+          if (n.status === 'warning' || n.status === 'fault' || (n.fault_count || 0) > 0) {
+            shadow = 14;
+          }
         }
         if (n.category === 'fault_record') {
           color = n.active ? '#da3633' : '#484f58';
           if (n.active) {
             borderColor = '#ff6b6b';
-            borderW = 1;
+            borderW = 3;
+            shadow = 18;
           }
         }
         if (n.category === 'workorder') {
           color = STATUS_COLOR[n.status || 'pending'] || color;
+          if (n.status === 'pending' || n.status === 'in_progress') {
+            borderColor = color;
+            borderW = 2;
+            shadow = 10;
+          }
         }
       } else if (isRoot) {
         color = STATUS_COLOR[n.severity || 'medium'] || color;
@@ -427,12 +444,13 @@ export default function KnowledgeBasePage() {
         links: data.edges.map(e => {
           const type = e.type || inferGraphEdgeType(nodeCategoryById.get(e.source), nodeCategoryById.get(e.target));
           const color = GRAPH_EDGE_COLOR[type] || GRAPH_EDGE_COLOR.default;
+          const edgeLabel = isTopo ? topologyEdgeLabel(type, e.label) : e.label;
           return {
             source: e.source,
             target: e.target,
             label: {
-              show: Boolean(e.label),
-              formatter: e.label,
+              show: Boolean(edgeLabel),
+              formatter: edgeLabel,
               fontSize: 9,
               color,
               backgroundColor: 'rgba(8,12,18,0.72)',
@@ -452,8 +470,8 @@ export default function KnowledgeBasePage() {
         categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#8b949e' } })),
         lineStyle: { color: '#30363d', curveness: isTopo ? 0.05 : 0.22, opacity: 0.5 },
         label: { show: true, formatter: '{b}' },
-        edgeSymbol: isTopo ? ['none', 'none'] : ['none', 'arrow'],
-        edgeSymbolSize: isTopo ? 0 : 7,
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: isTopo ? 6 : 7,
         emphasis: {
           focus: 'adjacency',
           blurScope: 'coordinateSystem',
@@ -730,6 +748,12 @@ export default function KnowledgeBasePage() {
             </button>
           </div>
         </div>
+
+        {graphView === 'topology' && (
+          <div className="border-b border-border-subtle bg-accent-blue/5 px-4 py-2 text-[10px] text-text-muted">
+            现场链路：风机 → 故障事件 → 工单 → 负责人；高亮节点表示当前需要关注的异常或待处理事项。
+          </div>
+        )}
 
         {graphSummary && (
           <div className="flex items-center gap-3 border-b border-border-subtle bg-bg-panel/40 px-4 py-2">
