@@ -50,10 +50,12 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const executor = useMemo(() => {
     const shot = async () => {
       try {
-        // Use a small element to avoid capturing the whole page (which may include the FAB itself)
         const main = document.querySelector('main') || document.body;
-        const canvas = await html2canvas(main as HTMLElement, { scale: 0.5, logging: false });
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        const canvas = await Promise.race([
+          html2canvas(main as HTMLElement, { scale: 0.4, logging: false, useCORS: false }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('screenshot timeout')), 6000)),
+        ]);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
         return dataUrl.split(',')[1] || null;
       } catch { return null; }
     };
