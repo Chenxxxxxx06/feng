@@ -35,7 +35,8 @@ async def multi_agent_diagnose(
     if request.screenshot:
         try:
             from app.services.qwen_client import describe_screenshot
-            screenshot_description = describe_screenshot(
+            screenshot_description = await asyncio.to_thread(
+                describe_screenshot,
                 screenshot_base64=request.screenshot,
                 page_type=request.page_context.get("page_type", "unknown") if request.page_context else "unknown",
                 api_key=current_user.api_key,
