@@ -627,7 +627,7 @@ async def _latest_workorders_by_fault(db: AsyncSession, fault_ids: list[int]) ->
         return {}
     result = await db.execute(
         select(WorkOrder)
-        .where(WorkOrder.fault_id.in_(fault_ids))
+        .where(WorkOrder.fault_id.in_(fault_ids), WorkOrder.deleted_at.is_(None))
         .order_by(WorkOrder.fault_id.asc(), WorkOrder.created_at.desc())
     )
     mapping: dict[int, WorkOrder] = {}

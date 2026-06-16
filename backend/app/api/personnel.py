@@ -23,6 +23,7 @@ async def _active_workorder_count(db: AsyncSession, assignee: str) -> int:
         select(func.count(WorkOrder.id)).where(
             WorkOrder.assignee == assignee,
             WorkOrder.status.notin_(["completed", "closed"]),
+            WorkOrder.deleted_at.is_(None),
         )
     )
     return int(result.scalar_one())
