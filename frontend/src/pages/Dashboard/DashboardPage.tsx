@@ -174,6 +174,7 @@ export default function DashboardPage() {
                 {/* Quick Actions */}
                 <div className="space-y-2 pt-1">
                   <Link to={`/turbine/${detail.id}`}
+                    data-action="view-turbine-detail"
                     className="block w-full text-center py-2.5 rounded-lg text-xs font-medium transition-all"
                     style={{ background: 'rgba(56,139,253,0.1)', border: '1px solid rgba(56,139,253,0.3)', color: '#388bfd' }}>
                     查看单机详情 →
@@ -237,6 +238,9 @@ function QuickList({ turbines, selectedId, onSelect }: { turbines: TurbineDetail
       <div className="flex-1 overflow-auto space-y-0.5">
         {turbines.slice(0, 8).map((t) => (
           <div key={t.id} onClick={() => onSelect(t.id)}
+            data-turbine-id={t.id}
+            data-turbine-name={t.name}
+            data-action="select-turbine"
             className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[11px] transition-all ${
               selectedId === t.id ? 'bg-bg-hover' : 'hover:bg-bg-hover/50'
             }`}>
