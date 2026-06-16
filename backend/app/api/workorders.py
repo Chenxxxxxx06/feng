@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from smtplib import SMTPRecipientsRefused
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ai import _detect_anomalies, _generate_local_diagnosis
@@ -433,7 +433,7 @@ async def list_workorders(
 ):
     q = select(WorkOrder).order_by(WorkOrder.created_at.desc())
     if not include_deleted:
-        q = q.where(or_(WorkOrder.deleted_at.is_(None), WorkOrder.status == "cancelled"))
+        q = q.where(WorkOrder.deleted_at.is_(None))
     if status:
         q = q.where(WorkOrder.status == status)
     if assignee:
@@ -450,7 +450,9 @@ async def list_workorders(
 
 @router.get("/{workorder_id}", response_model=WorkOrderDetailResponse)
 async def get_workorder(workorder_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -478,6 +480,10 @@ async def create_workorder(
     user: User = Depends(get_current_user),
 ):
     payload = data.model_dump(exclude_none=True)
+    turbine = await db.get(Turbine, data.turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
     if data.fault_id is not None:
         fault = await db.get(Fault, data.fault_id)
         if not fault:
@@ -510,7 +516,9 @@ async def update_workorder(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -557,28 +565,28 @@ async def update_workorder(
 
 
 @router.delete("/{workorder_id}", response_model=WorkOrderResponse)
-async def cancel_workorder(
+async def delete_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
 
-    before_status = wo.status
     now = _utc_now()
-    wo.status = "cancelled"
-    wo.cancelled_at = now
+    wo.deleted_at = now
     wo.updated_at = now
     await _add_record(
         db,
         wo,
         user,
-        "cancelled",
-        content="Work order cancelled",
-        before_status=before_status,
+        "deleted",
+        content="Work order deleted",
+        before_status=wo.status,
         after_status=wo.status,
     )
 
@@ -594,7 +602,9 @@ async def add_workorder_record(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -629,7 +639,9 @@ async def send_workorder_email(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
