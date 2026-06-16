@@ -320,6 +320,11 @@ export default function SettingsPage() {
     };
     if (apiKey.trim()) payload.api_key = apiKey.trim();
     if (apiBaseUrl.trim()) payload.api_base_url = apiBaseUrl.trim();
+    // Auto-detect provider from model options so backend catalog routing works
+    const matchedOption = getModelOption(model);
+    if (matchedOption) {
+      payload.api_provider = matchedOption.provider;
+    }
 
     try {
       setProfileError('');
@@ -902,6 +907,7 @@ function AISettingsSection({
     const preset = aiPresets.find(p => p.name === name);
     if (!preset) return;
     onModelChange(preset.model);
+    onApiBaseUrlChange(preset.baseUrl);
     onApiKeyChange('');
   };
 

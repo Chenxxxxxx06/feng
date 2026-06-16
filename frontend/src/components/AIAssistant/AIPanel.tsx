@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import api from '../../services/api';
 import type { AISummary } from '../../types';
 
@@ -10,14 +10,16 @@ interface Props {
 export default function AIPanel({ pageType, pageData }: Props) {
   const [summary, setSummary] = useState<AISummary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [triggered, setTriggered] = useState(false);
 
-  useEffect(() => {
+  const fetchSummary = useCallback(() => {
+    setTriggered(true);
     setLoading(true);
     api.post('/ai/summary', { page_type: pageType, page_data: pageData || {} })
       .then(({ data }) => setSummary(data))
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
-  }, [pageType, JSON.stringify(pageData)]);
+  }, [pageType, pageData]);
 
   return (
     <div className="p-3 max-h-64 overflow-auto">
@@ -26,8 +28,15 @@ export default function AIPanel({ pageType, pageData }: Props) {
         <h4 className="text-xs font-medium text-text-secondary">AI 智能总结</h4>
       </div>
 
-      {loading ? (
-        <p className="text-xs text-text-muted">分析中...</p>
+      {!triggered ? (
+        <button
+          onClick={fetchSummary}
+          className="w-full rounded border border-accent-cyan/40 bg-accent-cyan/10 px-3 py-2 text-xs text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
+        >
+          🤖 生成AI总结
+        </button>
+      ) : loading ? (
+        <p className="text-xs text-text-muted animate-pulse">分析中...</p>
       ) : summary ? (
         <div className="space-y-2">
           <div>
