@@ -164,15 +164,15 @@ def _ensure_remote_available(config: AIModelConfig, api_key: Optional[str], api_
         raise ValueError(f"API key belongs to {api_provider}, but selected model requires {config.provider}")
 
 
-def get_client(api_key: Optional[str], base_url: str, timeout: float = 8.0) -> OpenAI:
+def get_client(api_key: Optional[str], base_url: str, timeout: float = 30.0) -> OpenAI:
     """Create an OpenAI-compatible client for the selected provider.
 
-    Uses a short timeout (default 8s) and disables retries so that
-    invalid API keys or unreachable endpoints fail fast instead of
-    blocking the caller for 15+ seconds.
+    Uses a bounded timeout (default 30s) and disables retries. Chat requests
+    may include tool planning plus answer generation, so the threshold needs
+    enough room for provider-side latency while still failing predictably.
     """
     http_client = DefaultHttpxClient(
-        timeout=httpx.Timeout(timeout, connect=5.0),
+        timeout=httpx.Timeout(timeout, connect=10.0),
     )
     return OpenAI(
         base_url=base_url,
@@ -295,6 +295,52 @@ def _gemini_chat(
     if not text:
         raise ValueError("Gemini response did not include text")
     return text
+
+
+def _build_copilot_messages(
+    messages: list[dict],
+    page_context: dict,
+    knowledge_results: Optional[list[str]] = None,
+    screenshot_description: Optional[str] = None,
+) -> list[dict]:
+    screenshot_section = ""
+    if screenshot_description:
+        screenshot_section = (
+            f"\n当前页面截图内容（由视觉模型分析）:\n"
+            f"{screenshot_description}\n"
+        )
+    structured_context = page_context.get("context_bundle")
+    structured_context_section = ""
+    if structured_context:
+        structured_context_section = (
+            "\n结构化上下文包（后端只读白名单工具生成，优先级高于页面零散字段）:\n"
+            f"{json.dumps(structured_context, ensure_ascii=False, default=str)[:7000]}\n"
+        )
+
+    task_prompt = (
+        f"当前页面上下文:\n"
+        f"- 页面: {page_context.get('page_type', 'unknown')}\n"
+        f"- 风机总数: {page_context.get('total_turbines', 0)}\n"
+        f"- 预警风机: {page_context.get('warning_count', 0)}\n"
+        f"- 故障风机: {page_context.get('fault_count', 0)}\n"
+        f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
+        f"{structured_context_section}"
+        f"{screenshot_section}"
+        f"\n"
+        f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
+        f"\n"
+        f"规则:\n"
+        f"1. 基于上下文给出准确回答\n"
+        f"2. 优先使用结构化上下文包中的结果；说明数据来源时使用业务名称，不要暴露内部工具函数名\n"
+        f'3. 涉及安全决策时提醒"建议人工复核"\n'
+        f"4. 回复简洁, 关键数据用数字\n"
+        f"5. 如果上下文信息不足, 诚实说明\n"
+        f"6. 如果有页面截图描述, 可作为页面状态补充，但不得覆盖结构化数据"
+    )
+    return [
+        {"role": "system", "content": _build_system_prompt(task_prompt)},
+        *messages,
+    ]
 
 
 def summarize_page(
@@ -438,6 +484,7 @@ def copilot_chat(
     api_provider: Optional[str] = None,
     base_url: Optional[str] = None,
     stream: bool = False,
+    raise_on_error: bool = False,
 ) -> str:
     """Multi-turn Copilot chat with page context, optional RAG results,
     and optional screenshot description.
@@ -453,41 +500,11 @@ def copilot_chat(
     Returns:
         AI response text
     """
-    screenshot_section = ""
-    if screenshot_description:
-        screenshot_section = (
-            f"\n当前页面截图内容（由视觉模型分析）:\n"
-            f"{screenshot_description}\n"
-        )
-
-    task_prompt = (
-        f"当前页面上下文:\n"
-        f"- 页面: {page_context.get('page_type', 'unknown')}\n"
-        f"- 风机总数: {page_context.get('total_turbines', 0)}\n"
-        f"- 预警风机: {page_context.get('warning_count', 0)}\n"
-        f"- 故障风机: {page_context.get('fault_count', 0)}\n"
-        f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
-        f"{screenshot_section}"
-        f"\n"
-        f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
-        f"\n"
-        f"规则:\n"
-        f"1. 基于上下文给出准确回答\n"
-        f'2. 涉及安全决策时提醒"建议人工复核"\n'
-        f"3. 回复简洁, 关键数据用数字\n"
-        f"4. 如果上下文信息不足, 诚实说明\n"
-        f"5. 如果有页面截图描述, 优先参考截图中的实时数据"
-    )
-    system_prompt = _build_system_prompt(task_prompt)
-
     try:
         eff_key = api_key or settings.DASHSCOPE_API_KEY or None
         eff_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if eff_key else None)
         return chat(
-            [
-                {"role": "system", "content": system_prompt},
-                *messages,
-            ],
+            _build_copilot_messages(messages, page_context, knowledge_results, screenshot_description),
             model=model or QWEN_CONFIG["default_model"],
             api_key=eff_key,
             api_provider=eff_provider if not base_url else None,
@@ -498,7 +515,45 @@ def copilot_chat(
         )
     except Exception as e:
         logger.warning(f"Copilot chat failed: {e}")
+        if raise_on_error:
+            raise
         return "抱歉, AI服务暂时不可用。请稍后重试。"
+
+
+def copilot_chat_stream(
+    messages: list[dict],
+    page_context: dict,
+    knowledge_results: Optional[list[str]] = None,
+    screenshot_description: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
+    base_url: Optional[str] = None,
+):
+    """Yield Copilot answer deltas from an OpenAI-compatible streaming response."""
+    eff_key = api_key or settings.DASHSCOPE_API_KEY or None
+    eff_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if eff_key else None)
+    response = chat(
+        _build_copilot_messages(messages, page_context, knowledge_results, screenshot_description),
+        model=model or QWEN_CONFIG["default_model"],
+        api_key=eff_key,
+        api_provider=eff_provider if not base_url else None,
+        base_url=base_url,
+        temperature=0.5,
+        max_tokens=1024,
+        stream=True,
+    )
+    if isinstance(response, str):
+        yield response
+        return
+    for chunk in response:
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        content = getattr(delta, "content", None) if delta else None
+        if content:
+            yield content
 
 
 def describe_screenshot(
