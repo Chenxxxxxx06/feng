@@ -333,6 +333,21 @@ class TestWorkOrders:
 
         response = await client.delete(f"/api/workorders/{wo_id}", headers=auth_headers)
         assert response.status_code == 200
+        assert response.json()["deleted_at"] is not None
+
+        list_resp = await client.get("/api/workorders/", headers=auth_headers)
+        assert all(wo["id"] != wo_id for wo in list_resp.json())
+
+        include_resp = await client.get("/api/workorders/?include_deleted=true", headers=auth_headers)
+        deleted = [wo for wo in include_resp.json() if wo["id"] == wo_id]
+        assert deleted and deleted[0]["deleted_at"] is not None
+
+        update_resp = await client.put(
+            f"/api/workorders/{wo_id}",
+            headers=auth_headers,
+            json={"status": "assigned"},
+        )
+        assert update_resp.status_code == 404
 
 
 # ============================================================
