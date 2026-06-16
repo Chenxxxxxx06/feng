@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
-from openai import OpenAI
+from openai import OpenAI, DefaultHttpxClient
 
 from app.config import get_settings
 
@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 
 # Load from environment
 settings = get_settings()
+
+# Patterns that indicate a placeholder / unconfigured API key
+_PLACEHOLDER_PATTERNS = (
+    "your-", "change-me", "changeme", "change_me", "replace-me",
+    "sk-your-", "your_", "placeholder", "xxxxxx", "test-key",
+    "your-dashscope", "your-openai", "your-deepseek",
+)
 
 QWEN_CONFIG = {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -79,6 +86,14 @@ MODEL_ALIASES = {
     "qwen3.5-flash": "qwen3.6-flash",
     "deepseek-v3": "deepseek-chat",
 }
+
+
+def _is_placeholder_key(key: Optional[str]) -> bool:
+    """Return True if the key looks like an unconfigured placeholder."""
+    if not key or not key.strip():
+        return True
+    lower = key.strip().lower()
+    return any(pat in lower for pat in _PLACEHOLDER_PATTERNS)
 
 
 def normalize_model_preference(model: Optional[str]) -> str:
@@ -149,9 +164,22 @@ def _ensure_remote_available(config: AIModelConfig, api_key: Optional[str], api_
         raise ValueError(f"API key belongs to {api_provider}, but selected model requires {config.provider}")
 
 
-def get_client(api_key: Optional[str], base_url: str) -> OpenAI:
-    """Create an OpenAI-compatible client for the selected provider."""
-    return OpenAI(base_url=base_url, api_key=api_key or "ollama")
+def get_client(api_key: Optional[str], base_url: str, timeout: float = 8.0) -> OpenAI:
+    """Create an OpenAI-compatible client for the selected provider.
+
+    Uses a short timeout (default 8s) and disables retries so that
+    invalid API keys or unreachable endpoints fail fast instead of
+    blocking the caller for 15+ seconds.
+    """
+    http_client = DefaultHttpxClient(
+        timeout=httpx.Timeout(timeout, connect=5.0),
+    )
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key or "ollama",
+        http_client=http_client,
+        max_retries=0,
+    )
 
 
 def chat(
@@ -315,6 +343,15 @@ def summarize_page(
     effective_key = api_key or settings.DASHSCOPE_API_KEY or None
     effective_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if effective_key else None)
 
+    # Short-circuit: placeholder key → skip network call entirely.
+    # Otherwise a fake key causes the OpenAI SDK to retry connection/auth
+    # failures for 15+ seconds before falling back.
+    if _is_placeholder_key(effective_key) or _is_placeholder_key(api_key):
+        logger.info("AI summary: API key is a placeholder, using local fallback immediately")
+        fallback = fallback_summary(page_type, page_data)
+        fallback.update({**model_status, "mode": "local_fallback", "billing": "no_remote_charge"})
+        return fallback
+
     try:
         result = chat([
             {"role": "system", "content": system_prompt},
@@ -353,7 +390,15 @@ def diagnose_fault(
     Returns:
         Diagnosis report text
     """
-    config = describe_model(model, api_key, api_provider, base_url)
+    # Apply same fallback logic as copilot_chat for consistency
+    effective_key = api_key or settings.DASHSCOPE_API_KEY or None
+    effective_provider = (
+        api_provider
+        if (api_key and api_provider)
+        else ("通义千问 DashScope" if effective_key else None)
+    )
+
+    config = describe_model(model, effective_key, effective_provider, base_url)
     if config["mode"] != "remote":
         raise ValueError(f"{config['provider']} API key is not ready for selected model")
 
@@ -375,7 +420,9 @@ def diagnose_fault(
         return chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model, api_key=api_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.5, max_tokens=512)
+        ], model=model, api_key=effective_key,
+           api_provider=effective_provider if not base_url else None,
+           base_url=base_url, temperature=0.5, max_tokens=512)
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
         raise
