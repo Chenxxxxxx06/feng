@@ -184,12 +184,25 @@ async def execute_agent_command(
     confidence = intent_data.get("confidence", 0.5)
     entities = intent_data.get("entities", {})
 
-    # 3. Resolve scene skills → atomic steps (action only)
+    # 3. Build atomic steps — prefer LLM direct output, fallback to resolver
     atomic_steps: list[AgentAtomicStep] = []
-    scene_skills_data: list[dict] = intent_data.get("scene_skills", []) if intent_type in ("action", "mixed") else []
-
-    if intent_type in ("action", "mixed") and scene_skills_data:
-        atomic_steps = _resolve_atomic_steps(scene_skills_data, entities)
+    scene_skills_data: list[dict] = []
+    if intent_type in ("action", "mixed"):
+        llm_steps: list[dict] = intent_data.get("atomic_steps", [])
+        if llm_steps:
+            # LLM already decomposed into atomic operations → use directly
+            for i, s in enumerate(llm_steps):
+                atomic_steps.append(AgentAtomicStep(
+                    order=s.get("order", i + 1),
+                    skill=s["skill"],
+                    params=s.get("params", {}),
+                    reason=s.get("reason", ""),
+                ))
+        else:
+            # Fallback: resolve scene_skills via hardcoded mapping
+            scene_skills_data = intent_data.get("scene_skills", [])
+            if scene_skills_data:
+                atomic_steps = _resolve_atomic_steps(scene_skills_data, entities)
 
     # 4. Clarification check
     requires_clarification = router.needs_clarification(intent_data)
