@@ -62,8 +62,38 @@ INTENT_ROUTER_PROMPT = """
 - intent_type="action"时，scene_skills非空，dispatch_query为空字符串，follow_up_analysis为空
 - intent_type="qa"或"diagnosis"时，scene_skills为空数组，dispatch_query为具体查询任务
 - intent_type="mixed"时，scene_skills非空（操作部分）+ follow_up_analysis非空（解读部分）
-- turbine_id必须从风机列表中匹配
+- turbine_id必须从风机列表中匹配（如"陕北A区"的风机取该区域任意一台）
 - confidence<0.7视为不确定
+
+## 核心规则：操作必须多步链（极其重要！）
+
+**任何用户操作都必须分解为2-4个Skill的有序列表**，因为单个Skill无法完成完整任务。
+思考路径：
+1. 我要去哪个页面？（导航Skill）
+2. 我要在页面上找什么/点什么？（定位Skill）
+3. 需要打开什么详情/弹窗？（交互Skill）
+
+常用多步链模板：
+- 查看某区域风机 → [NavigateToMonitor, LocateTurbineOnMap, OpenTurbineDetailPanel]
+- 打开某页面 → [导航到该页, OpenTurbineDetailPanel(如果有风机ID)]
+- 查看工单 → [GoToWorkOrder, OpenWorkOrderPreview(如果有责任人)]
+- 诊断风机 → [NavigateToDiagnosis, SelectTurbineInDiagnosis, RunAutoDetect]
+- 创建工单 → [GoToWorkOrder, CreateWorkOrder]
+- 筛选工单 → [GoToWorkOrder, FilterWorkOrders]
+- 刷新预测 → [NavigateToPrediction, RefreshRUL]
+- 查看知识库 → [NavigateToKnowledge]
+
+多步示例:
+"打开维修工单" → [GoToWorkOrder]（这是最简单的情况，1个Skill即可）
+"打开维修工单看看" → [GoToWorkOrder]
+"查看曲振华的工单" → [GoToWorkOrder, OpenWorkOrderPreview(assignee=曲振华)]
+"看看区域B有什么风机" → [NavigateToMonitor, LocateTurbineOnMap(区域B某风机), OpenTurbineDetailPanel]
+"给张三派个巡检工单" → [GoToWorkOrder, CreateWorkOrder]
+"诊断3号风机" → [NavigateToDiagnosis, SelectTurbineInDiagnosis(turbine_id=3), RunAutoDetect]
+"分析一下这个风机" → [NavigateToDiagnosis, SelectTurbineInDiagnosis, RunAutoDetect]  intent_type: mixed
+  follow_up_analysis: "查看诊断结果并总结关键故障信息"
+"打开风场监控看看整体状态" → [NavigateToMonitor]  intent_type: mixed
+  follow_up_analysis: "当前风场有多少台风机在运行？健康/预警/故障各多少？"
 """
 
 

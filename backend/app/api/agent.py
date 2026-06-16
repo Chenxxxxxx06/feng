@@ -47,9 +47,9 @@ async def multi_agent_diagnose(
         except Exception as e:
             logger.warning(f"Screenshot analysis failed in agent path: {e}")
 
-    # 1. Get turbine list for orchestrator context
+    # 1. Get turbine list for orchestrator context (include region)
     result = await db.execute(select(Turbine))
-    turbine_list = ", ".join(f"#{t.id} {t.name}" for t in result.scalars().all())
+    turbine_list = ", ".join(f"#{t.id} {t.name}({t.region or ''})" for t in result.scalars().all())
 
     # 2. Orchestrator: parse intent
     api_key = current_user.api_key
@@ -148,10 +148,10 @@ async def execute_agent_command(
     from app.models import Turbine
     from sqlalchemy import select
 
-    # 1. Turbine list for entity resolution
+    # 1. Turbine list for entity resolution (include region for "区域A" matching)
     result = await db.execute(select(Turbine))
     turbines = result.scalars().all()
-    turbine_list = ", ".join(f"#{t.id} {t.name}" for t in turbines)
+    turbine_list = ", ".join(f"#{t.id} {t.name}({t.region or ''})" for t in turbines)
 
     # 2. IntentRouter: classify + plan
     api_key = current_user.api_key
@@ -265,6 +265,14 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "click",
              "params": {"selector": "[data-turbine-id='{turbine_id}']"}},
             {"skill": "wait", "params": {"ms": "500"}},
+        ],
+        "OpenTurbineDetailPanel": [
+            {"skill": "waitForElement",
+             "params": {"selector": "[data-turbine-id='{turbine_id}']", "timeout": "5000"}},
+            {"skill": "click",
+             "params": {"selector": "[data-turbine-id='{turbine_id}']"}},
+            {"skill": "wait", "params": {"ms": "800"}},
+            {"skill": "screenshot", "params": {}},
         ],
         "SelectTurbineInDiagnosis": [
             {"skill": "click", "params": {"selector": "[data-action='select-turbine']"}},
