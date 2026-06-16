@@ -1,0 +1,121 @@
+======================================================================
+TEST 1: User WITHOUT API key
+======================================================================
+[OK] _try_ai_analysis returns None (no API key)
+
+======================================================================
+TEST 2: User WITH API key -> real AI diagnosis
+======================================================================
+  source:        ai
+  anomalies:     0 found
+  diagnosis (230 chars):
+    YD-B-007（GW150-3MW）当前SCADA健康指数HI=72.3（阈值通常为75），处于预警状态，但无具体故障数据支撑。可能根因：轻微齿轮箱油温偏高、发电机轴承早期振动异常或变桨系统响应延迟。风险等级：中低（暂无停机或安全风险）。建议：立即调取近72小时SCADA数据（重点查齿轮箱油温、振动RMS、变桨角度偏差及功率曲线偏离度）；同步安排CMS复位检测；若HI持续＞73或出现趋势上升，48小时内安排现场点检。请勿忽视——HI预警常为早期退化信号。
+
+======================================================================
+TEST 3: Email body generation (plain + HTML)
+======================================================================
+
+--- PLAIN TEXT BODY (full) ---
+╔══════════════════════════════════════════╗
+║  风调预顺 PHM — 维修工单通知              ║
+║  WO-0002 | 紧急优先级 | 进行中
+╚══════════════════════════════════════════╝
+
+【工单概要】
+  编号:       WO-0002
+  标题:       YD-B-007 主轴不对中紧急维修
+  描述:       振动RMS异常，2X/3X频率分量显著，需紧急停机检修
+  风机:       YD-B-007 | 型号: GW150-3MW | 区域: 陕北A区
+  健康指数:   72.3 | 状态: warning
+  故障类型:   main_shaft_misalignment
+  优先级:     紧急
+  状态:       进行中
+  责任人:     曲振华
+  截止日期:   2026-06-18
+  预估成本:   ¥85,000
+
+【🤖 AI诊断报告】
+  YD-B-007（GW150-3MW）当前SCADA健康指数HI=72.3（阈值通常≥85为正常），属预警状态，但无具体故障数据支撑。可能根因：轻微齿轮箱润滑异常、变桨系统响应延迟或SCADA传感器漂移。风险等级：中低（暂无停机或安全风险）。建议：① 48小时内复核CMS振动谱（重点关注齿轮箱1X/2X边带及变桨电机电流谐波）；② 校准风速仪与功率曲线；③ 检查最近7天SCADA数据完整性。若HI持续<75或出现振动突增，需启动三级巡检。请人工复核现场运行状态。
+
+【知识库参考】
+  可能根因: 联轴器弹性元件磨损; 基础不均匀沉降; 对中精度漂移
+  建议方案: 激光对中仪重新校准; 更换联轴器弹性体; 检查地脚螺栓力矩
+  相关备件: 联轴器弹性体 ML-200, 地脚螺栓 M36, 对中垫片组
+
+【操作指引】
+  请登录风调预顺PHM系统查看并处理此工单。
+
+────────────────────────────────────────
+风调预顺 PHM 系统 | 预测性运维平台
+此邮件由系统自动生成，请勿直接回复
+(927 total chars)
+
+--- HTML BODY (full) ---
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f6f8fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f8fa;padding:20px 0;">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12);">
+
+  <!-- Header -->
+  <tr><td style="background:#1a1a2e;padding:20px 24px;color:#fff;">
+    <h2 style="margin:0 0 6px;font-size:18px;">🔧 风调预顺 PHM — 维修工单通知</h2>
+    <span style="background:#cf222e;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;margin-right:8px;">
+      ⬆⬆⬆紧急优先级
+    </span>
+    <span style="background:#d29922;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">进行中</span>
+    <span style="float:right;font-size:13px;opacity:.7;">WO-0002</span>
+  </td></tr>
+
+  <!-- Order Summary -->
+  <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📋 工单概要</h3>
+    <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">
+      <tr><td width="80" style="color:#24292f;font-weight:600;">编号</td><td>WO-0002</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">标题</td><td style="color:#24292f;font-weight:500;">YD-B-007 主轴不对中紧急维修</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;vertical-align:top;">描述</td><td>振动RMS异常，2X/3X频率分量显著，需紧急停机检修</td></tr><tr><td style="color:#24292f;font-weight:600;">风机</td><td>YD-B-007 | 型号: GW150-3MW | 区域: 陕北A区</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">健康指数</td><td>72.3 | 状态: warning</td></tr><tr><td style="color:#24292f;font-weight:600;">故障类型</td><td>main_shaft_misalignment</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">责任人</td><td>曲振华</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">截止日期</td><td>2026-06-18</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">预估成本</td><td style="color:#cf222e;font-weight:600;">¥85,000</td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">🤖 AI 诊断报告</h3>
+    <p style="margin:0 0 12px;font-size:13px;color:#57606a;line-height:1.6;">YD-B-007（GW150-3MW）当前SCADA健康指数HI=72.3（阈值通常≥85为正常），属预警状态，但无具体故障数据支撑。可能根因：轻微齿轮箱润滑异常、变桨系统响应延迟或SCADA传感器漂移。风险等级：中低（暂无停机或安全风险）。建议：① 48小时内复核CMS振动谱（重点关注齿轮箱1X/2X边带及变桨电机电流谐波）；② 校准风速仪与功率曲线；③ 检查最近7天SCADA数据完整性。若HI持续<75或出现振动突增，需启动三级巡检。请人工复核现场运行状态。</p>
+  </td></tr>
+  <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 知识库参考</h3>
+    <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;"><tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>联轴器弹性元件磨损; 基础不均匀沉降; 对中精度漂移</td></tr><tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>激光对中仪重新校准; 更换联轴器弹性体; 检查地脚螺栓力矩</td></tr><tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>联轴器弹性体 ML-200, 地脚螺栓 M36, 对中垫片组</td></tr>
+    </table>
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="background:#f6f8fa;padding:16px 24px;text-align:center;font-size:11px;color:#8b949e;">
+    <p style="margin:0 0 4px;">请登录 <b>风调预顺 PHM 系统</b> 查看并处理此工单</p>
+    <p style="margin:0;">此邮件由系统自动生成，请勿直接回复</p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+(3534 total chars)
+
+[OK] All content assertions passed
+
+======================================================================
+TEST 4: cost_estimate=None safety check
+======================================================================
+[OK] None cost_estimate handled safely
+
+======================================================================
+TEST 5: cost_estimate=0.0 consistency
+======================================================================
+[OK] 0.0 cost handled as '未设置' consistently
+
+======================================================================
+ALL 5 E2E TESTS PASSED
+======================================================================
