@@ -38,8 +38,13 @@ def _plain_email(value: str, field_name: str) -> str:
     return address
 
 
-async def send_email(to_email: str, subject: str, body: str) -> None:
-    """Send a plain-text email with the configured SMTP server."""
+async def send_email(to_email: str, subject: str, body: str, html_body: str | None = None) -> None:
+    """Send an email with the configured SMTP server.
+
+    When html_body is provided the message is sent as multipart/alternative
+    so mail clients can render the HTML version while plain-text clients
+    fall back to the text body.
+    """
     settings = _smtp_settings()
     from_email = _plain_email(settings.SMTP_FROM, "SMTP_FROM")
     recipient = _plain_email(to_email, "recipient_email")
@@ -48,6 +53,8 @@ async def send_email(to_email: str, subject: str, body: str) -> None:
     message["To"] = recipient
     message["Subject"] = Header(subject, "utf-8").encode()
     message.set_content(body, charset="utf-8")
+    if html_body:
+        message.add_alternative(html_body, subtype="html", charset="utf-8")
 
     await aiosmtplib.send(
         message,
