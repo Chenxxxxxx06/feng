@@ -237,32 +237,6 @@ class DataImportBatch(Base):
     summary = Column(JSON)
 
 
-class NotificationLog(Base):
-    __tablename__ = "notification_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
-    recipient_email = Column(String(128), nullable=False)
-    subject = Column(String(256), nullable=True)
-    channel = Column(String(32), default="email")
-    status = Column(String(16), default="sent")
-    sent_at = Column(DateTime(timezone=True), default=func.now())
-    error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
-class MaintenanceRecord(Base):
-    __tablename__ = "maintenance_records"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
-    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action_type = Column(String(32), nullable=False)
-    content = Column(Text, nullable=True)
-    before_status = Column(String(16), nullable=True)
-    after_status = Column(String(16), nullable=True)
-    extra = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
 class FaultKnowledgeNode(Base):
     __tablename__ = "fault_knowledge"
     id = Column(Integer, primary_key=True, index=True)
