@@ -446,12 +446,12 @@ export default function TurbineDetailPage() {
     chart.setOption({
       backgroundColor: 'transparent',
       grid: { top: 40, right: 60, bottom: 30, left: 50 },
-      legend: { top: 5, textStyle: { color: '#8b949e', fontSize: 11 } },
+      legend: { top: 5, textStyle: { color: '#94A3B8', fontSize: 11 } },
       tooltip: { trigger: 'axis', valueFormatter: (value: number) => displayValue(value, currentPowerUnit === 'p.u.' ? 3 : 1) },
-      xAxis: { type: 'category', data: times, axisLabel: { color: '#5c6975', fontSize: 10 } },
+      xAxis: { type: 'category', data: times, axisLabel: { color: '#64748B', fontSize: 10 } },
       yAxis: [
-        { type: 'value', name: currentPowerUnit === 'p.u.' ? '功率(p.u.)' : '功率(kW)', axisLabel: { color: '#5c6975', formatter: (value: number) => value.toFixed(currentPowerUnit === 'p.u.' ? 2 : 0) } },
-        { type: 'value', name: '°C', axisLabel: { color: '#5c6975', formatter: (value: number) => value.toFixed(1) } },
+        { type: 'value', name: currentPowerUnit === 'p.u.' ? '功率(p.u.)' : '功率(kW)', axisLabel: { color: '#64748B', formatter: (value: number) => value.toFixed(currentPowerUnit === 'p.u.' ? 2 : 0) } },
+        { type: 'value', name: '°C', axisLabel: { color: '#64748B', formatter: (value: number) => value.toFixed(1) } },
       ],
       series: [
         {
@@ -459,8 +459,8 @@ export default function TurbineDetailPage() {
           type: 'line',
           data: scadaReplay.daySeries.map((item) => rounded(item.power_kw, 3)),
           smooth: true,
-          lineStyle: { color: '#58a6ff', width: 1.5 },
-          areaStyle: { color: 'rgba(88,166,255,0.08)' },
+          lineStyle: { color: '#3B82F6', width: 1.5 },
+          areaStyle: { color: 'rgba(59,130,246,0.08)' },
           symbol: 'none',
         },
         {
@@ -468,7 +468,7 @@ export default function TurbineDetailPage() {
           type: 'line',
           data: scadaReplay.daySeries.map((item) => rounded(item.wind_speed_ms, 2)),
           smooth: true,
-          lineStyle: { color: '#39d2c0', width: 1 },
+          lineStyle: { color: '#22D3EE', width: 1 },
           symbol: 'none',
         },
         {
@@ -477,7 +477,7 @@ export default function TurbineDetailPage() {
           type: 'line',
           data: scadaReplay.daySeries.map((item) => rounded(item.gen_temperature_c, 1)),
           smooth: true,
-          lineStyle: { color: '#d29922', width: 1 },
+          lineStyle: { color: '#F59E0B', width: 1 },
           symbol: 'none',
         },
       ],
@@ -506,16 +506,16 @@ export default function TurbineDetailPage() {
       xAxis: {
         type: 'value',
         name: 's',
-        axisLabel: { color: '#5c6975', fontSize: 9 },
+        axisLabel: { color: '#64748B', fontSize: 9 },
       },
-      yAxis: { type: 'value', name: 'mm/s²', axisLabel: { color: '#5c6975' } },
+      yAxis: { type: 'value', name: 'mm/s²', axisLabel: { color: '#64748B' } },
       dataZoom: [{ type: 'inside', start: 0, end: 30 }],
       series: [{
         name: '振动',
         type: 'line',
         data: waveformPoints,
         smooth: false,
-        lineStyle: { color: '#39d2c0', width: 1 },
+        lineStyle: { color: '#22D3EE', width: 1 },
         areaStyle: { color: 'rgba(57,210,192,0.06)' },
         symbol: 'none',
         showSymbol: false,
@@ -848,17 +848,23 @@ export default function TurbineDetailPage() {
   if (!turbine) return <div className="p-8 text-text-muted text-sm">加载中...</div>;
 
   return (
-    <div className="h-full flex">
+    <div className="h-full flex ops-page">
       <div className="flex-1 overflow-auto p-6 space-y-5">
-        <div className="flex items-center gap-3">
-          <Link to="/dashboard" data-action="back" className="text-text-muted hover:text-text-primary text-sm">返回</Link>
-          <h2 className="text-lg font-semibold">{turbine.name}</h2>
-          <span className={`px-2 py-0.5 rounded text-xs ${turbine.status === 'normal' ? 'bg-accent-green/20 text-accent-green' : turbine.status === 'warning' ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-red/20 text-accent-red'}`}>
+        <div className="ops-header flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link to="/dashboard" data-action="back" className="ops-btn px-3 py-1.5 text-xs">返回</Link>
+            <div>
+              <p className="ops-eyebrow">单机运行画像</p>
+              <h2 className="ops-title gradient-text">{turbine.name}</h2>
+            </div>
+          </div>
+          <span className={`inline-flex items-center gap-2 rounded px-2.5 py-1 text-xs font-semibold ${turbine.status === 'normal' ? 'bg-accent-green/20 text-accent-green' : turbine.status === 'warning' ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-red/20 text-accent-red'}`}>
+            <span className="ops-status-dot" />
             {statusText(turbine.status)}
           </span>
         </div>
 
-        <div className="bg-bg-card border border-border-default rounded-lg p-4">
+        <div className="premium-card rounded-2xl p-4">
           <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-sm font-medium">叶片巡检照片</h3>
@@ -907,7 +913,7 @@ export default function TurbineDetailPage() {
                               width={region.bbox.w}
                               height={region.bbox.h}
                               fill="rgba(248,81,73,0.08)"
-                              stroke="#f85149"
+                              stroke="#EF4444"
                               strokeWidth={region.badge.strokeWidth}
                               pointerEvents="none"
                             />
@@ -915,7 +921,7 @@ export default function TurbineDetailPage() {
                               cx={region.badge.cx}
                               cy={region.badge.cy}
                               r={region.badge.r}
-                              fill="#f85149"
+                              fill="#EF4444"
                               stroke="rgba(8,12,18,0.9)"
                               strokeWidth={region.badge.strokeWidth}
                               pointerEvents="none"
@@ -946,13 +952,13 @@ export default function TurbineDetailPage() {
                                 cy={region.badge.deleteCy}
                                 r={region.badge.r * 0.72}
                                 fill="#161b22"
-                                stroke="#f85149"
+                                stroke="#EF4444"
                                 strokeWidth={region.badge.strokeWidth}
                               />
                               <text
                                 x={region.badge.deleteCx}
                                 y={region.badge.deleteCy + region.badge.r * 0.04}
-                                fill="#f85149"
+                                fill="#EF4444"
                                 fontSize={region.badge.r}
                                 fontWeight="800"
                                 textAnchor="middle"
@@ -1056,7 +1062,7 @@ export default function TurbineDetailPage() {
               )}
             </div>
 
-            <div className="flex min-h-[320px] flex-col justify-between rounded-lg border border-border-default bg-bg-secondary p-4">
+            <div className="flex min-h-[320px] flex-col justify-between premium-card rounded-2xl p-4">
               <div>
                 <div className="flex items-center justify-between gap-3">
                   <h4 className="text-sm font-medium">叶片诊断</h4>
@@ -1134,7 +1140,7 @@ export default function TurbineDetailPage() {
           </div>
         </div>
 
-        <div className="bg-bg-card border border-border-default rounded-lg p-4">
+        <div className="premium-card rounded-2xl p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-medium">
               {scadaHistorical ? 'SCADA 历史数据窗口' : 'SCADA 运行数据曲线'}
@@ -1176,7 +1182,7 @@ export default function TurbineDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <div className="bg-bg-card border border-border-default rounded-lg p-4">
+          <div className="premium-card rounded-2xl p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="text-sm font-medium">环境监控</h3>
               {wind?.source_dataset && (
@@ -1189,7 +1195,7 @@ export default function TurbineDetailPage() {
               <>
                 <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
                 {windMetricCards.map(([label, value, unit]) => (
-                  <div key={label} className="bg-bg-hover rounded p-2 text-center">
+                  <div key={label} className="premium-card rounded-2xl p-2 text-center">
                     <p className="text-text-muted text-[10px]">{label}</p>
                     <p className="text-accent-cyan font-mono font-bold">{value}{unit}</p>
                   </div>
@@ -1203,7 +1209,7 @@ export default function TurbineDetailPage() {
             )}
           </div>
 
-          <div className="bg-bg-card border border-border-default rounded-lg p-4">
+          <div className="premium-card rounded-2xl p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="text-sm font-medium">
               振动波形
@@ -1269,4 +1275,3 @@ export default function TurbineDetailPage() {
     </div>
   );
 }
-

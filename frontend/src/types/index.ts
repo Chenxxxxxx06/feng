@@ -208,9 +208,7 @@ export interface WorkOrder {
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   fault_type?: string | null;
   due_date?: string | null;
-  assignee_id?: number | null;
   assignee: string | null;
-  assignee_id?: number | null;
   assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
@@ -219,9 +217,6 @@ export interface WorkOrder {
   completed_at: string | null;
   cancelled_at?: string | null;
   deleted_at?: string | null;
-  due_date?: string | null;
-  fault_type?: string | null;
-  priority?: string;
   downtime_hours?: number | null;
   notification_sent_at?: string | null;
 }

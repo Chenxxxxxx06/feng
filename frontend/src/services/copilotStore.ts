@@ -26,7 +26,7 @@ interface CopilotState {
 
 const GREETING: Message = {
   role: 'assistant',
-  content: '你好！我是风调预顺AI助手。\n\n**我能做什么:**\n- 📊 查询风机实时数据 (HI、RUL、SCADA)\n- 🔍 诊断故障原因 + 匹配知识库\n- 📝 生成维修建议和排查步骤\n- 📸 截图分析当前页面\n\n请描述你的问题，或点击 **Agent任务** 进行深度分析。',
+  content: '你好！我是风调预顺AI助手。\n\n**我能做什么:**\n- 查询风机实时数据 (HI、RUL、SCADA)\n- 诊断故障原因 + 匹配知识库\n- 生成维修建议和排查步骤\n- 截图分析当前页面\n\n请描述你的问题，或点击 **Agent任务** 进行深度分析。',
 };
 
 export const useCopilotStore = create<CopilotState>((set) => ({

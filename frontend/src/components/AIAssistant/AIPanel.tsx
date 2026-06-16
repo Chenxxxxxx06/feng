@@ -33,7 +33,7 @@ export default function AIPanel({ pageType, pageData }: Props) {
           onClick={fetchSummary}
           className="w-full rounded border border-accent-cyan/40 bg-accent-cyan/10 px-3 py-2 text-xs text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
         >
-          🤖 生成AI总结
+          生成 AI 总结
         </button>
       ) : loading ? (
         <p className="text-xs text-text-muted animate-pulse">分析中...</p>

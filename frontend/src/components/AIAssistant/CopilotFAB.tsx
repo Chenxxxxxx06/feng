@@ -60,7 +60,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         if (/^\d+\.\s/.test(line) || line.startsWith('- ')) {
           return <div key={i} className="flex gap-1"><span className="text-accent-blue">•</span><span dangerouslySetInnerHTML={{ __html: html.replace(/^\d+\.\s|-\s/, '') }} /></div>;
         }
-        if (line.includes('📊') || line.includes('📚') || line.includes('🎯') || line.includes('🧠') || line.includes('📝')) {
+        if (line.includes('数据') || line.includes('知识') || line.includes('意图') || line.includes('汇总')) {
           return <div key={i} className="font-medium text-accent-cyan text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />;
         }
         return <p key={i} className="text-xs" dangerouslySetInnerHTML={{ __html: html }} />;
@@ -226,7 +226,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         allowTaint: true,
         scale: 0.5,
         ignoreElements: (el) => el.closest('[data-copilot-ignore]') !== null,
-        backgroundColor: '#080c12',
+        backgroundColor: '#071A35',
       });
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
@@ -273,7 +273,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
 
         // Show progress step
         const progressId = Date.now().toString();
-        addMessage({ role: 'assistant', content: `🔍 分析意图中...`, _progress: true, _progressId: progressId });
+        addMessage({ role: 'assistant', content: `分析意图中...`, _progress: true, _progressId: progressId });
 
         const { data } = await api.post('/agent/diagnose', payload, { timeout: 120000 });
 
@@ -284,17 +284,17 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         const trace = data.trace || {};
         // Step trace
         const steps: string[] = [];
-        if (trace.orchestrator_ms != null) steps.push(`🧠 意图分析 (${trace.orchestrator_ms}ms)`);
-        if (trace.data_agent_ms != null) steps.push(`📊 数据查询 (${trace.data_agent_ms}ms)`);
-        if (trace.knowledge_agent_ms != null) steps.push(`📚 知识检索 (${trace.knowledge_agent_ms}ms)`);
-        if (trace.synthesizer_ms != null) steps.push(`📝 汇总报告 (${trace.synthesizer_ms}ms)`);
+        if (trace.orchestrator_ms != null) steps.push(`意图分析 (${trace.orchestrator_ms}ms)`);
+        if (trace.data_agent_ms != null) steps.push(`数据查询 (${trace.data_agent_ms}ms)`);
+        if (trace.knowledge_agent_ms != null) steps.push(`知识检索 (${trace.knowledge_agent_ms}ms)`);
+        if (trace.synthesizer_ms != null) steps.push(`汇总报告 (${trace.synthesizer_ms}ms)`);
         if (steps.length > 0) parts.push(`> ${steps.join(' → ')}`);
 
         if (data.intent && data.intent.intent_type) {
-          parts.push(`**🎯 意图**: ${data.intent.intent_type} (置信度${(data.intent.confidence*100).toFixed(0)}%)`);
+          parts.push(`**意图**: ${data.intent.intent_type} (置信度${(data.intent.confidence*100).toFixed(0)}%)`);
         }
-        if (data.data_summary) parts.push(`**📊 数据摘要**:\n${data.data_summary}`);
-        if (data.knowledge_matches) parts.push(`**📚 知识匹配**:\n${data.knowledge_matches}`);
+        if (data.data_summary) parts.push(`**数据摘要**:\n${data.data_summary}`);
+        if (data.knowledge_matches) parts.push(`**知识匹配**:\n${data.knowledge_matches}`);
         if (data.report) parts.push(data.report);
         reply = parts.join('\n\n') || JSON.stringify(data);
       } else {
@@ -327,9 +327,9 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           onMouseDown={onFabMouseDown}
           onClick={() => { if (!fabHasMoved.current) setOpen(true); }}
           className="fixed z-50 w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
-          style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(88,166,255,0.4)' }}
+          style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(59,130,246,0.4)' }}
         >
-          <span className="text-2xl">💬</span>
+          <span className="text-lg font-bold">AI</span>
           <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-accent-green border-2 border-bg-primary animate-pulse" />
         </button>
       )}
@@ -339,16 +339,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         <div
           ref={panelRef}
           data-copilot-ignore
-          className="fixed z-50 shadow-2xl flex flex-col overflow-hidden rounded-xl border border-border-default bg-bg-card"
+          className="fixed z-50 shadow-2xl flex flex-col overflow-hidden ops-panel rounded-2xl"
           style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W, height: PANEL_H }}
         >
           {/* Header — drag handle */}
           <div
-            className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-secondary cursor-move select-none"
+            className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-panel/95 cursor-move select-none"
             onMouseDown={onDragStart}
           >
             <div className="flex items-center gap-2">
-              <span className="text-lg">🤖</span>
+              <span className="ops-icon rounded-full bg-accent-blue/20 text-[10px] font-bold text-accent-blue">AI</span>
               <div>
                 <h3 className="text-sm font-medium">风调AI助手</h3>
                 <p className="text-[10px] text-accent-green">
@@ -360,16 +360,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           </div>
 
           {/* Mode Toggle — AI对话 / Agent诊断 */}
-          <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-secondary">
+          <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-panel/90">
             <button
               onClick={() => setMode('chat')}
-              className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
-                mode === 'chat'
-                  ? 'bg-accent-blue text-white'
-                  : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
-              }`}
+                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
+                  mode === 'chat'
+                    ? 'bg-accent-blue text-white'
+                    : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+                }`}
             >
-              💬 AI对话
+              AI 对话
             </button>
             <button
               onClick={() => setMode('agent')}
@@ -379,7 +379,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                   : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
               }`}
             >
-              🔧 Agent任务
+              Agent 任务
             </button>
           </div>
 
@@ -400,7 +400,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 </div>
               </div>
             ))}
-            {loading && <p className="text-text-muted animate-pulse">AI思考中...</p>}
+            {loading && <p className="text-text-muted animate-pulse">AI 思考中...</p>}
           </div>
 
           {/* Input */}
@@ -415,7 +415,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                     ? '输入任务指令，如：查看故障诊断页面'
                     : '输入问题, 如: 当前风场运行状态如何?'
                 }
-                className="flex-1 bg-bg-secondary border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+                className="flex-1 bg-bg-panel border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
               />
               <button
                 onClick={() => handleSend()}
@@ -426,7 +426,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
               </button>
             </div>
             <div className="flex gap-2 mt-2">
-              {(mode === 'agent'
+                {(mode === 'agent'
                 ? ['查看故障诊断页面', '查看维护人员工作量', '查看所有工单']
                 : ['总结当前状态', '最近故障', '健康趋势分析']
               ).map((q) => (

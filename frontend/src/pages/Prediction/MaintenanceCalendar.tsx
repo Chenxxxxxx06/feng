@@ -30,8 +30,13 @@ const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8�
 function dateKey(d: Date) { const m = d.getMonth() + 1; return `${d.getFullYear()}-${m < 10 ? '0' + m : m}-${d.getDate() < 10 ? '0' + d.getDate() : d.getDate()}`; }
 function sameDay(a: Date, b: Date) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 
-function weatherEmoji(score: number) { return score >= 80 ? '☀️' : score >= 50 ? '⛅' : score >= 30 ? '🌧️' : '⛈️'; }
 function weatherBg(score: number) { return score < 30 ? 'bg-accent-red/5' : score < 50 ? 'bg-accent-yellow/5' : ''; }
+function weatherTone(score: number) {
+  if (score >= 80) return 'bg-accent-green';
+  if (score >= 50) return 'bg-accent-blue';
+  if (score >= 30) return 'bg-accent-yellow';
+  return 'bg-accent-red';
+}
 
 // ── Props ──
 interface Props {
@@ -139,7 +144,7 @@ export default function MaintenanceCalendar({
 
   // ── Render ──
   return (
-    <div className="bg-bg-card border border-border-default rounded-lg p-4 flex flex-col">
+    <div className="ops-panel p-4 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -155,24 +160,24 @@ export default function MaintenanceCalendar({
           </div>
         </div>
         <div className="flex items-center gap-1 text-xs">
-          <button onClick={() => nav(-1)} className="px-1.5 py-0.5 hover:text-accent-blue">◀</button>
+          <button onClick={() => nav(-1)} className="px-1.5 py-0.5 hover:text-accent-blue" aria-label="上一页">‹</button>
           <span className="font-medium min-w-[80px] text-center">{title}</span>
-          <button onClick={() => nav(1)} className="px-1.5 py-0.5 hover:text-accent-blue">▶</button>
-          <button onClick={() => setCursor(new Date())} className="ml-2 px-2 py-0.5 border border-border-default rounded text-[9px] hover:border-accent-blue">今天</button>
+          <button onClick={() => nav(1)} className="px-1.5 py-0.5 hover:text-accent-blue" aria-label="下一页">›</button>
+          <button onClick={() => setCursor(new Date())} className="ops-btn ml-2 px-2 py-0.5 text-[9px]">今天</button>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={onAutoSchedule} disabled={scheduling}
             className="px-2 py-0.5 bg-accent-blue/20 border border-accent-blue/30 rounded text-[9px] text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50">
-            {scheduling ? '排程中...' : '🤖 自动排程'}
+            {scheduling ? '排程中...' : '自动排程'}
           </button>
-          <button onClick={handleExport} className="px-2 py-0.5 border border-border-default rounded text-[9px] text-text-muted hover:text-accent-blue">📅 导出ICS</button>
+          <button onClick={handleExport} className="ops-btn px-2 py-0.5 text-[9px]">导出 ICS</button>
         </div>
       </div>
 
       {/* Conflict summary */}
       {conflicts.length > 0 && (
         <div className="mb-2 p-1.5 bg-accent-red/5 border border-accent-red/20 rounded text-[9px]">
-          {conflicts.filter(c => c.severity === 'error').map(c => <p key={c.message} className="text-accent-red">⚠ {c.message} — {c.suggestion}</p>)}
+          {conflicts.filter(c => c.severity === 'error').map(c => <p key={c.message} className="text-accent-red">{c.message} — {c.suggestion}</p>)}
         </div>
       )}
 
@@ -182,7 +187,7 @@ export default function MaintenanceCalendar({
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-blue mr-1"/>工单</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-green mr-1"/>RUL计划</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-purple mr-1"/>已排程</span>
-        <span><span title="天气风险">☀️/⛈️ 天气</span></span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-accent-yellow mr-1"/>天气风险</span>
       </div>
 
       {/* ── Month View ── */}
@@ -196,13 +201,13 @@ export default function MaintenanceCalendar({
 
       {/* Hover tooltip */}
       {tooltip && viewMode === 'month' && (
-        <div className="fixed z-[999] bg-bg-card border border-border-default rounded-lg shadow-xl p-2 min-w-[220px] max-w-[300px] pointer-events-none"
+        <div className="fixed z-[999] premium-card rounded-2xl shadow-xl p-2 min-w-[220px] max-w-[300px] pointer-events-none"
           style={{ left: tooltip.x + 8, top: tooltip.y }}>
           <p className="text-[10px] font-medium mb-1 border-b pb-1">{tooltip.date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
-          {getEvents(tooltip.date).conflicts.map(c => <p key={c.message} className="text-[9px] text-accent-red">⚠ {c.message}</p>)}
-          {getEvents(tooltip.date).tasks.map(t => <p key={`t-${t.turbine_id}-${t.component}`} className="text-[9px] text-accent-purple">🔧 {t.time_slot} {t.turbine_name} {t.component} {t.action}</p>)}
-          {getEvents(tooltip.date).wos.map(w => <p key={`w-${w.id}`} className="text-[9px]">📋 WO-{String(w.id).padStart(4, '0')} {w.title}</p>)}
-          {getEvents(tooltip.date).ruls.filter(r => r.remaining_life_days < 90).map(r => <p key={`r-${r.turbine_id}-${r.component}`} className="text-[9px] text-accent-yellow">⏰ {r.turbine_name} {r.component} RUL{r.remaining_life_days.toFixed(0)}天</p>)}
+          {getEvents(tooltip.date).conflicts.map(c => <p key={c.message} className="text-[9px] text-accent-red">{c.message}</p>)}
+          {getEvents(tooltip.date).tasks.map(t => <p key={`t-${t.turbine_id}-${t.component}`} className="text-[9px] text-accent-purple">{t.time_slot} {t.turbine_name} {t.component} {t.action}</p>)}
+          {getEvents(tooltip.date).wos.map(w => <p key={`w-${w.id}`} className="text-[9px]">WO-{String(w.id).padStart(4, '0')} {w.title}</p>)}
+          {getEvents(tooltip.date).ruls.filter(r => r.remaining_life_days < 90).map(r => <p key={`r-${r.turbine_id}-${r.component}`} className="text-[9px] text-accent-yellow">{r.turbine_name} {r.component} RUL{r.remaining_life_days.toFixed(0)}天</p>)}
         </div>
       )}
     </div>
@@ -231,7 +236,7 @@ function MonthGrid({ cursor, today, selectedDate, getEvents, getWeather, dayCell
               onClick={() => onClick(d)}>
               <div className="flex items-center justify-between">
                 <span className={`text-[10px] ${isToday ? 'text-accent-blue font-bold' : 'text-text-secondary'}`}>{i + 1}</span>
-                {w && <span className="text-[8px]" title={`${w.score}分 ${w.flags.join(',')}`}>{weatherEmoji(w.score)}</span>}
+                {w && <span className={`h-1.5 w-1.5 rounded-full ${weatherTone(w.score)}`} title={`${w.score}分 ${w.flags.join(',')}`} />}
               </div>
               <div className="flex flex-wrap gap-0.5 mt-0.5">
                 {ev.conflicts.filter((c: Conflict) => c.severity === 'error').length > 0 && <span className="w-2 h-2 rounded-sm bg-accent-red"/>}
@@ -272,7 +277,7 @@ function WeekGrid({ cursor, today, selectedDate, getEvents, getWeather, onSelect
             <div key={d.toISOString()} onClick={() => onSelect(d)} className={`bg-bg-secondary p-1 text-center cursor-pointer hover:bg-bg-hover ${isToday ? 'ring-1 ring-accent-blue' : ''} ${isSel ? 'ring-1 ring-accent-purple' : ''}`}>
               <p className="text-[10px] font-medium">{DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
               <p className={`text-[11px] ${isToday ? 'text-accent-blue font-bold' : ''}`}>{d.getDate()}</p>
-              {w && <span className="text-[8px]">{weatherEmoji(w.score)}</span>}
+              {w && <span className={`mx-auto mt-0.5 block h-1.5 w-1.5 rounded-full ${weatherTone(w.score)}`} title={`${w.score}分`} />}
             </div>
           );
         })}
@@ -308,12 +313,12 @@ function DayView({ date, events, weather, turbines }: {
     <div className="flex-1 overflow-auto">
       <div className="p-2 bg-bg-hover rounded mb-2 text-xs">
         <span className="font-medium">{date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</span>
-        {weather && <span className="ml-2 text-text-muted">{weatherEmoji(weather.score)} {weather.score}分 {weather.flags.length > 0 ? `· ${weather.flags.join(', ')}` : ''}</span>}
+        {weather && <span className="ml-2 text-text-muted">{weather.score}分 {weather.flags.length > 0 ? `· ${weather.flags.join(', ')}` : ''}</span>}
       </div>
       {/* Conflicts */}
       {events.conflicts.length > 0 && (
         <div className="mb-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px]">
-          {events.conflicts.map(c => <p key={c.message} className="text-accent-red">⚠ {c.message} — {c.suggestion}</p>)}
+          {events.conflicts.map(c => <p key={c.message} className="text-accent-red">{c.message} — {c.suggestion}</p>)}
         </div>
       )}
       {/* Timeline */}
@@ -338,7 +343,7 @@ function DayView({ date, events, weather, turbines }: {
                 ))}
                 {slotWos.map((w: any) => (
                   <div key={`wo-${w.id}`} className="px-2 py-1 bg-accent-blue/10 border border-accent-blue/20 rounded text-[9px]">
-                    📋 WO-{String(w.id).padStart(4, '0')} {w.title}
+                    WO-{String(w.id).padStart(4, '0')} {w.title}
                   </div>
                 ))}
               </div>
