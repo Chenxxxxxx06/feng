@@ -225,7 +225,7 @@ const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'alerts', label: '告警规则', desc: 'HI阈值和通知方式' },
   { key: 'pipeline', label: '数据源管理', desc: 'SCADA/振动/图像/气象' },
   { key: 'personnel', label: '人员管理', desc: '维护人员和负载' },
-  { key: 'logs', label: '操作日志', desc: '设置变更和接口结果' },
+  { key: 'logs', label: '操作记录', desc: '最近操作与保存反馈' },
 ];
 
 const sourceIcons: Record<string, string> = {
@@ -276,12 +276,22 @@ const loadTone = (load: number) => {
   return 'text-accent-green';
 };
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (email: string) => emailPattern.test(email.trim());
+const parseSkills = (skills: string) => (
+  skills
+    .split(/[,，]/)
+    .map((skill) => skill.trim())
+    .filter(Boolean)
+);
+
 export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [hiThreshold, setHiThreshold] = useState('70');
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
+  const [thresholdError, setThresholdError] = useState('');
   const [wechatEnabled, setWechatEnabled] = useState(false);
   const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
   const [aiProviderLoading, setAiProviderLoading] = useState(false);
@@ -386,10 +396,15 @@ export default function SettingsPage() {
   };
 
   const saveThreshold = async () => {
+    if (emailEnabled && !isValidEmail(emailAddress)) {
+      setThresholdError('请输入正确邮箱地址，格式需包含 @ 和域名');
+      return;
+    }
+    setThresholdError('');
     await api.put('/settings/thresholds', {
       hi_threshold: Number(hiThreshold),
       email_enabled: emailEnabled,
-      email_address: emailEnabled ? emailAddress || null : null,
+      email_address: emailEnabled ? emailAddress.trim() || null : null,
     });
     setThresholdSaved(true);
     addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
@@ -589,15 +604,21 @@ export default function SettingsPage() {
   };
 
   const submitPerson = async () => {
-    if (!personForm.name || !personForm.email) {
+    const name = personForm.name.trim();
+    const email = personForm.email.trim();
+    if (!name || !email) {
       setPersonnelError('请填写姓名和邮箱');
       return;
     }
+    if (!isValidEmail(email)) {
+      setPersonnelError('请输入正确邮箱地址，格式需包含 @ 和域名');
+      return;
+    }
     const payload = {
-      name: personForm.name,
-      email: personForm.email,
+      name,
+      email,
       region: personForm.region,
-      skills: personForm.skills.split(',').map((s) => s.trim()).filter(Boolean),
+      skills: parseSkills(personForm.skills),
     };
     try {
       if (editingId) {
@@ -610,8 +631,9 @@ export default function SettingsPage() {
       resetPersonForm();
       setPersonnelError('');
       refreshPersonnel();
-    } catch {
-      setPersonnelError('人员保存失败，请检查姓名或邮箱是否重复');
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setPersonnelError(detail || '人员保存失败，请检查姓名或邮箱是否重复');
     }
   };
 
@@ -725,9 +747,13 @@ export default function SettingsPage() {
                 emailAddress={emailAddress}
                 wechatEnabled={wechatEnabled}
                 thresholdSaved={thresholdSaved}
+                thresholdError={thresholdError}
                 onHiChange={setHiThreshold}
                 onEmailEnabledChange={setEmailEnabled}
-                onEmailAddressChange={setEmailAddress}
+                onEmailAddressChange={(value) => {
+                  setEmailAddress(value);
+                  if (!value || isValidEmail(value)) setThresholdError('');
+                }}
                 onWechatEnabledChange={setWechatEnabled}
                 onSave={saveThreshold}
               />
@@ -763,7 +789,7 @@ export default function SettingsPage() {
               />
             )}
             {activeSection === 'logs' && (
-              <LogsSection logs={logs} />
+              <LogsSection logs={logs} onBack={() => setActiveSection('overview')} />
             )}
           </main>
         </div>
@@ -886,14 +912,18 @@ function OverviewTile({ label, value, hint, tone }: { label: string; value: stri
   );
 }
 
-function LogsSection({ logs }: { logs: ActivityLog[] }) {
+function LogsSection({ logs, onBack }: { logs: ActivityLog[]; onBack: () => void }) {
   return (
-    <SectionShell title="操作日志" description="查看当前会话内的配置加载、保存、测试和人员维护操作。">
+    <SectionShell
+      title="操作记录"
+      description="查看本次会话中的设置加载、保存、测试和人员维护反馈。"
+      actions={<button onClick={onBack} className="industrial-btn">返回总览</button>}
+    >
       <div className="rounded-lg border border-border-default bg-navy-900/60">
-        {logs.length > 0 ? (
-          logs.map((log) => <LogRow key={log.id} log={log} />)
+        {logs.length === 0 ? (
+          <div className="px-4 py-8 text-sm text-text-muted">暂无操作记录</div>
         ) : (
-          <div className="px-4 py-8 text-center text-xs text-text-muted">暂无操作记录</div>
+          logs.map((log) => <LogRow key={log.id} log={log} />)
         )}
       </div>
     </SectionShell>
@@ -1450,6 +1480,7 @@ function AlertSection({
   emailAddress,
   wechatEnabled,
   thresholdSaved,
+  thresholdError,
   onHiChange,
   onEmailEnabledChange,
   onEmailAddressChange,
@@ -1461,6 +1492,7 @@ function AlertSection({
   emailAddress: string;
   wechatEnabled: boolean;
   thresholdSaved: boolean;
+  thresholdError: string;
   onHiChange: (value: string) => void;
   onEmailEnabledChange: (value: boolean) => void;
   onEmailAddressChange: (value: string) => void;
@@ -1529,12 +1561,19 @@ function AlertSection({
               <input type="checkbox" checked={emailEnabled} onChange={(e) => onEmailEnabledChange(e.target.checked)} />
             </label>
             {emailEnabled && (
-              <input
-                value={emailAddress}
-                onChange={(e) => onEmailAddressChange(e.target.value)}
-                placeholder="ops@example.com"
-                className="industrial-input w-full"
-              />
+              <>
+                <input
+                  type="email"
+                  inputMode="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                  value={emailAddress}
+                  onChange={(e) => onEmailAddressChange(e.target.value)}
+                  placeholder="ops@example.com"
+                  aria-invalid={Boolean(thresholdError)}
+                  className={`industrial-input w-full ${thresholdError ? 'border-accent-red focus:border-accent-red' : ''}`}
+                />
+                {thresholdError && <p className="text-xs text-accent-red">{thresholdError}</p>}
+              </>
             )}
           </div>
         </div>
@@ -1587,6 +1626,20 @@ function PipelineSection({
             <p className={`mt-3 text-xs ${source.real_data_available ? 'text-accent-green' : 'text-accent-yellow'}`}>
               {source.note}
             </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <button type="button" onClick={() => onTest(source.type)} className="industrial-btn text-xs">
+                测试连接
+              </button>
+              {testResults[source.type] && (
+                <span className={`rounded-full border px-2 py-1 text-[10px] ${
+                  testResults[source.type] === 'success'
+                    ? 'border-accent-green/40 bg-accent-green/10 text-accent-green'
+                    : 'border-accent-red/40 bg-accent-red/10 text-accent-red'
+                }`}>
+                  {testResults[source.type] === 'success' ? '测试通过' : '测试失败'}
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -1634,6 +1687,9 @@ function PersonnelSection({
   onEdit: (person: Personnel) => void;
   onRemove: (person: Personnel) => void;
 }) {
+  const emailInvalid = Boolean(personForm.email) && !isValidEmail(personForm.email);
+  const submitDisabled = !personForm.name.trim() || !personForm.email.trim() || emailInvalid;
+
   return (
     <SectionShell
       title="人员管理"
@@ -1670,7 +1726,19 @@ function PersonnelSection({
             <h4 className="text-sm font-medium">{editingId ? '编辑人员' : '新增人员'}</h4>
             <div className="mt-4 space-y-3">
               <input placeholder="姓名" value={personForm.name} onChange={(e) => onFormChange({ ...personForm, name: e.target.value })} className="industrial-input w-full" />
-              <input placeholder="邮箱" value={personForm.email} onChange={(e) => onFormChange({ ...personForm, email: e.target.value })} className="industrial-input w-full" />
+              <div>
+                <input
+                  type="email"
+                  inputMode="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                  placeholder="邮箱"
+                  value={personForm.email}
+                  onChange={(e) => onFormChange({ ...personForm, email: e.target.value })}
+                  aria-invalid={emailInvalid}
+                  className={`industrial-input w-full ${emailInvalid ? 'border-accent-red focus:border-accent-red' : ''}`}
+                />
+                {emailInvalid && <p className="mt-1 text-[11px] text-accent-red">请输入正确邮箱地址，格式需包含 @ 和域名</p>}
+              </div>
               <input placeholder="技能，逗号分隔" value={personForm.skills} onChange={(e) => onFormChange({ ...personForm, skills: e.target.value })} className="industrial-input w-full" />
               <select value={personForm.region} onChange={(e) => onFormChange({ ...personForm, region: e.target.value })} className="industrial-input w-full">
                 <option>陕北</option>
@@ -1679,16 +1747,23 @@ function PersonnelSection({
               </select>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={onSubmit} className="industrial-btn industrial-btn-primary flex-1">{editingId ? '保存修改' : '添加人员'}</button>
+              <button
+                onClick={onSubmit}
+                disabled={submitDisabled}
+                className="industrial-btn industrial-btn-primary flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {editingId ? '保存修改' : '添加人员'}
+              </button>
               {editingId && <button onClick={onCancelEdit} className="industrial-btn">取消</button>}
             </div>
             {personnelError && <p className="mt-3 text-xs text-accent-red">{personnelError}</p>}
           </div>
 
           <div className="min-w-0 rounded-lg border border-border-default bg-navy-900/60">
-            <div className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
+            <div className="grid min-w-[820px] grid-cols-[90px_minmax(140px,1fr)_200px_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
               <span>姓名</span>
               <span>技能</span>
+              <span>邮箱</span>
               <span>区域</span>
               <span>负载</span>
               <span className="text-right">操作</span>
@@ -1700,12 +1775,20 @@ function PersonnelSection({
                 <p className="p-4 text-sm text-text-muted">暂无人员</p>
               ) : (
                 personnel.map((person) => (
-                  <div key={person.id} className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs last:border-0">
+                  <div key={person.id} className="grid min-w-[820px] grid-cols-[90px_minmax(140px,1fr)_200px_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs last:border-0">
                     <span className="font-medium text-text-primary">{person.name}</span>
                     <span className="flex flex-wrap gap-1">
                       {person.skills.map((skill) => (
                         <span key={skill} className="rounded bg-accent-blue/10 px-1.5 py-0.5 text-[10px] text-accent-blue">{skill}</span>
                       ))}
+                    </span>
+                    <span className="min-w-0" title={person.email}>
+                      <span className={`block truncate font-mono text-[11px] ${isValidEmail(person.email) ? 'text-text-secondary' : 'text-accent-red'}`}>
+                        {person.email || '-'}
+                      </span>
+                      {person.email && !isValidEmail(person.email) && (
+                        <span className="mt-0.5 block text-[10px] text-accent-red">格式异常</span>
+                      )}
                     </span>
                     <span className="text-text-secondary">{person.region}</span>
                     <span className={loadTone(person.load)}>负载 {person.load}/5</span>
