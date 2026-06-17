@@ -194,6 +194,42 @@ class MaintenanceRecord(Base):
     created_at = Column(DateTime(timezone=True), default=func.now())
 
 
+class AgentActionLog(Base):
+    __tablename__ = "agent_action_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    raw_message = Column(Text, nullable=True)
+    parsed_action = Column(JSON, nullable=True)
+    action = Column(String(64), nullable=False, index=True)
+    params = Column(JSON, nullable=True)
+    before_state = Column(JSON, nullable=True)
+    after_state = Column(JSON, nullable=True)
+    status = Column(String(16), nullable=False, default="pending")
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentTaskPlanState(Base):
+    __tablename__ = "agent_task_plan_states"
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(String(64), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    raw_message = Column(Text, nullable=False)
+    playbook_id = Column(String(128), nullable=False, index=True)
+    page_context = Column(JSON, nullable=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+
 class NotificationLog(Base):
     __tablename__ = "notification_logs"
     id = Column(Integer, primary_key=True, index=True)
