@@ -1,8 +1,11 @@
 /**
- * 总览场景: 地形 + 风机群 + 无人机群 + 路径线
+ * 总览场景: 动态地形 + 风机群 + 无人机群 + 路径线
+ * 根据 activeFarm 自动计算坐标原点和地形范围
  */
 
+import { useMemo } from 'react';
 import { useDrone3DStore } from '../../../services/drone3dStore';
+import { setCoordinateOrigin, computeTurbineBounds } from '../../../utils/coordinateTransform';
 import TerrainSurface from './TerrainSurface';
 import TurbineInstance from './TurbineInstance';
 import DroneInstance from './DroneInstance';
@@ -14,13 +17,28 @@ export default function OverviewScene() {
   const activeFarm = useDrone3DStore((s) => s.activeFarm);
   const focusTurbine = useDrone3DStore((s) => s.focusTurbine);
 
-  const visibleTurbines = activeFarm
-    ? turbines.filter((t) => t.region === activeFarm)
-    : turbines;
+  const visibleTurbines = useMemo(
+    () => activeFarm
+      ? turbines.filter((t) => t.region === activeFarm)
+      : turbines,
+    [turbines, activeFarm],
+  );
+
+  // 动态计算坐标原点 + 地形尺寸
+  const terrainConfig = useMemo(() => {
+    const bounds = computeTurbineBounds(visibleTurbines);
+    if (bounds) {
+      setCoordinateOrigin(bounds.centerLat, bounds.centerLng);
+      const padding = 1.6;
+      const size = Math.max(bounds.extentM * padding, 800);
+      return { width: size, depth: size };
+    }
+    return { width: 800, depth: 800 };
+  }, [visibleTurbines]);
 
   return (
     <>
-      <TerrainSurface />
+      <TerrainSurface width={terrainConfig.width} depth={terrainConfig.depth} />
 
       {visibleTurbines.map((turbine) => (
         <TurbineInstance
