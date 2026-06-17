@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../services/authStore';
+import coverImage from '../../../../../fengmian.png';
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -27,7 +28,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="h-screen flex items-center justify-center ops-page">
+    <div
+      className="h-screen flex items-center justify-center bg-bg-primary"
+      style={{
+        backgroundImage: `linear-gradient(120deg, rgba(7, 26, 53, 0.82), rgba(7, 26, 53, 0.52)), url(${coverImage})`,
+        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+      }}
+    >
       <div className="w-96 p-8 ops-panel shadow-2xl">
         <div className="text-center mb-8">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent-blue/20 text-sm font-bold text-accent-cyan shadow-glow-blue">PHM</div>

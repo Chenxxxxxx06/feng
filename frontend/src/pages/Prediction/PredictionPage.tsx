@@ -369,23 +369,24 @@ function SchedulePreviewModal({ items, conflicts, overflow, onConfirm, onCancel 
             <button onClick={() => onConfirm(items.filter((_, i) => checked[i]))} disabled={count === 0} className="ops-btn ops-btn-primary px-4 py-1.5 text-xs disabled:opacity-50">确认排程 ({count}项)</button>
           </div>
         </div>
-        {overflow.length > 0 && <div className="mx-4 mt-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px] text-accent-red">{overflow.length} 项无法安排：{overflow.slice(0, 5).map((t: any) => `${t.turbine_name} ${t.component}`).join('、')}{overflow.length > 5 ? '等' : ''}</div>}
-        <div className="flex-1 overflow-auto p-4">
+        {overflow.length > 0 && <div className="mx-4 my-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px] text-accent-red">{overflow.length} 项无法安排：{overflow.slice(0, 5).map((t: any) => `${t.turbine_name} ${t.component}`).join('、')}{overflow.length > 5 ? '等' : ''}</div>}
+        <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-[10px]">
-            <thead><tr className="text-text-muted border-b border-border-default sticky top-0 bg-bg-card">
-              <th className="text-left py-1.5 w-8"><input type="checkbox" checked={count === items.length && items.length > 0} onChange={toggleAll} className="w-3 h-3"/></th>
-              <th className="text-left py-1.5">日期</th><th className="text-left py-1.5">风机</th><th className="text-left py-1.5">部件</th><th className="text-right py-1.5">RUL</th><th className="text-right py-1.5">工时</th><th className="text-left py-1.5">措施</th><th className="text-right py-1.5">费用</th>
+            <thead className="sticky top-0 z-10 bg-bg-card/95 backdrop-blur">
+            <tr className="text-text-muted border-b border-border-default">
+              <th className="text-left py-2 pl-4 w-10"><input type="checkbox" checked={count === items.length && items.length > 0} onChange={toggleAll} className="w-3 h-3"/></th>
+              <th className="text-left py-2">日期</th><th className="text-left py-2">风机</th><th className="text-left py-2">部件</th><th className="text-right py-2">RUL</th><th className="text-right py-2">工时</th><th className="text-left py-2">措施</th><th className="text-right py-2 pr-4">费用</th>
             </tr></thead>
             <tbody>{items.map((t, i) => (
               <tr key={i} className={`border-b border-border-default ${checked[i] ? '' : 'opacity-30'}`}>
-                <td className="py-1"><input type="checkbox" checked={checked[i]} onChange={() => toggle(i)} className="w-3 h-3"/></td>
+                <td className="py-1.5 pl-4"><input type="checkbox" checked={checked[i]} onChange={() => toggle(i)} className="w-3 h-3"/></td>
                 <td className="py-1 font-mono text-[9px]">{t.scheduled_date}</td>
                 <td className="py-1">{t.turbine_name}<span className="text-[8px] text-text-muted ml-0.5">{t.region}</span></td>
                 <td className="py-1">{t.component}</td>
                 <td className="py-1 text-right font-mono">{t.rul_days?.toFixed(0)}天</td>
                 <td className="py-1 text-right font-mono text-text-muted">{t.downtime_hours}h</td>
                 <td className="py-1"><span className="px-1 py-0.5 rounded text-[8px] bg-accent-blue/20 text-accent-blue">{t.action}</span></td>
-                <td className="py-1 text-right font-mono">¥{t.cost_estimate?.toLocaleString()}</td>
+                <td className="py-1 pr-4 text-right font-mono">¥{t.cost_estimate?.toLocaleString()}</td>
               </tr>
             ))}</tbody>
           </table>

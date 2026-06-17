@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { rulColor } from '../../hooks/useECharts';
 import api from '../../services/api';
 import type { RULPrediction, WorkOrder } from '../../types';
@@ -31,11 +32,36 @@ function dateKey(d: Date) { const m = d.getMonth() + 1; return `${d.getFullYear(
 function sameDay(a: Date, b: Date) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 
 function weatherBg(score: number) { return score < 30 ? 'bg-accent-red/5' : score < 50 ? 'bg-accent-yellow/5' : ''; }
-function weatherTone(score: number) {
-  if (score >= 80) return 'bg-accent-green';
-  if (score >= 50) return 'bg-accent-blue';
-  if (score >= 30) return 'bg-accent-yellow';
-  return 'bg-accent-red';
+function weatherTextTone(score: number) {
+  if (score >= 80) return 'text-accent-green border-accent-green/25 bg-accent-green/10';
+  if (score >= 50) return 'text-accent-blue border-accent-blue/25 bg-accent-blue/10';
+  if (score >= 30) return 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10';
+  return 'text-accent-red border-accent-red/25 bg-accent-red/10';
+}
+function weatherLabel(day: WeatherDay) {
+  if (!day.safe) return day.score < 30 ? '高风险' : '需关注';
+  if (day.score >= 80) return '适宜';
+  return '可作业';
+}
+function weatherEmoji(day: WeatherDay) {
+  const flags = (day.flags || []).join(' ').toLowerCase();
+  if (/雷|thunder|storm/.test(flags)) return '⛈️';
+  if (/雨|rain|shower|precip/.test(flags)) return '🌧️';
+  if (/雪|snow/.test(flags)) return '❄️';
+  if (/雾|霾|fog|mist|haze/.test(flags)) return '🌫️';
+  if (/风|wind|gust/.test(flags)) return '🌬️';
+  if (!day.safe || day.score < 30) return '⛈️';
+  if (day.score < 50) return '🌧️';
+  if (day.score < 80) return '⛅';
+  return '☀️';
+}
+function tooltipStyle(x: number, y: number) {
+  const width = typeof window === 'undefined' ? 9999 : window.innerWidth;
+  const height = typeof window === 'undefined' ? 9999 : window.innerHeight;
+  return {
+    left: Math.max(8, Math.min(x + 12, width - 320)),
+    top: Math.max(8, Math.min(y + 12, height - 240)),
+  };
 }
 
 // ── Props ──
@@ -144,7 +170,7 @@ export default function MaintenanceCalendar({
 
   // ── Render ──
   return (
-    <div className="ops-panel p-4 flex flex-col">
+    <div className="ops-panel relative p-4 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -187,7 +213,7 @@ export default function MaintenanceCalendar({
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-blue mr-1"/>工单</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-green mr-1"/>RUL计划</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-purple mr-1"/>已排程</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-accent-yellow mr-1"/>天气风险</span>
+        <span><span className="mr-1">☀️/⛈️</span>天气</span>
       </div>
 
       {/* ── Month View ── */}
@@ -200,16 +226,30 @@ export default function MaintenanceCalendar({
       {viewMode === 'day' && selectedDate && <DayView date={selectedDate} events={getEvents(selectedDate)} weather={getWeather(selectedDate)} turbines={turbines} />}
 
       {/* Hover tooltip */}
-      {tooltip && viewMode === 'month' && (
-        <div className="fixed z-[999] premium-card rounded-2xl shadow-xl p-2 min-w-[220px] max-w-[300px] pointer-events-none"
-          style={{ left: tooltip.x + 8, top: tooltip.y }}>
+      {tooltip && viewMode === 'month' && createPortal((
+        <div className="fixed z-[9999] premium-card rounded-2xl shadow-xl p-2 min-w-[220px] max-w-[300px] pointer-events-none"
+          style={tooltipStyle(tooltip.x, tooltip.y)}>
           <p className="text-[10px] font-medium mb-1 border-b pb-1">{tooltip.date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
+          {getWeather(tooltip.date) && (
+            <div className={`mb-1 rounded border px-2 py-1 text-[9px] ${weatherTextTone(getWeather(tooltip.date)!.score)}`}>
+              <span className="mr-1">{weatherEmoji(getWeather(tooltip.date)!)}</span>
+              天气窗口：{weatherLabel(getWeather(tooltip.date)!)} · {getWeather(tooltip.date)!.score}分
+              {getWeather(tooltip.date)!.flags.length > 0 && <span className="text-text-muted"> · {getWeather(tooltip.date)!.flags.join('、')}</span>}
+            </div>
+          )}
           {getEvents(tooltip.date).conflicts.map(c => <p key={c.message} className="text-[9px] text-accent-red">{c.message}</p>)}
           {getEvents(tooltip.date).tasks.map(t => <p key={`t-${t.turbine_id}-${t.component}`} className="text-[9px] text-accent-purple">{t.time_slot} {t.turbine_name} {t.component} {t.action}</p>)}
           {getEvents(tooltip.date).wos.map(w => <p key={`w-${w.id}`} className="text-[9px]">WO-{String(w.id).padStart(4, '0')} {w.title}</p>)}
           {getEvents(tooltip.date).ruls.filter(r => r.remaining_life_days < 90).map(r => <p key={`r-${r.turbine_id}-${r.component}`} className="text-[9px] text-accent-yellow">{r.turbine_name} {r.component} RUL{r.remaining_life_days.toFixed(0)}天</p>)}
+          {(() => {
+            const ev = getEvents(tooltip.date);
+            const w = getWeather(tooltip.date);
+            return !w && ev.conflicts.length + ev.tasks.length + ev.wos.length + ev.ruls.length === 0
+              ? <p className="text-[9px] text-text-muted">暂无排程信息</p>
+              : null;
+          })()}
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }
@@ -231,12 +271,25 @@ function MonthGrid({ cursor, today, selectedDate, getEvents, getWeather, dayCell
           const isToday = sameDay(d, today);
           return (
             <div key={i} className={dayCellClass(d, ev)}
-              onMouseEnter={e => { if (ev.wos.length + ev.ruls.length + ev.tasks.length > 0) { const r = (e.target as HTMLElement).getBoundingClientRect(); onHover({ x: r.right, y: r.top, date: d }); }}}
+              onMouseEnter={e => {
+                if (ev.wos.length + ev.ruls.length + ev.tasks.length + ev.conflicts.length > 0 || w) {
+                  onHover({ x: e.clientX, y: e.clientY, date: d });
+                }
+              }}
+              onMouseMove={e => {
+                if (ev.wos.length + ev.ruls.length + ev.tasks.length + ev.conflicts.length > 0 || w) {
+                  onHover({ x: e.clientX, y: e.clientY, date: d });
+                }
+              }}
               onMouseLeave={() => onHover(null)}
               onClick={() => onClick(d)}>
               <div className="flex items-center justify-between">
                 <span className={`text-[10px] ${isToday ? 'text-accent-blue font-bold' : 'text-text-secondary'}`}>{i + 1}</span>
-                {w && <span className={`h-1.5 w-1.5 rounded-full ${weatherTone(w.score)}`} title={`${w.score}分 ${w.flags.join(',')}`} />}
+                {w && (
+                  <span className={`rounded border px-1 text-[10px] leading-4 ${weatherTextTone(w.score)}`} title={`${weatherLabel(w)} ${w.score}分 ${w.flags.join(',')}`}>
+                    {weatherEmoji(w)}
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-0.5 mt-0.5">
                 {ev.conflicts.filter((c: Conflict) => c.severity === 'error').length > 0 && <span className="w-2 h-2 rounded-sm bg-accent-red"/>}
@@ -277,7 +330,7 @@ function WeekGrid({ cursor, today, selectedDate, getEvents, getWeather, onSelect
             <div key={d.toISOString()} onClick={() => onSelect(d)} className={`bg-bg-secondary p-1 text-center cursor-pointer hover:bg-bg-hover ${isToday ? 'ring-1 ring-accent-blue' : ''} ${isSel ? 'ring-1 ring-accent-purple' : ''}`}>
               <p className="text-[10px] font-medium">{DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
               <p className={`text-[11px] ${isToday ? 'text-accent-blue font-bold' : ''}`}>{d.getDate()}</p>
-              {w && <span className={`mx-auto mt-0.5 block h-1.5 w-1.5 rounded-full ${weatherTone(w.score)}`} title={`${w.score}分`} />}
+              {w && <span className={`mx-auto mt-0.5 block rounded border px-1 text-[10px] leading-4 ${weatherTextTone(w.score)}`} title={`${weatherLabel(w)} ${w.score}分 ${w.flags.join(',')}`}>{weatherEmoji(w)}</span>}
             </div>
           );
         })}
