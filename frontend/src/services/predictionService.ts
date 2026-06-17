@@ -45,13 +45,6 @@ export const predictionService = {
     return data.predictions || [];
   },
 
-  /** Refresh RUL predictions for one or all turbines */
-  async refreshRUL(turbineId?: number): Promise<{ success: boolean; refreshed: number; predictions: number }> {
-    const params = turbineId ? { turbine_id: turbineId } : {};
-    const { data } = await api.post('/prediction/rul/refresh', null, { params });
-    return data;
-  },
-
   /** Get aggregated prediction statistics */
   async getSummary(): Promise<PredictionSummary> {
     const { data } = await api.get('/prediction/summary');
