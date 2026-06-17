@@ -79,7 +79,7 @@ function KPICard({ label, value, unit, color, trend }: { label: string; value: s
       <div className="flex-1 min-w-0">
         <p className="text-[11px] font-medium text-text-muted mb-1 tracking-wide uppercase">{label}</p>
         <p className="text-[26px] font-bold tracking-tight leading-none" style={{ color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums' }}>
-          {value}<span className="text-[13px] font-medium text-text-muted ml-1.5 align-baseline">{unit}</span>
+          {value}<span className="text-[15px] font-semibold ml-1 align-baseline" style={{ color, opacity: 0.55, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{unit}</span>
         </p>
       </div>
       {trend && <span className="text-accent-red text-xs">↑</span>}
