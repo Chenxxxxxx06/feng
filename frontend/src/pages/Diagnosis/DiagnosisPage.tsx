@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import api from '../../services/api';
 import type {
@@ -123,6 +123,8 @@ const COMPONENT_ORDER: TurbineComponentKey[] = [
   'sensor',
 ];
 
+const EMPTY_DIAGNOSIS_SIGNALS: DiagnosisSignalInsight[] = [];
+
 function faultLabel(type: string) {
   return FAULT_LABELS[type] || type;
 }
@@ -164,6 +166,10 @@ function componentTone(component: TurbineComponentKey, activeComponents: Set<Tur
 function shortenText(text: string | undefined | null, max = 18) {
   if (!text) return '--';
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function topologyPercent(value?: number | null) {
+  return value == null ? '--' : `${(value * 100).toFixed(0)}%`;
 }
 
 function priorityLabel(priority: string) {
@@ -248,7 +254,7 @@ function bboxToStyle(bbox: { x: number; y: number; w: number; h: number }) {
   return { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` };
 }
 
-function DiagnosisTopology({
+const DiagnosisTopology = memo(function DiagnosisTopology({
   turbine,
   turbines,
   causes,
@@ -266,17 +272,38 @@ function DiagnosisTopology({
   const [hoveredFaultId, setHoveredFaultId] = useState<number | null>(null);
   const [hoveredCauseId, setHoveredCauseId] = useState<string | null>(null);
   const [hoveredComponent, setHoveredComponent] = useState<TurbineComponentKey | null>(null);
-  const activeComponents = new Set<TurbineComponentKey>([
-    ...causes.map((cause) => cause.component),
-    ...faults.map((fault) => fault.component),
-  ]);
-  const hoveredFault = faults.find((fault) => fault.id === hoveredFaultId);
-  const hoveredCause = causes.find((cause) => cause.id === hoveredCauseId);
-  const selectedFault = faults.find((fault) => fault.selected);
+  const activeComponents = useMemo(
+    () => new Set<TurbineComponentKey>([
+      ...causes.map((cause) => cause.component),
+      ...faults.map((fault) => fault.component),
+    ]),
+    [causes, faults],
+  );
+  const hoveredFault = useMemo(
+    () => faults.find((fault) => fault.id === hoveredFaultId),
+    [faults, hoveredFaultId],
+  );
+  const hoveredCause = useMemo(
+    () => causes.find((cause) => cause.id === hoveredCauseId),
+    [causes, hoveredCauseId],
+  );
+  const selectedFault = useMemo(
+    () => faults.find((fault) => fault.selected),
+    [faults],
+  );
   const focusedComponent = hoveredComponent || hoveredFault?.component || hoveredCause?.component || selectedFault?.component;
   const selectedComponent = focusedComponent || faults[0]?.component;
   const turbineStatus = turbine ? turbineStatusLabel(turbine.status) : '未选择';
   const modelTone = turbine?.status === 'fault' ? '#ff4d5e' : turbine?.status === 'warning' ? '#f6b94a' : '#39d2c0';
+  const updateHoveredComponent = useCallback((component: TurbineComponentKey | null) => {
+    setHoveredComponent((current) => (current === component ? current : component));
+  }, []);
+  const updateHoveredCause = useCallback((causeId: string | null) => {
+    setHoveredCauseId((current) => (current === causeId ? current : causeId));
+  }, []);
+  const updateHoveredFault = useCallback((faultId: number | null) => {
+    setHoveredFaultId((current) => (current === faultId ? current : faultId));
+  }, []);
   const componentOpacity = (component: TurbineComponentKey, base = 1) => {
     if (!focusedComponent || component === focusedComponent) return base;
     return Math.max(0.16, base * 0.28);
@@ -329,13 +356,6 @@ function DiagnosisTopology({
               <stop offset="0%" stopColor="#dcecff" stopOpacity="0.82" />
               <stop offset="100%" stopColor="#58a6ff" stopOpacity="0.48" />
             </linearGradient>
-            <filter id="topologyGlow" x="-40%" y="-40%" width="180%" height="180%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
           </defs>
 
           {leftRows.length === 0 && (
@@ -353,7 +373,7 @@ function DiagnosisTopology({
                   strokeOpacity={connectionOpacity(cause.component, hoveredCauseId === cause.id)}
                   strokeWidth={focusedComponent === cause.component ? '2.2' : '1.4'}
                 />
-                <circle cx={point.x} cy={point.y} r={focusedComponent === cause.component ? '6' : '4'} fill={componentTone(cause.component, activeComponents, selectedComponent)} filter="url(#topologyGlow)" />
+                <circle cx={point.x} cy={point.y} r={focusedComponent === cause.component ? '6' : '4'} fill={componentTone(cause.component, activeComponents, selectedComponent)} />
               </g>
             );
           })}
@@ -373,7 +393,7 @@ function DiagnosisTopology({
                   strokeOpacity={connectionOpacity(fault.component, fault.selected || hoveredFaultId === fault.id)}
                   strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2.4' : '1.4'}
                 />
-                <circle cx={point.x} cy={point.y} r={fault.selected || hoveredFaultId === fault.id ? '7' : '4'} fill={componentTone(fault.component, activeComponents, selectedComponent)} filter="url(#topologyGlow)" />
+                <circle cx={point.x} cy={point.y} r={fault.selected || hoveredFaultId === fault.id ? '7' : '4'} fill={componentTone(fault.component, activeComponents, selectedComponent)} />
               </g>
             );
           })}
@@ -389,7 +409,7 @@ function DiagnosisTopology({
             <path d="M382 152 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
             <path d="M382 199 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
 
-            <circle cx="360" cy="174" r="27" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} filter="url(#topologyGlow)" />
+            <circle cx="360" cy="174" r="27" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} />
             <circle cx="360" cy="174" r="15" fill="#111923" stroke={componentTone('pitch', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('pitch', 0.78)} strokeWidth={componentStrokeWidth('pitch')} />
             <path d="M360 148 V160 M337 186 L348 180 M383 186 L372 180" stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.58)} strokeWidth="5" strokeLinecap="round" />
 
@@ -421,10 +441,10 @@ function DiagnosisTopology({
               <g
                 key={component}
                 className="cursor-pointer"
-                onMouseEnter={() => setHoveredComponent(component)}
-                onMouseLeave={() => setHoveredComponent(null)}
-                onFocus={() => setHoveredComponent(component)}
-                onBlur={() => setHoveredComponent(null)}
+                onMouseEnter={() => updateHoveredComponent(component)}
+                onMouseLeave={() => updateHoveredComponent(null)}
+                onFocus={() => updateHoveredComponent(component)}
+                onBlur={() => updateHoveredComponent(null)}
                 role="button"
                 tabIndex={0}
               >
@@ -442,13 +462,14 @@ function DiagnosisTopology({
             return (
               <g
                 key={`cause-${cause.id}`}
-                onMouseEnter={() => setHoveredCauseId(cause.id)}
-                onMouseLeave={() => setHoveredCauseId(null)}
+                onMouseEnter={() => updateHoveredCause(cause.id)}
+                onMouseLeave={() => updateHoveredCause(null)}
               >
                 <rect x="28" y={y} width="224" height="54" rx="8" fill={hoveredCauseId === cause.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={hoveredCauseId === cause.id ? '0.84' : '0.34'} strokeWidth={hoveredCauseId === cause.id ? '2' : '1'} />
-                <text x="42" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(cause.label, 17)}</text>
-                <text x="42" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(cause.detail, 24)}</text>
-                <text x="200" y={y + 36} fill={tone} fontSize="10" textAnchor="end">{cause.score ? `${(cause.score * 100).toFixed(0)}%` : '--'}</text>
+                <text x="42" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(cause.label, 15)}</text>
+                <text x="42" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(cause.detail, 18)}</text>
+                <rect x="201" y={y + 25} width="39" height="16" rx="8" fill="#071A35" stroke={tone} strokeOpacity="0.38" />
+                <text x="220.5" y={y + 36} fill={tone} fontSize="10" fontWeight="700" textAnchor="middle">{topologyPercent(cause.score)}</text>
               </g>
             );
           })}
@@ -461,10 +482,10 @@ function DiagnosisTopology({
               <g
                 key={`fault-${fault.id}`}
                 onClick={() => !disabled && onFaultSelect(fault.id)}
-                onMouseEnter={() => !disabled && setHoveredFaultId(fault.id)}
-                onMouseLeave={() => setHoveredFaultId(null)}
-                onFocus={() => !disabled && setHoveredFaultId(fault.id)}
-                onBlur={() => setHoveredFaultId(null)}
+                onMouseEnter={() => !disabled && updateHoveredFault(fault.id)}
+                onMouseLeave={() => updateHoveredFault(null)}
+                onFocus={() => !disabled && updateHoveredFault(fault.id)}
+                onBlur={() => updateHoveredFault(null)}
                 onKeyDown={(event) => {
                   if (!disabled && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
@@ -476,10 +497,11 @@ function DiagnosisTopology({
                 tabIndex={disabled ? undefined : 0}
               >
                 <rect x="648" y={y} width="224" height="54" rx="8" fill={fault.selected || hoveredFaultId === fault.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={fault.selected || hoveredFaultId === fault.id ? '0.9' : '0.38'} strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2' : '1'} />
-                <text x="662" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(fault.label, 16)}</text>
-                <text x="662" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(fault.turbineLabel, 12)} · {processingStatusLabel(fault.processingStatus)}</text>
-                <text x="858" y={y + 18} fill={tone} fontSize="10" textAnchor="end">{fault.confidence ? `${(fault.confidence * 100).toFixed(0)}%` : '--'}</text>
-                <text x="858" y={y + 36} fill="#8d9aaa" fontSize="10" textAnchor="end">{shortenText(fault.workOrderTitle || '未关联工单', 10)}</text>
+                <text x="662" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(fault.label, 14)}</text>
+                <text x="662" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(fault.turbineLabel, 9)} · {shortenText(processingStatusLabel(fault.processingStatus), 4)}</text>
+                <rect x="823" y={y + 8} width="38" height="16" rx="8" fill="#071A35" stroke={tone} strokeOpacity="0.38" />
+                <text x="842" y={y + 19} fill={tone} fontSize="10" fontWeight="700" textAnchor="middle">{topologyPercent(fault.confidence)}</text>
+                <text x="858" y={y + 36} fill="#8d9aaa" fontSize="10" textAnchor="end">{shortenText(fault.workOrderTitle || '未关联工单', 8)}</text>
               </g>
             );
           })}
@@ -487,7 +509,7 @@ function DiagnosisTopology({
       </div>
     </section>
   );
-}
+});
 
 export default function DiagnosisPage() {
   const [faults, setFaults] = useState<Fault[]>([]);
@@ -526,6 +548,20 @@ export default function DiagnosisPage() {
   const waveformRef = useRef<HTMLDivElement>(null);
   const spectrumRef = useRef<HTMLDivElement>(null);
 
+  const viewDetail = useCallback(async (id: number) => {
+    const { data } = await api.get(`/diagnosis/faults/${id}`);
+    setSelected(data);
+    setSelectedTurbineId(data.turbine_id);
+    setAutoResult(null);
+  }, []);
+
+  const loadVibration = useCallback(async (turbineId: number, nextComponent: string, faultType: string | undefined) => {
+    const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
+    if (faultType) params.fault_type = faultType;
+    const { data } = await api.get('/diagnosis/vibration', { params });
+    setVibration(data);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     Promise.all([
@@ -545,12 +581,12 @@ export default function DiagnosisPage() {
       .catch(() => setError('诊断数据加载失败'))
       .finally(() => setLoading(false));
     return () => { mounted = false; };
-  }, []);
+  }, [viewDetail]);
 
   useEffect(() => {
     if (!selectedTurbineId) return;
     loadVibration(selectedTurbineId, component, undefined);
-  }, [selectedTurbineId, component]);
+  }, [selectedTurbineId, component, loadVibration]);
 
   useEffect(() => {
     if (monitorMode !== 'single' || !selectedTurbineId) return;
@@ -731,17 +767,19 @@ export default function DiagnosisPage() {
     ? `${(faults.reduce((sum, f) => sum + f.confidence, 0) / faults.length * 100).toFixed(1)}%`
     : '--';
 
-  const insights: DiagnosisSignalInsight[] = autoResult?.signals
-    || selected?.signal_insights
-    || selected?.signals?.map((s) => ({
-      sensor_name: s.sensor_name,
-      value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
-      normal_range: `优先级${priorityLabelValue(s.priority)}`,
-      contribution_score: s.contribution_score,
-      priority: s.priority,
-      finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
-    }))
-    || [];
+  const insights = useMemo<DiagnosisSignalInsight[]>(() => (
+    autoResult?.signals
+      || selected?.signal_insights
+      || selected?.signals?.map((s) => ({
+        sensor_name: s.sensor_name,
+        value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
+        normal_range: `优先级${priorityLabelValue(s.priority)}`,
+        contribution_score: s.contribution_score,
+        priority: s.priority,
+        finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
+      }))
+      || EMPTY_DIAGNOSIS_SIGNALS
+  ), [autoResult?.signals, selected?.signal_insights, selected?.signals]);
 
   const troubleshootingSteps = autoResult?.troubleshooting_steps
     || selected?.troubleshooting_steps
@@ -753,7 +791,7 @@ export default function DiagnosisPage() {
   const currentGroupTurbinePage = Math.min(groupTurbinePage, groupTotalTurbinePages);
   const currentGroupRecord = groupCauseRecords[currentGroupTurbinePage - 1] || null;
   const activeCauseInsights = monitorMode === 'group'
-    ? currentGroupRecord?.signals || []
+    ? currentGroupRecord?.signals || EMPTY_DIAGNOSIS_SIGNALS
     : insights;
   const activeTroubleshootingSteps = monitorMode === 'group'
     ? currentGroupRecord?.troubleshooting_steps || []
@@ -821,20 +859,6 @@ export default function DiagnosisPage() {
     { label: '平均置信度', value: avgConfidence, unit: '', color: 'text-accent-cyan' },
     { label: '高优先级信号', value: String(highRiskSignals), unit: '项', color: highRiskSignals ? 'text-accent-red' : 'text-accent-green' },
   ];
-
-  async function viewDetail(id: number) {
-    const { data } = await api.get(`/diagnosis/faults/${id}`);
-    setSelected(data);
-    setSelectedTurbineId(data.turbine_id);
-    setAutoResult(null);
-  }
-
-  async function loadVibration(turbineId: number, nextComponent: string, faultType: string | undefined) {
-    const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
-    if (faultType) params.fault_type = faultType;
-    const { data } = await api.get('/diagnosis/vibration', { params });
-    setVibration(data);
-  }
 
   async function runAutoDetect() {
     if (!selectedTurbineId) return;
