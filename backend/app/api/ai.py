@@ -353,17 +353,20 @@ async def analyze_fault(
     ]
 
     try:
-        diagnosis = await asyncio.to_thread(
-            diagnose_fault,
-            turbine_data,
-            fault_data,
-            model=current_user.model_preference,
-            api_key=current_user.api_key,
-            api_provider=current_user.api_provider,
-            base_url=current_user.api_base_url,
+        diagnosis = await asyncio.wait_for(
+            asyncio.to_thread(
+                diagnose_fault,
+                turbine_data,
+                fault_data,
+                model=current_user.model_preference,
+                api_key=current_user.api_key,
+                api_provider=current_user.api_provider,
+                base_url=current_user.api_base_url,
+            ),
+            timeout=25.0,
         )
-    except Exception as e:
-        logger.warning(f"AI diagnosis failed: {e}")
+    except (Exception, asyncio.TimeoutError):
+        logger.warning(f"AI diagnosis failed for turbine {turbine.id}, falling back to local")
         diagnosis = _generate_local_diagnosis(turbine_data, anomalies)
 
     return AIFaultAnalysisResponse(

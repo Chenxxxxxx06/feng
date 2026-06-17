@@ -145,6 +145,7 @@ export default function WorkOrderPage() {
   const [deletingOrder, setDeletingOrder] = useState(false);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [aiError, setAiError] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -261,6 +262,7 @@ export default function WorkOrderPage() {
     if (previewWO?.id === deleteTarget.id) {
       setPreviewWO(null);
       setAiAnalysis(null);
+      setAiError('');
       setEditingWO(false);
     }
     setDeleteTarget(null);
@@ -344,13 +346,35 @@ export default function WorkOrderPage() {
     setPreviewWO(wo);
     setEditingWO(false);
     setAnalyzing(true);
+    setAiError('');
+    setAiAnalysis(null);
     try {
       const { data } = await api.post('/ai/analyze-fault', {
         turbine_id: wo.turbine_id,
         fault_type: wo.fault_type || wo.title || '未知故障',
-      });
+      }, { timeout: 60000 });
       setAiAnalysis(data);
-    } catch {
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || '';
+      const axiosCode = err?.code || '';
+      if (status === 404) {
+        setAiError(`风机 #${wo.turbine_id} 不存在或已删除，无法获取SCADA数据进行AI分析。`);
+      } else if (status === 503) {
+        setAiError('AI诊断服务当前不可用，请检查系统AI配置或稍后重试。');
+      } else if (status === 401 || status === 403) {
+        setAiError('AI服务鉴权失败，请在系统设置中配置有效的API KEY。');
+      } else if (status === 500) {
+        setAiError(detail ? `服务器内部错误：${detail}` : '服务器内部错误，请查看后端日志。');
+      } else if (status) {
+        setAiError(detail || `请求失败 (HTTP ${status})，请检查后端服务。`);
+      } else if (axiosCode === 'ECONNABORTED') {
+        setAiError('AI分析请求超时（>15秒），AI供应商响应过慢或网络不稳，请稍后重试。');
+      } else if (axiosCode === 'ERR_NETWORK' || axiosCode === 'ERR_CONNECTION_REFUSED') {
+        setAiError('无法连接后端服务（端口8000），请确认后端已启动：cd feng/backend && python -m app.main');
+      } else {
+        setAiError(`请求失败 (${axiosCode || '未知错误'})：${err?.message || ''}。请检查后端服务是否运行、AI配置是否正确。`);
+      }
       setAiAnalysis(null);
     }
     setAnalyzing(false);
@@ -621,7 +645,7 @@ export default function WorkOrderPage() {
         )}
 
         {previewWO && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); }}>
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); setAiError(''); }}>
             <div className="ops-drawer h-full w-full max-w-[720px] overflow-auto" onClick={e => e.stopPropagation()}>
               <div className="sticky top-0 z-10 border-b border-border-default bg-bg-panel/95 px-6 py-4 backdrop-blur">
                 <div className="flex items-start justify-between gap-4">
@@ -630,7 +654,7 @@ export default function WorkOrderPage() {
                     <h3 className="mt-1 text-lg font-semibold">{editingWO ? '编辑工单' : previewWO.title}</h3>
                     <p className="mt-1 text-xs text-text-muted">状态：{STATUS_LABEL[previewWO.status] || previewWO.status}</p>
                   </div>
-                  <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); }} className="ops-btn px-3 py-1.5 text-sm">关闭</button>
+                  <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); setAiError(''); }} className="ops-btn px-3 py-1.5 text-sm">关闭</button>
                 </div>
               </div>
 
@@ -714,6 +738,10 @@ export default function WorkOrderPage() {
                           <span className="ml-3">{a.deviation}</span>
                         </div>
                       ))}
+                    </div>
+                  ) : aiError ? (
+                    <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 px-3 py-2">
+                      <p className="text-xs text-accent-red leading-5">{aiError}</p>
                     </div>
                   ) : (
                     <p className="text-text-muted">暂无分析结果。</p>
