@@ -78,8 +78,8 @@ function KPICard({ label, value, unit, color, trend }: { label: string; value: s
       <div className="w-1 h-12 rounded-full flex-shrink-0 transition-all duration-300 group-hover:h-14" style={{ background: `linear-gradient(180deg, ${color} 0%, ${color}44 100%)`, boxShadow: `0 0 12px ${color}33` }} />
       <div className="flex-1 min-w-0">
         <p className="text-[11px] font-medium text-text-muted mb-1 tracking-wide uppercase">{label}</p>
-        <p className="text-[26px] font-bold tracking-tight leading-none" style={{ color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums' }}>
-          {value}<span className="text-[15px] font-semibold ml-1 align-baseline" style={{ color, opacity: 0.55, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{unit}</span>
+        <p className="text-[26px] font-bold tracking-tight leading-none" style={{ color, fontFamily: "'Inter', 'Noto Sans SC', system-ui, sans-serif", fontVariantNumeric: 'tabular-nums' }}>
+          {value}<span className="text-[15px] font-semibold ml-1 align-baseline" style={{ color, opacity: 0.55, fontFamily: "'Inter', 'Noto Sans SC', system-ui, sans-serif" }}>{unit}</span>
         </p>
       </div>
       {trend && <span className="text-accent-red text-xs">↑</span>}
@@ -101,7 +101,7 @@ function HealthRing({ value, size = 52, strokeWidth = 5, label }: { value: numbe
         <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeOpacity="0.12" strokeWidth={strokeWidth} />
         <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={`url(#${gid})`} strokeWidth={strokeWidth} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} className="health-ring-circle" style={{ filter: `drop-shadow(0 0 6px ${color}55)` }} />
       </svg>
-      <span className="text-xs font-bold" style={{ color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{value.toFixed(0)}</span>
+      <span className="text-xs font-bold" style={{ color, fontFamily: "'Inter', 'Noto Sans SC', system-ui, sans-serif" }}>{value.toFixed(0)}</span>
       <span className="text-[10px] text-text-muted leading-tight text-center">{label}</span>
     </div>
   );
@@ -164,7 +164,7 @@ function ComponentHealthCard({ label, temperature, maxTemp, unit = '°C', status
   return (
     <div className="px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-bg-hover/50" style={{ border: '1px solid rgba(59,130,246,0.08)' }}>
       <div className="flex items-center justify-between mb-1.5"><span className="text-[11px] text-text-secondary">{label}</span><span className="w-1.5 h-1.5 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}` }} /></div>
-      <p className="text-lg font-bold" style={{ color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{temperature.toFixed(1)}{unit}</p>
+      <p className="text-lg font-bold" style={{ color, fontFamily: "'Inter', 'Noto Sans SC', system-ui, sans-serif" }}>{temperature.toFixed(1)}{unit}</p>
       <div className="mt-1.5 h-1 rounded-full" style={{ background: 'rgba(59,130,246,0.10)' }}><div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${color}88, ${color})` }} /></div>
     </div>
   );
@@ -373,7 +373,7 @@ export default function DashboardPage() {
                       <circle cx="60" cy="60" r="52" fill="none" stroke={hiColor(detail.hi_value)} strokeWidth="8" strokeLinecap="round" strokeDasharray={2 * Math.PI * 52} strokeDashoffset={2 * Math.PI * 52 * (1 - detail.hi_value / 100)} style={{ filter: `drop-shadow(0 0 12px ${hiColor(detail.hi_value)}66)`, transition: 'stroke-dashoffset 1s cubic-bezier(0.16, 1, 0.3, 1)' }} />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <p className="text-3xl font-bold" style={{ color: hiColor(detail.hi_value), fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{detail.hi_value.toFixed(0)}</p>
+                      <p className="text-3xl font-bold" style={{ color: hiColor(detail.hi_value), fontFamily: "'Inter', 'Noto Sans SC', system-ui, sans-serif" }}>{detail.hi_value.toFixed(0)}</p>
                       <p className="text-[10px] text-text-muted font-medium">健康指数</p>
                     </div>
                   </div>
@@ -383,7 +383,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   {[{ label: '额定功率', value: `${detail.power_mw} MW`, color: '#3B82F6' }, { label: '上次维护', value: detail.last_maintenance ? new Date(detail.last_maintenance).toLocaleDateString('zh-CN') : '--', color: '#94A3B8' }, { label: '机型', value: detail.model || '--', color: '#22D3EE' }, { label: '区域', value: detail.region, color: '#94A3B8' }].map((item) => (
-                    <div key={item.label} className="premium-card rounded-xl p-3.5"><p className="text-[10px] text-text-muted mb-1">{item.label}</p><p className="text-sm font-bold" style={{ color: item.color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{item.value}</p></div>
+                    <div key={item.label} className="premium-card rounded-xl p-3.5"><p className="text-[10px] text-text-muted mb-1">{item.label}</p><p className="text-sm font-bold" style={{ color: item.color, fontFamily: "'Inter', 'Noto Sans SC', system-ui, sans-serif" }}>{item.value}</p></div>
                   ))}
                 </div>
                 <div className="space-y-2.5 pt-1">
