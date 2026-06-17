@@ -1,0 +1,965 @@
+{
+  "version": "2026-06-16",
+  "description": "高级受控动作拆解知识库。高级动作是业务流程，不是直接数据库写入；最终写入只能由低级原子动作执行。",
+  "global_rules": [
+    "所有write步骤必须位于require_confirmation之后。",
+    "所有工作流必须先解析实体，再查询上下文，再做校验和草拟。",
+    "模型只能选择workflow和填充slots，不得跳过后端校验。",
+    "涉及删除、关闭、取消、批量执行、外部通知、API KEY配置的动作默认为高风险。",
+    "业务页面自身函数不作为Agent执行入口；Agent只使用后端专属工具、公共API或Agent Gateway。",
+    "写入后必须回读校验，校验失败应回滚或标记失败。"
+  ],
+  "workflows": [
+    {
+      "id": "workorder.create",
+      "name": "创建维修工单",
+      "category": "workorder",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "为指定风机创建维修工单，可由系统根据故障上下文草拟标题、故障类型、优先级和描述。",
+      "requirement_refs": ["4.5.1", "3.3", "数据词典-工单"],
+      "keywords": ["创建工单", "新建工单", "发起工单", "发起", "维修工单", "维修任务", "开工单", "建工单"],
+      "intent_examples": [
+        "为YD-B-007号风机发起一份维修工单，暂不指定维护人员",
+        "给YH-A-001的轴承异常创建高优先级工单",
+        "给YD-B007建一个维修任务"
+      ],
+      "required_slots": ["turbine_ref"],
+      "optional_slots": ["assignee_name", "fault_keyword", "priority", "title", "description", "cost_estimate", "due_date"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read"},
+        {"step": "query_turbine_fault_context", "type": "read"},
+        {"step": "resolve_personnel_by_name", "type": "read", "optional": true},
+        {"step": "draft_workorder_fields", "type": "infer"},
+        {"step": "validate_workorder_draft", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "create_workorder_record", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_turbine_fault_context", "resolve_personnel_by_name", "draft_workorder_fields", "create_workorder_record"],
+      "final_write_action": "create_workorder_record",
+      "confirmation_required": true,
+      "confirm_payload": {
+        "required_fields": ["turbine_name", "title", "fault_type", "priority", "status", "assignee", "description"],
+        "must_show_context": ["fault_context", "turbine_status", "hi_value"]
+      },
+      "missing_slot_prompts": {
+        "turbine_ref": "请说明要为哪台风机创建维修工单，例如 YD-B-007。"
+      },
+      "business_rules": [
+        "风机必须存在且唯一。",
+        "用户未指定维护人员时，允许创建待分配工单。",
+        "标题、优先级、描述可由系统草拟，但必须在确认卡片中展示。",
+        "如果没有明确故障上下文，故障类型可草拟为待诊断，并在确认卡片中提示。"
+      ],
+      "forbidden": [
+        "不得在风机解析失败时创建工单。",
+        "不得绕过确认直接创建工单。",
+        "不得把create_workorder_workflow当成最终写动作。"
+      ],
+      "result_presentation": {"navigate_to": "/workorder", "open_entity": "workorder"}
+    },
+    {
+      "id": "workorder.assign",
+      "name": "分配维修工单",
+      "category": "workorder",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "将指定维修工单分配给指定维修人员。",
+      "requirement_refs": ["4.5.1"],
+      "keywords": ["分配", "派给", "派工", "指派", "交给", "安排给", "分配给", "师傅", "工程师"],
+      "intent_examples": ["把WO-0003分配给张三", "把WO-0001分配给张三师傅", "WO-0005派给王工", "让李四处理3号工单"],
+      "required_slots": ["workorder_ref", "assignee_name"],
+      "optional_slots": ["turbine_ref", "fault_keyword"],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read"},
+        {"step": "resolve_personnel_by_name", "type": "read"},
+        {"step": "validate_assignment", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "assign_workorder", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "resolve_personnel_by_name", "assign_workorder"],
+      "final_write_action": "assign_workorder",
+      "confirmation_required": true,
+      "confirm_payload": {
+        "required_fields": ["workorder_ref", "title", "before_assignee", "after_assignee", "before_status", "after_status"]
+      },
+      "missing_slot_prompts": {
+        "workorder_ref": "请说明具体工单编号，例如 WO-0003。",
+        "assignee_name": "请说明要分配给哪位师傅。"
+      },
+      "business_rules": [
+        "completed、closed、cancelled状态的工单不允许重新派工。",
+        "已有负责人且会被覆盖时必须在确认卡片中提示。",
+        "指定人员必须存在且可用。"
+      ],
+      "forbidden": ["不得跳过用户确认。", "不得派给未注册或不可用人员。"],
+      "result_presentation": {"navigate_to": "/workorder", "open_entity": "workorder"}
+    },
+    {
+      "id": "workorder.advance_status",
+      "name": "推进工单状态",
+      "category": "workorder",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "按状态机推进维修工单状态，例如待处理到处理中、处理中到复核、复核到完成。",
+      "requirement_refs": ["4.5.1"],
+      "keywords": ["标记为", "推进", "完成工单", "关闭工单", "提交复核", "开始处理"],
+      "intent_examples": ["把WO-0003标记为处理中", "WO-0004提交复核", "关闭WO-0005"],
+      "required_slots": ["workorder_ref", "target_status"],
+      "optional_slots": ["maintenance_note", "cost_actual", "downtime_hours"],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read"},
+        {"step": "validate_workorder_status_transition", "type": "validate"},
+        {"step": "draft_maintenance_record", "type": "infer", "optional": true},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "advance_workorder_status", "type": "write"},
+        {"step": "add_maintenance_record", "type": "write", "optional": true},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "advance_workorder_status", "add_maintenance_record"],
+      "final_write_action": "advance_workorder_status",
+      "confirmation_required": true,
+      "confirm_payload": {
+        "required_fields": ["workorder_ref", "title", "before_status", "target_status", "maintenance_note"]
+      },
+      "missing_slot_prompts": {
+        "workorder_ref": "请说明要处理的工单编号。",
+        "target_status": "请说明要把工单推进到哪个状态。"
+      },
+      "business_rules": [
+        "状态流建议为 pending -> assigned -> in_progress -> review -> completed -> closed。",
+        "关闭或完成工单时建议要求维护说明、实际成本或停机时长。",
+        "状态回退属于高风险动作，需要强确认或管理员权限。"
+      ],
+      "forbidden": ["不得从closed或cancelled状态继续推进。", "不得无记录地关闭工单。"],
+      "result_presentation": {"navigate_to": "/workorder", "open_entity": "workorder"}
+    },
+    {
+      "id": "workorder.update_fields",
+      "name": "修改工单字段",
+      "category": "workorder",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "修改工单标题、描述、故障类型、优先级、成本估算、截止时间等字段。",
+      "requirement_refs": ["4.5.1"],
+      "keywords": ["修改工单", "更新工单", "调整优先级", "补充描述", "修改成本"],
+      "intent_examples": ["把WO-0003优先级改成紧急", "把WO-0001优先级改成紧急", "给WO-0004补充维修说明", "修改WO-0005预计成本为50000"],
+      "required_slots": ["workorder_ref", "patch_fields"],
+      "optional_slots": ["reason"],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read"},
+        {"step": "validate_workorder_patch", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "update_workorder_record", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "update_workorder_record"],
+      "final_write_action": "update_workorder_record",
+      "confirmation_required": true,
+      "confirm_payload": {
+        "required_fields": ["workorder_ref", "changed_fields", "before_state", "after_state"]
+      },
+      "missing_slot_prompts": {
+        "workorder_ref": "请说明要修改哪张工单。",
+        "patch_fields": "请说明要修改哪些字段。"
+      },
+      "business_rules": [
+        "已关闭工单仅允许追加记录，不建议修改核心字段。",
+        "成本、日期、优先级必须通过类型校验。"
+      ],
+      "forbidden": ["不得修改已删除工单。", "不得隐藏变更前后差异。"],
+      "result_presentation": {"navigate_to": "/workorder", "open_entity": "workorder"}
+    },
+    {
+      "id": "workorder.cancel_or_delete",
+      "name": "取消或删除工单",
+      "category": "workorder",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "取消、软删除或删除维修工单。",
+      "requirement_refs": ["4.5.1", "6.软件属性需求-安全保密性"],
+      "keywords": ["取消工单", "删除工单", "作废工单"],
+      "intent_examples": ["取消WO-0003", "取消WO-0001，原因是误创建", "删除误创建的WO-0004"],
+      "required_slots": ["workorder_ref", "reason"],
+      "optional_slots": [],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read"},
+        {"step": "validate_workorder_cancel", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "cancel_workorder_record", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "cancel_workorder_record"],
+      "final_write_action": "cancel_workorder_record",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["workorder_ref", "title", "status", "reason"]},
+      "missing_slot_prompts": {
+        "workorder_ref": "请说明要取消或删除的工单编号。",
+        "reason": "请说明取消或删除原因。"
+      },
+      "business_rules": [
+        "删除/取消属于高风险动作，应二次确认。",
+        "已完成或已关闭工单原则上不物理删除，只能软删除或追加作废说明。"
+      ],
+      "forbidden": ["不得批量删除工单。", "不得无原因删除。"],
+      "result_presentation": {"navigate_to": "/workorder"}
+    },
+    {
+      "id": "workorder.add_progress_record",
+      "name": "追加维修进度记录",
+      "category": "workorder",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "给工单追加现场处理记录、排查结论、备件使用、成本或停机时长。",
+      "requirement_refs": ["4.5.1", "3.3"],
+      "keywords": ["追加记录", "维修记录", "处理说明", "备件", "成本", "停机"],
+      "intent_examples": ["给WO-0003追加记录：已更换轴承", "记录WO-0004停机2小时，成本12000"],
+      "required_slots": ["workorder_ref", "record_content"],
+      "optional_slots": ["action_type", "cost_actual", "downtime_hours", "spare_parts"],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read"},
+        {"step": "draft_maintenance_record", "type": "infer"},
+        {"step": "validate_maintenance_record", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "add_maintenance_record", "type": "write"},
+        {"step": "update_workorder_record", "type": "write", "optional": true},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "add_maintenance_record", "update_workorder_record"],
+      "final_write_action": "add_maintenance_record",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["workorder_ref", "record_content", "cost_actual", "downtime_hours"]},
+      "missing_slot_prompts": {
+        "workorder_ref": "请说明要追加记录的工单编号。",
+        "record_content": "请说明要记录的处理内容。"
+      },
+      "business_rules": [
+        "维护记录追加后不可静默删除。",
+        "若记录包含状态变更，应同时走状态流校验。"
+      ],
+      "forbidden": ["不得覆盖历史记录。"],
+      "result_presentation": {"navigate_to": "/workorder", "open_entity": "workorder"}
+    },
+    {
+      "id": "workorder.send_notification",
+      "name": "发送工单通知",
+      "category": "workorder",
+      "risk_level": "high",
+      "implementation_status": "planned",
+      "description": "向指定人员或邮箱发送工单通知并记录通知日志。",
+      "requirement_refs": ["4.5.2", "4.7.1"],
+      "keywords": ["通知", "邮件", "发送", "提醒", "告警"],
+      "intent_examples": ["把WO-0003发送给张三邮箱", "通知维护组处理WO-0005"],
+      "required_slots": ["workorder_ref", "recipients"],
+      "optional_slots": ["message", "channel"],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read"},
+        {"step": "resolve_personnel_by_name", "type": "read", "optional": true},
+        {"step": "draft_notification_content", "type": "infer"},
+        {"step": "validate_notification_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "send_workorder_notification", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "resolve_personnel_by_name", "send_workorder_notification"],
+      "final_write_action": "send_workorder_notification",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["workorder_ref", "recipients", "subject", "content"]},
+      "missing_slot_prompts": {
+        "workorder_ref": "请说明要发送哪张工单。",
+        "recipients": "请说明通知对象或邮箱。"
+      },
+      "business_rules": [
+        "外部通知属于副作用动作，必须确认收件人和内容。",
+        "通知失败必须返回具体错误并写入日志。"
+      ],
+      "forbidden": ["不得泄露API KEY或敏感配置。", "不得向未确认邮箱发送通知。"],
+      "result_presentation": {"navigate_to": "/workorder", "open_entity": "workorder"}
+    },
+    {
+      "id": "diagnosis.run_auto_detection",
+      "name": "执行单机自动故障检测",
+      "category": "diagnosis",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "对单台风机执行自动故障识别，输出故障类型、置信度、异常信号和排查步骤，必要时生成故障记录。",
+      "requirement_refs": ["4.3.1", "4.3.4"],
+      "keywords": ["自动检测", "故障识别", "诊断", "运行检测", "检测故障"],
+      "intent_examples": ["对YD-B-007运行自动故障检测", "诊断这台风机的齿轮箱", "给A组3号风机做故障识别"],
+      "required_slots": ["turbine_ref"],
+      "optional_slots": ["component", "window_hours", "data_source", "persist_result"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read"},
+        {"step": "query_vibration_context", "type": "read"},
+        {"step": "validate_detection_input", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "run_auto_fault_detection", "type": "write"},
+        {"step": "query_knowledge_context", "type": "read", "optional": true},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_vibration_context", "run_auto_fault_detection", "query_knowledge_context"],
+      "final_write_action": "run_auto_fault_detection",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["turbine_name", "component", "window_hours", "data_source", "persist_result"]},
+      "missing_slot_prompts": {
+        "turbine_ref": "请说明要检测哪台风机。"
+      },
+      "business_rules": [
+        "如果检测结果会落库或影响故障列表，必须确认。",
+        "缺少振动数据时不得强行输出确定故障，应返回数据不足。"
+      ],
+      "forbidden": ["不得把低置信度结果直接当成已确认故障。"],
+      "result_presentation": {"navigate_to": "/diagnosis", "open_entity": "fault_or_detection_result"}
+    },
+    {
+      "id": "diagnosis.run_batch_detection",
+      "name": "执行批量故障检测",
+      "category": "diagnosis",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "按区域、状态或风机列表批量执行自动故障检测。",
+      "requirement_refs": ["4.3.1", "5.1", "5.2"],
+      "keywords": ["批量检测", "全场检测", "A组检测", "批量诊断", "故障检测", "预警风机", "风场"],
+      "intent_examples": ["对风场A所有预警风机做故障检测", "批量检测B组风机齿轮箱", "批量检测故障风机齿轮箱"],
+      "required_slots": ["scope"],
+      "optional_slots": ["component", "window_hours", "data_source", "persist_result"],
+      "standard_workflow": [
+        {"step": "query_fleet_overview", "type": "read"},
+        {"step": "resolve_batch_turbines", "type": "read"},
+        {"step": "validate_batch_detection_scope", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "run_batch_fault_detection", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_fleet_overview", "run_batch_fault_detection"],
+      "final_write_action": "run_batch_fault_detection",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["scope", "turbine_count", "component", "window_hours", "persist_result"]},
+      "missing_slot_prompts": {
+        "scope": "请说明批量检测范围，例如风场A、预警风机或具体风机列表。"
+      },
+      "business_rules": [
+        "批量动作必须显示影响风机数量。",
+        "超过阈值数量时建议二次确认或后台任务执行。"
+      ],
+      "forbidden": ["不得默认对全场执行批量写入。"],
+      "result_presentation": {"navigate_to": "/diagnosis"}
+    },
+    {
+      "id": "diagnosis.create_fault",
+      "name": "人工创建故障记录",
+      "category": "diagnosis",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "根据人工确认或外部信息为风机创建故障记录。",
+      "requirement_refs": ["3.2", "4.3.1", "4.3.4"],
+      "keywords": ["创建故障", "新增故障", "登记故障", "记录故障"],
+      "intent_examples": ["给YD-B-007登记齿轮箱过热故障，置信度80%", "新增YH-A-001轴承异常"],
+      "required_slots": ["turbine_ref", "fault_type"],
+      "optional_slots": ["confidence", "priority", "details"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read"},
+        {"step": "query_turbine_fault_context", "type": "read"},
+        {"step": "validate_fault_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "create_fault_record", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_turbine_fault_context", "create_fault_record"],
+      "final_write_action": "create_fault_record",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["turbine_name", "fault_type", "confidence", "priority", "details"]},
+      "missing_slot_prompts": {
+        "turbine_ref": "请说明故障属于哪台风机。",
+        "fault_type": "请说明故障类型。"
+      },
+      "business_rules": [
+        "同一风机同类活跃故障存在时，应提示可能重复。",
+        "置信度必须在0到1之间；未提供时应标记人工录入或待确认。"
+      ],
+      "forbidden": ["不得创建无风机归属的故障。"],
+      "result_presentation": {"navigate_to": "/diagnosis", "open_entity": "fault"}
+    },
+    {
+      "id": "diagnosis.update_fault",
+      "name": "更新故障记录",
+      "category": "diagnosis",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "更新故障类型、置信度、优先级、详情或处理状态备注。",
+      "requirement_refs": ["4.3.1", "4.3.4"],
+      "keywords": ["更新故障", "修改故障", "调整置信度", "置信度", "改置信度", "改优先级", "故障优先级"],
+      "intent_examples": ["把故障12置信度改成90%", "把故障1置信度改成90%", "将YD-B-007最新故障优先级改为高"],
+      "required_slots": ["fault_ref_or_context", "patch_fields"],
+      "optional_slots": ["reason"],
+      "standard_workflow": [
+        {"step": "resolve_fault_by_id_or_context", "type": "read"},
+        {"step": "validate_fault_patch", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "update_fault_record", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_fault_by_id_or_context", "update_fault_record"],
+      "final_write_action": "update_fault_record",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["fault_id", "turbine_name", "changed_fields", "before_state", "after_state"]},
+      "missing_slot_prompts": {
+        "fault_ref_or_context": "请说明要更新哪个故障，可以提供故障ID或风机+故障类型。",
+        "patch_fields": "请说明要修改哪些字段。"
+      },
+      "business_rules": ["已关闭故障修改核心字段应要求管理员确认。"],
+      "forbidden": ["不得隐藏修改前后差异。"],
+      "result_presentation": {"navigate_to": "/diagnosis", "open_entity": "fault"}
+    },
+    {
+      "id": "diagnosis.close_or_fail_fault",
+      "name": "关闭或标记故障处理失败",
+      "category": "diagnosis",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "将故障处理状态推进到已关闭或处理失败，并记录原因、处理人和关联工单。",
+      "requirement_refs": ["4.3.4", "4.5.1"],
+      "keywords": ["关闭故障", "关闭", "故障已处理", "已处理", "处理完成", "处理失败", "标记失败"],
+      "intent_examples": ["关闭YD-B-007的齿轮箱过热故障，原因是已更换润滑系统", "把故障12标记为处理失败"],
+      "required_slots": ["fault_ref_or_context", "target_processing_status", "reason"],
+      "optional_slots": ["workorder_ref", "handler"],
+      "standard_workflow": [
+        {"step": "resolve_fault_by_id_or_context", "type": "read"},
+        {"step": "resolve_workorder_by_ref", "type": "read", "optional": true},
+        {"step": "validate_fault_status_transition", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "update_fault_processing_status", "type": "write"},
+        {"step": "add_maintenance_record", "type": "write", "optional": true},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_fault_by_id_or_context", "resolve_workorder_by_ref", "update_fault_processing_status", "add_maintenance_record"],
+      "final_write_action": "update_fault_processing_status",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["fault_id", "fault_type", "before_status", "target_processing_status", "reason", "workorder_ref"]},
+      "missing_slot_prompts": {
+        "fault_ref_or_context": "请说明要关闭或标记失败的故障。",
+        "reason": "请说明处理结论或失败原因。"
+      },
+      "business_rules": [
+        "关闭故障建议关联已完成工单。",
+        "处理失败必须保留失败原因和下一步建议。"
+      ],
+      "forbidden": ["不得无原因关闭故障。", "不得关闭未确认的疑似故障而不留记录。"],
+      "result_presentation": {"navigate_to": "/diagnosis", "open_entity": "fault"}
+    },
+    {
+      "id": "diagnosis.delete_fault",
+      "name": "删除故障记录",
+      "category": "diagnosis",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "删除误报或错误导入的故障记录。",
+      "requirement_refs": ["6.软件属性需求-安全保密性"],
+      "keywords": ["删除故障", "移除故障", "清除误报"],
+      "intent_examples": ["删除故障12", "删除故障1，原因是误报", "清除YD-B-007这个误报故障"],
+      "required_slots": ["fault_ref_or_context", "reason"],
+      "optional_slots": [],
+      "standard_workflow": [
+        {"step": "resolve_fault_by_id_or_context", "type": "read"},
+        {"step": "validate_fault_delete", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "delete_fault_record", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_fault_by_id_or_context", "delete_fault_record"],
+      "final_write_action": "delete_fault_record",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["fault_id", "turbine_name", "fault_type", "reason"]},
+      "missing_slot_prompts": {
+        "fault_ref_or_context": "请说明要删除哪个故障。",
+        "reason": "请说明删除原因。"
+      },
+      "business_rules": ["删除故障属于高风险动作，应优先使用关闭/标记误报。"],
+      "forbidden": ["不得批量删除故障。", "不得无原因删除。"],
+      "result_presentation": {"navigate_to": "/diagnosis"}
+    },
+    {
+      "id": "diagnosis.upload_blade_image",
+      "name": "上传叶片图像并诊断",
+      "category": "diagnosis",
+      "risk_level": "medium",
+      "implementation_status": "planned_gateway",
+      "description": "上传叶片巡检图像并执行损伤识别，保存诊断结果。",
+      "requirement_refs": ["4.3.2"],
+      "keywords": ["叶片图像", "图像诊断", "上传图片", "叶片损伤"],
+      "intent_examples": ["给YD-B-007上传叶片图片并诊断", "分析这张叶片巡检图像"],
+      "required_slots": ["turbine_ref", "image_file"],
+      "optional_slots": ["image_path"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read"},
+        {"step": "validate_image_upload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "upload_blade_image_diagnosis", "type": "write"},
+        {"step": "query_knowledge_context", "type": "read", "optional": true},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "upload_blade_image_diagnosis", "query_knowledge_context"],
+      "final_write_action": "upload_blade_image_diagnosis",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["turbine_name", "file_name", "file_size", "diagnosis_scope"]},
+      "missing_slot_prompts": {
+        "turbine_ref": "请说明图片属于哪台风机。",
+        "image_file": "请上传JPG或PNG叶片巡检图片。"
+      },
+      "business_rules": ["仅允许JPG/PNG。", "诊断结果应展示损伤类型、位置和置信度。"],
+      "forbidden": ["不得把图像诊断结果自动等同于已确认现场故障。"],
+      "result_presentation": {"navigate_to": "/diagnosis", "open_entity": "blade_diagnosis"}
+    },
+    {
+      "id": "prediction.refresh_rul",
+      "name": "刷新RUL预测",
+      "category": "prediction",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "刷新一台或多台风机核心部件的剩余寿命预测。",
+      "requirement_refs": ["4.4.1", "5.2"],
+      "keywords": ["刷新RUL", "刷新", "RUL", "重新预测", "剩余寿命", "寿命预测", "齿轮箱"],
+      "intent_examples": ["刷新YD-B-007齿轮箱RUL", "重新计算所有预警风机剩余寿命"],
+      "required_slots": ["scope"],
+      "optional_slots": ["component"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read", "optional": true},
+        {"step": "query_turbine_detail", "type": "read", "optional": true},
+        {"step": "validate_rul_refresh_scope", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "refresh_rul_predictions", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "refresh_rul_predictions"],
+      "final_write_action": "refresh_rul_predictions",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["scope", "component", "affected_count"]},
+      "missing_slot_prompts": {
+        "scope": "请说明刷新范围，例如某台风机、某个区域或全部高风险风机。"
+      },
+      "business_rules": ["批量刷新应显示影响范围。", "数据不足时结果必须携带数据质量提示。"],
+      "forbidden": ["不得默认全量刷新。"],
+      "result_presentation": {"navigate_to": "/prediction"}
+    },
+    {
+      "id": "prediction.generate_schedule",
+      "name": "生成维护排程",
+      "category": "prediction",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "根据RUL、故障、成本和天气窗口生成维护排程，可选择创建工单。",
+      "requirement_refs": ["4.4.2", "4.4.3", "4.5.1"],
+      "keywords": ["生成维护计划", "排程", "维护排程", "维护日历", "下周维护", "下月维护", "排班", "采购提示", "创建工单"],
+      "intent_examples": ["为高风险风机生成下月维护计划", "生成下周维护排程", "根据RUL生成维护日历并创建工单"],
+      "required_slots": ["scope"],
+      "optional_slots": ["top_n", "create_work_orders", "weather_required", "budget_limit"],
+      "standard_workflow": [
+        {"step": "query_rul_predictions", "type": "read"},
+        {"step": "query_turbine_fault_context", "type": "read", "optional": true},
+        {"step": "query_maintenance_plan", "type": "read"},
+        {"step": "validate_schedule_scope", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "generate_maintenance_schedule", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_rul_predictions", "query_maintenance_plan", "generate_maintenance_schedule"],
+      "final_write_action": "generate_maintenance_schedule",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["scope", "top_n", "create_work_orders", "estimated_workorder_count", "date_window"]},
+      "missing_slot_prompts": {
+        "scope": "请说明排程范围，例如高风险风机、某区域或指定风机列表。"
+      },
+      "business_rules": [
+        "如果create_work_orders=true，必须显示预计创建工单数量。",
+        "涉及备件采购提示时，采购动作不在本系统直接执行，只能生成建议。"
+      ],
+      "forbidden": ["不得未经确认批量创建工单。", "不得直接对接ERP采购。"],
+      "result_presentation": {"navigate_to": "/prediction"}
+    },
+    {
+      "id": "knowledge.upsert_node",
+      "name": "创建或更新知识库节点",
+      "category": "knowledge",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "新增或编辑故障知识节点，包括症状、根因、解决方案、备件和案例。",
+      "requirement_refs": ["4.3.4", "8.1-AI模型长期演化机制"],
+      "keywords": ["新增知识", "新增", "更新知识库", "更新", "沉淀经验", "故障知识", "处理方案", "沉淀到知识库"],
+      "intent_examples": ["把WO-0003的处理经验沉淀到知识库", "新增齿轮箱点蚀处理方案", "新增主轴裂纹处理方案"],
+      "required_slots": ["fault_type"],
+      "optional_slots": ["symptoms", "root_causes", "solutions", "spare_parts", "source_workorder_ref"],
+      "standard_workflow": [
+        {"step": "resolve_workorder_by_ref", "type": "read", "optional": true},
+        {"step": "query_knowledge_context", "type": "read"},
+        {"step": "draft_knowledge_node", "type": "infer"},
+        {"step": "validate_knowledge_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "upsert_knowledge_node", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_workorder_by_ref", "query_knowledge_context", "draft_knowledge_node", "upsert_knowledge_node"],
+      "final_write_action": "upsert_knowledge_node",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["fault_type", "category", "symptoms", "root_causes", "solutions", "source"]},
+      "missing_slot_prompts": {
+        "fault_type": "请说明要沉淀或更新的故障类型。"
+      },
+      "business_rules": [
+        "自动抽取的知识应默认标记为未人工验证或低置信度。",
+        "已有同名节点时应显示合并差异。"
+      ],
+      "forbidden": ["不得把未经验证的经验标记为verified=true。"],
+      "result_presentation": {"navigate_to": "/knowledge", "open_entity": "knowledge_node"}
+    },
+    {
+      "id": "knowledge.review_node",
+      "name": "审核知识节点",
+      "category": "knowledge",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "将知识节点标记为已验证或拒绝。",
+      "requirement_refs": ["6.软件属性需求-正确性"],
+      "keywords": ["审核知识", "验证知识", "拒绝知识", "标记可信", "知识节点", "已验证"],
+      "intent_examples": ["把齿轮箱点蚀知识标记为已验证", "把主轴裂纹知识标记为已验证", "拒绝这个知识节点，原因是重复"],
+      "required_slots": ["knowledge_node_ref", "review_action"],
+      "optional_slots": ["reason"],
+      "standard_workflow": [
+        {"step": "query_knowledge_context", "type": "read"},
+        {"step": "validate_knowledge_review", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "verify_knowledge_node", "type": "write", "condition": "review_action=verify"},
+        {"step": "reject_knowledge_node", "type": "write", "condition": "review_action=reject"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_knowledge_context", "verify_knowledge_node", "reject_knowledge_node"],
+      "final_write_action": "verify_knowledge_node|reject_knowledge_node",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["knowledge_node_ref", "review_action", "reason"]},
+      "missing_slot_prompts": {
+        "knowledge_node_ref": "请说明要审核哪个知识节点。",
+        "review_action": "请说明是标记为已验证还是拒绝。"
+      },
+      "business_rules": ["拒绝知识节点时建议填写原因。"],
+      "forbidden": ["不得批量验证未知来源知识。"],
+      "result_presentation": {"navigate_to": "/knowledge", "open_entity": "knowledge_node"}
+    },
+    {
+      "id": "knowledge.delete_node",
+      "name": "删除知识节点",
+      "category": "knowledge",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "删除故障知识节点。",
+      "requirement_refs": ["6.软件属性需求-安全保密性"],
+      "keywords": ["删除知识", "删除知识节点", "移除知识节点", "知识节点", "故障知识"],
+      "intent_examples": ["删除重复的轴承磨损知识节点", "删除主轴裂纹知识节点，原因是验证回收", "删除齿轮箱点蚀知识节点，原因是重复"],
+      "required_slots": ["knowledge_node_ref", "reason"],
+      "optional_slots": [],
+      "standard_workflow": [
+        {"step": "query_knowledge_context", "type": "read"},
+        {"step": "validate_knowledge_delete", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "delete_knowledge_node", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_knowledge_context", "delete_knowledge_node"],
+      "final_write_action": "delete_knowledge_node",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["knowledge_node_ref", "fault_type", "reason"]},
+      "missing_slot_prompts": {
+        "knowledge_node_ref": "请说明要删除哪个知识节点。",
+        "reason": "请说明删除原因。"
+      },
+      "business_rules": ["删除知识节点属于高风险动作，优先建议设为未验证或拒绝。"],
+      "forbidden": ["不得无原因删除知识节点。"],
+      "result_presentation": {"navigate_to": "/knowledge"}
+    },
+    {
+      "id": "settings.update_thresholds",
+      "name": "更新告警阈值和通知渠道",
+      "category": "settings",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "更新HI告警阈值、邮件通知和企业微信通知设置。",
+      "requirement_refs": ["4.5.2", "6.软件属性需求-安全保密性"],
+      "keywords": ["阈值", "告警", "通知渠道", "邮件", "企业微信"],
+      "intent_examples": ["把HI告警阈值改成75", "开启邮件通知并发送到admin@example.com"],
+      "required_slots": ["threshold_payload"],
+      "optional_slots": ["notification_channels"],
+      "standard_workflow": [
+        {"step": "query_threshold_config", "type": "read"},
+        {"step": "validate_threshold_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "update_threshold_config", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_threshold_config", "update_threshold_config"],
+      "final_write_action": "update_threshold_config",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["before_threshold", "after_threshold", "email_enabled", "wechat_enabled", "email_address"]},
+      "missing_slot_prompts": {
+        "threshold_payload": "请说明新的HI阈值和通知渠道。"
+      },
+      "business_rules": [
+        "HI阈值必须在0到100之间。",
+        "开启邮件通知时必须提供合法邮箱。",
+        "系统管理员权限优先。"
+      ],
+      "forbidden": ["不得无确认修改告警阈值。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "settings.upsert_ai_provider",
+      "name": "新增或更新AI供应商配置",
+      "category": "settings",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "保存AI供应商API地址、API KEY、默认模型和常用模型列表。",
+      "requirement_refs": ["4.6.1", "6.软件属性需求-安全保密性"],
+      "keywords": ["AI供应商", "API KEY", "模型", "DeepSeek", "通义千问", "Kimi", "OpenAI"],
+      "intent_examples": ["新增DeepSeek配置", "把通义千问默认模型改成qwen-plus", "给Kimi添加常用模型", "新增Ollama配置，地址http://localhost:11434/v1，默认模型qwen2.5"],
+      "required_slots": ["provider", "base_url"],
+      "optional_slots": ["api_key", "default_model", "model_options", "enabled"],
+      "standard_workflow": [
+        {"step": "query_ai_provider_config", "type": "read"},
+        {"step": "validate_ai_provider_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "upsert_ai_provider_config", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_ai_provider_config", "upsert_ai_provider_config"],
+      "final_write_action": "upsert_ai_provider_config",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["provider", "base_url", "api_style", "default_model", "model_options", "has_api_key"]},
+      "missing_slot_prompts": {
+        "provider": "请说明要配置哪个AI供应商。",
+        "base_url": "请说明API地址。"
+      },
+      "business_rules": [
+        "API KEY不得进入模型提示词或确认消息明文。",
+        "更改配置不等同于切换当前会话模型。",
+        "供应商连接测试失败时状态应记录为error并展示原因。"
+      ],
+      "forbidden": ["不得回显API KEY明文。", "不得把供应商配置当作对话模型切换。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "settings.test_ai_provider",
+      "name": "测试AI供应商连接",
+      "category": "settings",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "调用供应商测试接口，并写入连接测试状态和失败原因。",
+      "requirement_refs": ["4.6.1"],
+      "keywords": ["测试AI", "连接测试", "供应商验证", "模型验证"],
+      "intent_examples": ["测试通义千问连接", "验证DeepSeek配置是否可用"],
+      "required_slots": ["provider"],
+      "optional_slots": ["model"],
+      "standard_workflow": [
+        {"step": "query_ai_provider_config", "type": "read"},
+        {"step": "validate_ai_provider_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "test_ai_provider_connection", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_ai_provider_config", "test_ai_provider_connection"],
+      "final_write_action": "test_ai_provider_connection",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["provider", "model", "base_url", "has_api_key"]},
+      "missing_slot_prompts": {
+        "provider": "请说明要测试哪个AI供应商。"
+      },
+      "business_rules": ["失败原因必须写入供应商状态，不应只在按钮下方显示笼统错误。"],
+      "forbidden": ["不得显示Authorization完整值。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "settings.delete_ai_provider",
+      "name": "删除AI供应商配置",
+      "category": "settings",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "删除指定AI供应商配置。",
+      "requirement_refs": ["6.软件属性需求-安全保密性"],
+      "keywords": ["删除AI配置", "删除", "移除供应商", "供应商配置", "删除API KEY", "Kimi", "通义千问", "DeepSeek"],
+      "intent_examples": ["删除Kimi供应商配置", "移除通义千问配置"],
+      "required_slots": ["provider"],
+      "optional_slots": ["reason"],
+      "standard_workflow": [
+        {"step": "query_ai_provider_config", "type": "read"},
+        {"step": "validate_ai_provider_delete", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "delete_ai_provider_config", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_ai_provider_config", "delete_ai_provider_config"],
+      "final_write_action": "delete_ai_provider_config",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["provider", "display_name", "default_model", "has_api_key"]},
+      "missing_slot_prompts": {
+        "provider": "请说明要删除哪个供应商配置。"
+      },
+      "business_rules": ["删除后不应影响历史会话记录，但新会话不可再使用该供应商。"],
+      "forbidden": ["不得删除其他用户的供应商配置。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "settings.update_data_source_connection",
+      "name": "测试或更新数据源连接",
+      "category": "settings",
+      "risk_level": "high",
+      "implementation_status": "planned",
+      "description": "测试SCADA、振动、图像、气象等数据源连接，并记录连接状态。",
+      "requirement_refs": ["4.7.1", "5.3"],
+      "keywords": ["数据源", "测试连接", "SCADA", "振动", "气象", "图像"],
+      "intent_examples": ["测试SCADA连接", "更新振动数据源连接参数"],
+      "required_slots": ["source_type"],
+      "optional_slots": ["connection_params"],
+      "standard_workflow": [
+        {"step": "resolve_data_source", "type": "read"},
+        {"step": "validate_data_source_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "test_data_source_connection", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_data_source", "test_data_source_connection"],
+      "final_write_action": "test_data_source_connection",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["source_type", "endpoint", "protocol", "masked_credentials"]},
+      "missing_slot_prompts": {
+        "source_type": "请说明要测试或更新哪类数据源。"
+      },
+      "business_rules": [
+        "连接参数中的密码、token不得明文展示。",
+        "连接失败必须展示具体错误和重试建议。"
+      ],
+      "forbidden": ["不得把连接凭据发送给外部AI模型。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "personnel.upsert",
+      "name": "新增或更新维护人员",
+      "category": "settings",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "新增或更新维护人员姓名、邮箱、技能、区域和负载。",
+      "requirement_refs": ["2.2", "4.5.1"],
+      "keywords": ["新增人员", "修改人员", "维护人员", "师傅", "工程师"],
+      "intent_examples": ["新增维护人员张三，负责齿轮箱", "把王工区域改成B组"],
+      "required_slots": ["personnel_payload"],
+      "optional_slots": ["personnel_ref"],
+      "standard_workflow": [
+        {"step": "resolve_personnel_by_name", "type": "read", "optional": true},
+        {"step": "validate_personnel_payload", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "upsert_personnel", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_personnel_by_name", "upsert_personnel"],
+      "final_write_action": "upsert_personnel",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["name", "email", "skills", "region", "load"]},
+      "missing_slot_prompts": {
+        "personnel_payload": "请说明维护人员姓名、邮箱、技能或区域。"
+      },
+      "business_rules": ["邮箱必须合法。", "人员名称重复时应进入更新而不是新增。"],
+      "forbidden": ["不得创建无联系方式的关键维护人员。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "personnel.delete",
+      "name": "删除维护人员",
+      "category": "settings",
+      "risk_level": "high",
+      "implementation_status": "implemented_gateway",
+      "description": "删除或禁用维护人员。",
+      "requirement_refs": ["6.软件属性需求-安全保密性"],
+      "keywords": ["删除人员", "移除师傅", "禁用维护人员"],
+      "intent_examples": ["删除维护人员张三", "禁用王工"],
+      "required_slots": ["assignee_name", "reason"],
+      "optional_slots": [],
+      "standard_workflow": [
+        {"step": "resolve_personnel_by_name", "type": "read"},
+        {"step": "query_workorder_context", "type": "read"},
+        {"step": "validate_personnel_delete", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "delete_personnel", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_personnel_by_name", "query_workorder_context", "delete_personnel"],
+      "final_write_action": "delete_personnel",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["personnel_name", "active_workorder_count", "reason"]},
+      "missing_slot_prompts": {
+        "assignee_name": "请说明要删除或禁用哪位维护人员。",
+        "reason": "请说明删除或禁用原因。"
+      },
+      "business_rules": ["若人员存在未完成工单，应禁止删除或要求先转派。"],
+      "forbidden": ["不得删除仍有活跃工单的维护人员。"],
+      "result_presentation": {"navigate_to": "/settings"}
+    },
+    {
+      "id": "turbine.refresh_health",
+      "name": "刷新风机健康指数",
+      "category": "monitoring",
+      "risk_level": "medium",
+      "implementation_status": "implemented_gateway",
+      "description": "根据多源数据重新计算风机HI健康指数和状态。",
+      "requirement_refs": ["3.3", "4.2.1", "4.7.1"],
+      "keywords": ["刷新健康指数", "重新计算HI", "更新风机状态", "刷新HI", "健康指数"],
+      "intent_examples": ["刷新YD-B-007健康指数", "刷新YD-B-007的HI健康指数", "重新计算A组所有风机HI"],
+      "required_slots": ["scope"],
+      "optional_slots": ["data_sources"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read", "optional": true},
+        {"step": "query_fleet_overview", "type": "read"},
+        {"step": "validate_health_refresh_scope", "type": "validate"},
+        {"step": "require_confirmation", "type": "guard"},
+        {"step": "refresh_health_indexes", "type": "write"},
+        {"step": "verify_written_entity", "type": "verify"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_fleet_overview", "refresh_health_indexes"],
+      "final_write_action": "refresh_health_indexes",
+      "confirmation_required": true,
+      "confirm_payload": {"required_fields": ["scope", "affected_count", "data_sources"]},
+      "missing_slot_prompts": {
+        "scope": "请说明要刷新哪台风机、哪个区域或哪类风机。"
+      },
+      "business_rules": [
+        "批量刷新必须展示影响范围。",
+        "单路数据源中断时不得影响其他数据源计算。"
+      ],
+      "forbidden": ["不得默认刷新全场。"],
+      "result_presentation": {"navigate_to": "/dashboard"}
+    }
+  ]
+}

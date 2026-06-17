@@ -643,7 +643,7 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="flex h-full min-h-0 bg-bg-deep">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden scroll-smooth pb-8">
         <div className="border-b border-border-subtle bg-bg-panel/90 p-3">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -782,7 +782,7 @@ export default function KnowledgeBasePage() {
           </div>
         )}
 
-        <div className="flex min-h-[560px] flex-1">
+        <div className="flex min-h-[760px] flex-1 xl:min-h-[820px]">
           {graphLoading ? (
             <div className="flex flex-1 items-center justify-center">
               <div className="flex flex-col items-center gap-3">

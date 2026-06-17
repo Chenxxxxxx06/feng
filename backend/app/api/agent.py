@@ -321,11 +321,6 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "screenshot", "params": {}},
         ],
         # ── Prediction ──
-        "RefreshRUL": [
-            {"skill": "click", "params": {"selector": "[data-action='refresh-rul']"}},
-            {"skill": "wait", "params": {"ms": "3000"}},
-            {"skill": "screenshot", "params": {}},
-        ],
         "RunSchedule": [
             {"skill": "click", "params": {"selector": "[data-action='run-schedule']"}},
             {"skill": "wait", "params": {"ms": "2000"}},
