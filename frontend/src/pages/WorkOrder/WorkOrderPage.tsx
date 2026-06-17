@@ -301,6 +301,18 @@ export default function WorkOrderPage() {
     setEditingWO(false);
   };
 
+  const translateEmailError = (detail: string): string => {
+    const map: Record<string, string> = {
+      'Email notification is disabled in settings': '邮件通知未开启，请前往「设置 → 告警规则」开启邮件通知',
+      'No recipient email found for work order assignee': '该工单未指定责任人邮箱，请先为工单分配责任人',
+      'WorkOrder not found': '工单不存在，请刷新页面后重试',
+    };
+    if (map[detail]) return map[detail];
+    if (detail.startsWith('Missing SMTP settings')) return 'SMTP 邮件配置不完整，请联系管理员检查 .env 文件';
+    if (detail) return `邮件发送失败：${detail}`;
+    return '发送失败，请确认后端服务已启动且通知配置正确';
+  };
+
   const sendEmail = async (wo: WorkOrder) => {
     setSendingEmail(true);
     setEmailResult(null);
@@ -313,12 +325,17 @@ export default function WorkOrderPage() {
       });
       if ((data.sent || 0) === 0) {
         const failedLog = data.logs?.find((log: any) => log.status === 'failed');
-        setEmailResult({ type: 'error', message: failedLog?.error_message || '未实际发送：未找到责任人邮箱或后端未完成通知配置' });
+        if (failedLog?.error_message) {
+          setEmailResult({ type: 'error', message: `邮件发送失败：${failedLog.error_message}` });
+        } else {
+          setEmailResult({ type: 'error', message: '未找到有效收件人，请为该工单分配责任人并确保其账号已绑定邮箱' });
+        }
       } else {
         setEmailResult({ type: 'success', message: `邮件已发送给责任人，共 ${data.sent} 封。` });
       }
     } catch (err: any) {
-      setEmailResult({ type: 'error', message: err.response?.data?.detail || '发送失败，请检查通知配置' });
+      const detail: string | undefined = err.response?.data?.detail;
+      setEmailResult({ type: 'error', message: translateEmailError(detail || '') });
     }
     setSendingEmail(false);
   };
