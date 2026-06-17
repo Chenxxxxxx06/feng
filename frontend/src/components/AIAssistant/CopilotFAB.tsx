@@ -1029,7 +1029,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                     ? '输入任务指令，如：查看故障诊断页面'
                     : '输入问题, 如: 当前风场运行状态如何?'
                 }
-                className="flex-1 bg-bg-panel border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+                className="flex-1 rounded-lg border border-accent-blue/25 bg-bg-deep px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent-cyan focus:outline-none focus:ring-2 focus:ring-accent-cyan/15"
               />
               {mode === 'chat' && (
                 <button
@@ -1062,7 +1062,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 <button
                   key={q}
                   onClick={() => { setInput(q); }}
-                  className="text-[10px] px-2 py-1 rounded border border-border-default text-text-muted hover:text-accent-blue hover:border-accent-blue transition-colors"
+                  className="rounded border border-accent-blue/25 bg-bg-card px-2 py-1 text-[10px] text-text-secondary transition-colors hover:border-accent-cyan hover:bg-accent-cyan/10 hover:text-accent-cyan"
                 >
                   {q}
                 </button>

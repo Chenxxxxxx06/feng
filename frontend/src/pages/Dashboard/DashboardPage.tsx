@@ -190,6 +190,20 @@ export default function DashboardPage() {
   const avgHealth = scopedTurbines.length > 0 ? scopedTurbines.reduce((s, t) => s + t.hi_value, 0) / scopedTurbines.length : 0;
   const todayEnergy = useMemo(() => (scopedTurbines.length * 3.3 * 0.32 * 24).toFixed(0), [scopedTurbines.length]);
   const currentPower = useMemo(() => (scopedTurbines.length * 3.3 * 0.35).toFixed(0), [scopedTurbines.length]);
+  const aiSummaryData = useMemo(() => ({
+    total_turbines: summary.total,
+    healthy_turbines: healthy,
+    warning_turbines: warning,
+    faulty_turbines: faulty,
+    availability: avail,
+    mtbf_hours: mtbfHours,
+    avg_health: avgHealth,
+    current_power_mw: currentPower,
+    today_energy_mwh: todayEnergy,
+    alarms,
+    work_orders: workOrders,
+    component_temperatures: componentTemps,
+  }), [alarms, avail, avgHealth, componentTemps, currentPower, faulty, healthy, mtbfHours, summary.total, todayEnergy, warning, workOrders]);
 
   const closeDetail = useCallback(() => { setSelectedId(null); setDetail(null); }, []);
 
@@ -274,7 +288,7 @@ export default function DashboardPage() {
 
       {/* ═══ Bottom Dashboard Grid ═══ */}
       <div className="flex-shrink-0 px-4 pb-5">
-        <div className="grid grid-cols-3 gap-4" style={{ height: '280px' }}>
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_300px] gap-4" style={{ height: '280px' }}>
           {/* Column 1: Health Monitoring */}
           <div className="premium-card rounded-2xl p-4 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between mb-3"><h3 className="text-[13px] font-semibold text-text-primary">风机健康监测</h3><span className="text-[10px] text-text-muted">{scopedTurbines.length} 台风机</span></div>
@@ -309,11 +323,15 @@ export default function DashboardPage() {
               <ScadaTrendChart title="齿轮箱温度" data={tempData} color="#F59E0B" unit="°C" height={76} />
             </div>
           </div>
+
+          {/* Column 4: AI Summary */}
+          <div className="premium-card rounded-2xl min-h-0 overflow-hidden">
+            <AIPanel pageType="dashboard" pageData={aiSummaryData} />
+          </div>
         </div>
       </div>
 
       <CopilotFAB />
-      <AIPanel pageType="dashboard" />
     </div>
   );
 }
