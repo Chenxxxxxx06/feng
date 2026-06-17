@@ -5,7 +5,6 @@ import type {
   AutoFaultDetectionResult,
   BatchAutoFaultDetectionResult,
   BatchAutoFaultRecord,
-  BladeDiagnosisResult,
   DiagnosisSignalInsight,
   Fault,
   FaultDetail,
@@ -283,14 +282,6 @@ function toVibrationFaultType(faultType: string) {
   if (faultType.includes('gearbox')) return 'gearbox_tooth_wear';
   if (faultType.includes('shaft')) return 'misalignment';
   return undefined;
-}
-
-function bboxToStyle(bbox: { x: number; y: number; w: number; h: number }) {
-  const left = Math.min(90, Math.max(0, (bbox.x / 1920) * 100));
-  const top = Math.min(90, Math.max(0, (bbox.y / 1440) * 100));
-  const width = Math.min(45, Math.max(8, (bbox.w / 1920) * 100));
-  const height = Math.min(45, Math.max(8, (bbox.h / 1440) * 100));
-  return { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` };
 }
 
 function turbineStatusClass(status: string) {
@@ -699,12 +690,9 @@ export default function DiagnosisPage() {
   const [faultDateFrom, setFaultDateFrom] = useState('');
   const [faultDateTo, setFaultDateTo] = useState('');
   const [vibration, setVibration] = useState<VibrationPreview | null>(null);
-  const [bladeResult, setBladeResult] = useState<BladeDiagnosisResult | null>(null);
-  const [bladePreview, setBladePreview] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [autoLoading, setAutoLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
-  const [bladeLoading, setBladeLoading] = useState(false);
   const [error, setError] = useState('');
   const waveformRef = useRef<HTMLDivElement>(null);
   const spectrumRef = useRef<HTMLDivElement>(null);
@@ -1018,7 +1006,7 @@ export default function DiagnosisPage() {
 
   const troubleshootingSteps = autoResult?.troubleshooting_steps
     || selected?.troubleshooting_steps
-    || bladeResult?.troubleshooting_steps
+   
     || [];
 
   const groupCauseRecords = sortedBatchRecords;
@@ -1137,7 +1125,6 @@ export default function DiagnosisPage() {
     setSelectedTurbineId(id);
     setSelected(null);
     setAutoResult(null);
-    setBladeResult(null);
   }
 
   async function runAutoDetect() {
@@ -1205,29 +1192,7 @@ export default function DiagnosisPage() {
     await loadVibration(record.turbine_id, record.component, toVibrationFaultType(record.fault_type));
   }
 
-  async function handleBladeFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !selectedTurbineId) return;
-    setBladeLoading(true);
-    setError('');
-    const previewUrl = URL.createObjectURL(file);
-    setBladePreview(previewUrl);
-    try {
-      const form = new FormData();
-      form.append('turbine_id', String(selectedTurbineId));
-      form.append('image', file);
-      const { data } = await api.post('/diagnosis/blade-diagnosis/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setBladeResult(data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || '叶片图像诊断失败');
-    } finally {
-      setBladeLoading(false);
-    }
-  }
-
-  const topologyMonitoringPanel = (
+    const topologyMonitoringPanel = (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex rounded border border-border-default bg-bg-secondary p-1 text-xs">
@@ -1500,44 +1465,6 @@ export default function DiagnosisPage() {
           </div>
         )}
 
-        {monitorMode === 'single' && (
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-medium">叶片图像诊断</h3>
-              <label className="px-3 py-1.5 rounded bg-bg-hover border border-border-default text-xs cursor-pointer hover:border-accent-blue">
-                选择图像
-                <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleBladeFile} />
-              </label>
-            </div>
-            <div className="grid grid-cols-[1fr_180px] gap-3">
-              <div className="relative h-40 rounded border border-border-default bg-bg-secondary overflow-hidden flex items-center justify-center">
-                {bladePreview ? (
-                  <img src={bladePreview} alt="叶片预览" className="w-full h-full object-cover opacity-80" />
-                ) : (
-                  <span className="text-xs text-text-muted">JPG/PNG 图像预览</span>
-                )}
-                {bladeResult?.damage_bbox && (
-                  <div className="absolute border-2 border-accent-red bg-accent-red/10" style={bboxToStyle(bladeResult.damage_bbox)} />
-                )}
-              </div>
-              <div className="bg-bg-hover rounded p-3 text-xs space-y-2">
-                <div>
-                  <p className="text-text-muted">诊断结果</p>
-                  <p className="font-medium text-accent-yellow">{bladeLoading ? '分析中...' : bladeResult ? faultLabel(bladeResult.damage_type) : '--'}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">置信度</p>
-                  <p className="font-mono text-accent-cyan">{bladeResult ? `${(bladeResult.confidence * 100).toFixed(1)}%` : '--'}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">模型状态</p>
-                  <p className="text-text-secondary leading-4">{bladeResult?.algorithm_status || '待接入'}</p>
-                </div>
-              </div>
-            </div>
-            {bladeResult?.message && <p className="mt-3 text-xs text-text-secondary">{bladeResult.message}</p>}
-          </section>
-        )}
 
         {monitorMode === 'group' && batchResult?.success && (
           <section className="bg-bg-card border border-border-default rounded-lg p-4">

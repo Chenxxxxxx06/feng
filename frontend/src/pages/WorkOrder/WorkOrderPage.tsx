@@ -147,6 +147,8 @@ export default function WorkOrderPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [createResult, setCreateResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [creating, setCreating] = useState(false);
   const [editingWO, setEditingWO] = useState(false);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -193,21 +195,39 @@ export default function WorkOrderPage() {
   }, [orders]);
 
   const handleCreate = async () => {
-    await api.post('/workorders/', {
-      turbine_id: Number(form.turbine_id),
-      title: form.title,
-      description: form.description,
-      assignee: form.assignee || null,
-      assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
-      assignee_email: form.assignee_email || null,
-      priority: form.priority,
-      fault_type: form.fault_type,
-      due_date: form.due_date || null,
-      cost_estimate: Number(form.cost_estimate),
-    });
-    setShowCreate(false);
-    setForm(emptyForm);
-    fetchOrders();
+    setCreateResult(null);
+    const turbineId = Number(form.turbine_id);
+    if (!turbineId || turbineId <= 0) {
+      setCreateResult({ type: 'error', message: '请输入有效的风机 ID（正整数）' });
+      return;
+    }
+    if (!form.title.trim()) {
+      setCreateResult({ type: 'error', message: '请输入工单标题' });
+      return;
+    }
+    setCreating(true);
+    try {
+      await api.post('/workorders/', {
+        turbine_id: turbineId,
+        title: form.title.trim(),
+        description: form.description || null,
+        assignee: form.assignee || null,
+        assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
+        assignee_email: form.assignee_email || null,
+        priority: form.priority,
+        fault_type: form.fault_type,
+        due_date: form.due_date || null,
+        cost_estimate: Number(form.cost_estimate) || 0,
+      });
+      setShowCreate(false);
+      setForm(emptyForm);
+      setCreateResult(null);
+      fetchOrders();
+    } catch (err: any) {
+      setCreateResult({ type: 'error', message: err.response?.data?.detail || '工单创建失败，请检查必填字段' });
+    } finally {
+      setCreating(false);
+    }
   };
 
   const advanceStatus = async (id: number, current: string) => {
@@ -451,10 +471,18 @@ export default function WorkOrderPage() {
 
                 <textarea placeholder="工单描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4}
                   className="w-full form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+
+                {createResult && (
+                  <div className={`rounded border px-3 py-2 text-xs ${createResult.type === 'success' ? 'border-accent-green/40 bg-accent-green/10 text-accent-green' : 'border-accent-red/40 bg-accent-red/10 text-accent-red'}`}>
+                    {createResult.message}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-2 border-t border-border-default px-6 py-4">
-                <button onClick={() => setShowCreate(false)} className="ops-btn px-4 py-2 text-sm">取消</button>
-                <button onClick={handleCreate} className="ops-btn ops-btn-primary px-4 py-2 text-sm">创建</button>
+                <button onClick={() => { setShowCreate(false); setCreateResult(null); }} className="ops-btn px-4 py-2 text-sm">取消</button>
+                <button disabled={creating} onClick={handleCreate} className="ops-btn ops-btn-primary px-4 py-2 text-sm disabled:opacity-50">
+                  {creating ? '创建中...' : '创建'}
+                </button>
               </div>
             </div>
           </div>
