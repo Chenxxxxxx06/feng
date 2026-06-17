@@ -449,3 +449,9 @@ select.form-input { color-scheme: dark; }
 .copilot-markdown th{background:rgba(59,130,246,0.08);text-align:left;padding:6px 10px;border-bottom:1px solid var(--border-subtle);font-weight:600;color:var(--accent-blue)}
 .copilot-markdown td{padding:5px 10px;border-bottom:1px solid rgba(59,130,246,0.04)}
 .copilot-markdown blockquote{border-left:2px solid var(--accent-blue);padding-left:12px;margin:0.4em 0;color:var(--text-secondary)}
+
+/* ── Drone path animations ── */
+@keyframes dash-march{to{stroke-dashoffset:-44}}
+.drone-path-remaining{animation:dash-march 1.5s linear infinite}
+.drone-turbine-icon{transition:transform .2s ease}
+.drone-turbine-icon:hover{transform:scale(1.3)}

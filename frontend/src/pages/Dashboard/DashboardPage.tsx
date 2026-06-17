@@ -196,7 +196,7 @@ export default function DashboardPage() {
   return (
     <div className="h-full flex flex-col overflow-y-auto" style={{ background: 'radial-gradient(ellipse at 50% 20%, #0D2447 0%, #071A35 70%)' }}>
       {/* ═══ Top Header ═══ */}
-      <div className="flex-shrink-0 px-6 py-3 flex items-center justify-between border-b" style={{ borderColor: 'rgba(59,130,246,0.08)' }}>
+      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b" style={{ borderColor: 'rgba(59,130,246,0.08)' }}>
         <div className="flex items-center gap-5">
           <div><h2 className="text-[15px] font-bold tracking-wide gradient-text">陕西省 · 风场监控中心</h2><p className="text-[10px] text-text-muted mt-0.5">实时数据更新</p></div>
           <span className="text-[10px] text-text-muted px-2.5 py-1 rounded-full" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.12)' }}>共 {summary.total} 台风机</span>
@@ -210,7 +210,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ═══ KPI Strip ═══ */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-2">
+      <div className="flex-shrink-0 px-4 pt-4 pb-2">
         <div className="grid grid-cols-5 gap-3">
           <KPICard label="风机可用率" value={avail} unit="%" color="#3B82F6" />
           <KPICard label="正常运行" value={String(healthy)} unit="台" color="#10B981" />
@@ -221,7 +221,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ═══ Map ═══ */}
-      <div className="flex-1 relative mx-6 my-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(59,130,246,0.10)', boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4), 0 4px 24px rgba(0,0,0,0.3)', minHeight: '320px' }}>
+      <div className="flex-1 relative mx-2 my-3 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(59,130,246,0.10)', boxShadow: 'inset 0 0 80px rgba(0,0,0,0.4), 0 4px 24px rgba(0,0,0,0.3)', minHeight: '360px' }}>
         {loading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center backdrop-blur-sm" style={{ background: 'rgba(7,26,53,0.7)' }}>
             <div className="flex flex-col items-center gap-3"><div className="w-10 h-10 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(59,130,246,0.3)', borderTopColor: '#3B82F6' }} /><span className="text-text-muted text-xs font-medium">加载风机数据...</span></div>
@@ -231,7 +231,7 @@ export default function DashboardPage() {
         <div className="relative z-[700]"><FilterPanel filters={filters} onChange={setFilters} /></div>
 
         {/* Slide-out Detail */}
-        <div className={`absolute top-0 right-0 h-full w-[390px] transform transition-transform duration-300 z-[800] flex flex-col ${detail ? 'translate-x-0' : 'translate-x-full'}`}
+        <div className={`absolute top-0 right-0 h-full w-[350px] transform transition-transform duration-300 z-[800] flex flex-col ${detail ? 'translate-x-0' : 'translate-x-full'}`}
           style={{ background: 'rgba(10,31,63,0.92)', backdropFilter: 'blur(20px)', borderLeft: '1px solid rgba(59,130,246,0.15)', boxShadow: '-8px 0 40px rgba(0,0,0,0.4)' }}>
           {detail && (
             <div className="slide-panel h-full flex flex-col">
@@ -273,7 +273,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ═══ Bottom Dashboard Grid ═══ */}
-      <div className="flex-shrink-0 px-6 pb-5">
+      <div className="flex-shrink-0 px-4 pb-5">
         <div className="grid grid-cols-3 gap-4" style={{ height: '280px' }}>
           {/* Column 1: Health Monitoring */}
           <div className="premium-card rounded-2xl p-4 flex flex-col overflow-hidden">

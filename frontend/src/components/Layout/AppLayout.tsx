@@ -68,7 +68,7 @@ const navItems = [
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 340;
-const SIDEBAR_DEFAULT = 220;
+const SIDEBAR_DEFAULT = 200;
 const SIDEBAR_WIDTH_KEY = 'app.sidebar.width';
 
 const clampSidebarWidth = (value: number) => Math.max(SIDEBAR_MIN, Math.min(value, SIDEBAR_MAX));
