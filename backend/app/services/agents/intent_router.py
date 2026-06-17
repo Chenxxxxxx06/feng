@@ -35,7 +35,6 @@ INTENT_ROUTER_PROMPT = """
    - [data-action='back'] — 返回按钮
    - [data-action='select-turbine'] — 诊断页选择风机下拉
    - [data-action='run-auto-detect'] — 运行自动检测
-   - [data-action='refresh-rul'] — 刷新RUL
    - [data-action='filter-status'] — 工单状态筛选
 
 3. **wait** — 等待

@@ -45,13 +45,6 @@ export const predictionService = {
     return data.predictions || [];
   },
 
-  /** Refresh RUL predictions for one or all turbines */
-  async refreshRUL(turbineId?: number): Promise<{ success: boolean; refreshed: number; predictions: number }> {
-    const params = turbineId ? { turbine_id: turbineId } : {};
-    const { data } = await api.post('/prediction/rul/refresh', null, { params });
-    return data;
-  },
-
   /** Get aggregated prediction statistics */
   async getSummary(): Promise<PredictionSummary> {
     const { data } = await api.get('/prediction/summary');
@@ -70,6 +63,19 @@ export const predictionService = {
       turbine_id: turbineId,
       fault_type: faultType,
     });
+    return data;
+  },
+
+  /** Get prediction page settings (thresholds, coordinates, etc.) */
+  async getSettings(): Promise<{
+    hi_warning_threshold: number;
+    hi_failure_threshold: number;
+    rul_warning_threshold: number;
+    shift_start_time: string;
+    farm_lat: number;
+    farm_lng: number;
+  }> {
+    const { data } = await api.get('/prediction/settings');
     return data;
   },
 

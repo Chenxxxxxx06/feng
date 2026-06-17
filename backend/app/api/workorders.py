@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ai import _detect_anomalies, _generate_local_diagnosis
 from app.api.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import (
     Fault,
@@ -135,16 +136,71 @@ def _workorder_plain_body(
                 )
         lines.append("")
 
-    # fault knowledge section
+    # fault knowledge / encyclopedia section
     if knowledge:
-        lines.append("【知识库参考】")
-        if knowledge.get("root_causes"):
-            lines.append(f"  可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:3]))}")
-        if knowledge.get("solutions"):
-            lines.append(f"  建议方案: {'; '.join(_fmt_items(knowledge['solutions'][:3]))}")
-        if knowledge.get("spare_parts"):
-            lines.append(f"  相关备件: {', '.join(_fmt_items(knowledge['spare_parts'][:5]))}")
+        sev_label = {"low": "低", "medium": "中", "high": "高", "critical": "紧急"}.get(
+            knowledge.get("severity", ""), knowledge.get("severity", "")
+        )
+        lines.append("【📚 故障百科 · 知识库参考】")
+        lines.append(f"  故障类型: {knowledge.get('fault_type', '')}  |  分类: {knowledge.get('category', '')}  |  严重度: {sev_label}")
         lines.append("")
+        # Symptoms
+        symptoms = knowledge.get("symptoms") or []
+        if symptoms:
+            lines.append("  ▸ 故障症状/指标:")
+            for s in symptoms[:5]:
+                if isinstance(s, dict):
+                    lines.append(f"    · {s.get('indicator', '')} 阈值: {s.get('threshold', '')} {s.get('unit', '')}")
+                else:
+                    lines.append(f"    · {_fmt_item(s)}")
+            lines.append("")
+        # Root causes
+        if knowledge.get("root_causes"):
+            lines.append(f"  ▸ 可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:5]))}")
+            lines.append("")
+        # Solutions
+        if knowledge.get("solutions"):
+            lines.append("  ▸ 建议方案:")
+            for sol in knowledge["solutions"][:4]:
+                if isinstance(sol, dict):
+                    diff = sol.get("difficulty", "")
+                    diff_label = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(diff, diff)
+                    lines.append(f"    · {sol.get('action', '')} (难度: {diff_label}, 停机: {sol.get('downtime_hours', '?')}h)")
+                else:
+                    lines.append(f"    · {_fmt_item(sol)}")
+            lines.append("")
+        # Spare parts
+        if knowledge.get("spare_parts"):
+            lines.append("  ▸ 相关备件:")
+            for sp in knowledge["spare_parts"][:5]:
+                if isinstance(sp, dict):
+                    cost = f"约¥{sp.get('est_cost', 0):,.0f}" if sp.get('est_cost') else ""
+                    lines.append(f"    · {sp.get('name', '')} x{sp.get('quantity', 1)} {cost}")
+                else:
+                    lines.append(f"    · {_fmt_item(sp)}")
+            lines.append("")
+        # Related faults
+        related = knowledge.get("related_faults") or []
+        if related:
+            lines.append("  ▸ 关联故障:")
+            for rf in related[:3]:
+                if isinstance(rf, dict):
+                    prob = rf.get("probability", 0)
+                    lines.append(f"    · {rf.get('name', '')} (伴生概率: {int(prob * 100)}%)")
+                else:
+                    lines.append(f"    · {_fmt_item(rf)}")
+            lines.append("")
+        # Historical cases
+        cases = knowledge.get("cases") or []
+        if cases:
+            lines.append("  ▸ 历史案例:")
+            for c in cases[:2]:
+                if isinstance(c, dict):
+                    lines.append(f"    · {c.get('turbine', '')} ({c.get('date', '')})")
+                    lines.append(f"      处置: {c.get('resolution', '')}  |  费用: ¥{c.get('total_cost', 0):,}  |  停机: {c.get('downtime_days', 0)}天")
+                else:
+                    lines.append(f"    · {_fmt_item(c)}")
+            lines.append("")
 
     lines += [
         "【操作指引】",
@@ -252,18 +308,77 @@ def _workorder_html_body(
             html += "</table>"
         html += "\n  </td></tr>"
 
-    # fault knowledge section
+    # fault knowledge / encyclopedia section
     if knowledge:
-        html += """
+        sev_label = {"low": "低", "medium": "中", "high": "高", "critical": "紧急"}.get(
+            knowledge.get("severity", ""), knowledge.get("severity", "")
+        )
+        _SEV_COLOR = {"low": "#2da44e", "medium": "#d29922", "high": "#cf222e", "critical": "#cf222e"}
+        sev_color = _SEV_COLOR.get(knowledge.get("severity", ""), "#6e7681")
+        html += f"""
   <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
-    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 知识库参考</h3>
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 故障百科 · 知识库参考</h3>
+    <p style="margin:0 0 12px;font-size:13px;color:#57606a;">
+      {knowledge.get('icon', '')} <b>{knowledge.get('fault_type', '')}</b>
+      &nbsp;|&nbsp; 分类: {knowledge.get('category', '')}
+      &nbsp;|&nbsp; 严重度: <span style="color:{sev_color};font-weight:600;">{sev_label}</span>
+    </p>
     <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">"""
+        # Symptoms
+        symptoms = knowledge.get("symptoms") or []
+        if symptoms:
+            sym_text = "<br>".join(
+                f"· {s.get('indicator','')} 阈值: {s.get('threshold','')} {s.get('unit','')}"
+                if isinstance(s, dict) else f"· {_fmt_item(s)}"
+                for s in symptoms[:5]
+            )
+            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;vertical-align:top;">故障症状</td><td>{sym_text}</td></tr>"""
         if knowledge.get("root_causes"):
-            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:3]))}</td></tr>"""
+            html += f"""<tr><td style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:5]))}</td></tr>"""
         if knowledge.get("solutions"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(_fmt_items(knowledge['solutions'][:3]))}</td></tr>"""
+            sol_lines = []
+            for sol in knowledge["solutions"][:4]:
+                if isinstance(sol, dict):
+                    diff = sol.get("difficulty", "")
+                    diff_label = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(diff, diff)
+                    sol_lines.append(f"· {sol.get('action','')} (难度:{diff_label}, 停机:{sol.get('downtime_hours','?')}h)")
+                else:
+                    sol_lines.append(f"· {_fmt_item(sol)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">建议方案</td><td>{"<br>".join(sol_lines)}</td></tr>"""
         if knowledge.get("spare_parts"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(_fmt_items(knowledge['spare_parts'][:5]))}</td></tr>"""
+            sp_lines = []
+            for sp in knowledge["spare_parts"][:5]:
+                if isinstance(sp, dict):
+                    cost = f"约¥{sp.get('est_cost', 0):,.0f}" if sp.get('est_cost') else ""
+                    sp_lines.append(f"· {sp.get('name','')} x{sp.get('quantity',1)} {cost}")
+                else:
+                    sp_lines.append(f"· {_fmt_item(sp)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{"<br>".join(sp_lines)}</td></tr>"""
+        # Related faults
+        related = knowledge.get("related_faults") or []
+        if related:
+            rel_lines = []
+            for rf in related[:3]:
+                if isinstance(rf, dict):
+                    prob = rf.get("probability", 0)
+                    rel_lines.append(f"· {rf.get('name','')} (伴生概率: {int(prob*100)}%)")
+                else:
+                    rel_lines.append(f"· {_fmt_item(rf)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">关联故障</td><td>{"<br>".join(rel_lines)}</td></tr>"""
+        # Historical cases
+        cases = knowledge.get("cases") or []
+        if cases:
+            case_lines = []
+            for c in cases[:2]:
+                if isinstance(c, dict):
+                    case_lines.append(
+                        f"· {c.get('turbine','')} ({c.get('date','')}) — "
+                        f"处置: {c.get('resolution','')} | "
+                        f"费用: ¥{c.get('total_cost',0):,} | 停机: {c.get('downtime_days',0)}天"
+                    )
+                else:
+                    case_lines.append(f"· {_fmt_item(c)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">历史案例</td><td>{"<br>".join(case_lines)}</td></tr>"""
         html += """
     </table>
   </td></tr>"""
@@ -288,22 +403,199 @@ async def _fetch_turbine_info(wo: WorkOrder, db: AsyncSession) -> Turbine | None
     return await db.get(Turbine, wo.turbine_id)
 
 
+# ── Fault-type → Knowledge-node fuzzy matching helpers ──────
+
+# English internal fault_type codes → Chinese labels.
+# Work orders store English codes (e.g. "generator_overheat") but the
+# knowledge base uses Chinese names (e.g. "发电机过热").  This mapping
+# bridges the two so _fetch_fault_knowledge can match correctly.
+_EN_TO_CN_FAULT: dict[str, str] = {
+    "bearing_inner_race_wear": "轴承内圈磨损",
+    "bearing_outer_race": "轴承外圈故障",
+    "bearing_ball": "轴承滚动体故障",
+    "bearing_wear": "轴承磨损",
+    "bearing_fault": "轴承磨损",
+    "bearing_cage_failure": "轴承保持架故障",
+    "gearbox_tooth_pitting": "齿轮箱点蚀",
+    "gearbox_tooth_wear": "齿轮箱齿面磨损",
+    "gearbox_fault": "齿轮箱点蚀",
+    "generator_overheat": "发电机过热",
+    "generator_fault": "发电机过热",
+    "blade_leading_edge_erosion": "叶片前缘侵蚀",
+    "blade_damage": "叶片裂纹",
+    "blade_crack": "叶片裂纹",
+    "blade_ice": "叶片结冰",
+    "pitch_system_fault": "变桨系统故障",
+    "main_shaft_misalignment": "轴对中不良",
+    "shaft_misalignment": "轴对中不良",
+    "cooling_system_fault": "冷却系统故障",
+    "electrical_connection": "电气连接异常",
+    "electrical_fault": "变频器故障",
+    "unbalance": "转子不平衡",
+    "misalignment": "轴对中不良",
+    "looseness": "轴承磨损",
+    "resonance": "齿轮箱点蚀",
+    "yaw_failure": "偏航系统故障",
+    "yaw_sensor_fault": "风向传感器故障",
+    "coupling_wear": "联轴器磨损",
+    "converter_fault": "变频器故障",
+    "transformer_overheat": "变压器过热",
+    "tower_weld_crack": "塔筒焊缝裂纹",
+    "tower_foundation": "基础沉降",
+    "no_fault_detected": "未识别到明确故障",
+}
+
+# Keywords extracted from fault_type / work order title used as
+# search anchors when an exact fault_type match is not found.
+_KNOWLEDGE_KEYWORD_MAP: dict[str, list[str]] = {
+    "齿轮": ["齿轮箱点蚀", "齿轮断齿", "齿轮箱漏油"],
+    "齿轮箱": ["齿轮箱点蚀", "齿轮断齿", "齿轮箱漏油"],
+    "轴承": ["轴承磨损", "轴承保持架故障", "轴承电蚀"],
+    "叶片": ["叶片前缘侵蚀", "叶片裂纹", "叶片结冰"],
+    "发电机": ["发电机过热", "发电机绝缘老化"],
+    "偏航": ["偏航系统故障", "风向传感器故障"],
+    "传动": ["轴对中不良", "联轴器磨损"],
+    "主轴": ["轴对中不良", "联轴器磨损"],
+    "电气": ["变频器故障", "变压器过热"],
+    "塔筒": ["塔筒焊缝裂纹", "基础沉降"],
+    "变桨": ["变桨系统故障"],
+    "冷却": ["发电机过热"],
+    "振动": ["轴承磨损", "齿轮箱点蚀", "转子不平衡"],
+    "温度": ["发电机过热", "变压器过热"],
+    "漏油": ["齿轮箱漏油"],
+    "断齿": ["齿轮断齿"],
+    "点蚀": ["齿轮箱点蚀"],
+    "裂纹": ["叶片裂纹", "塔筒焊缝裂纹"],
+    "不平衡": ["转子不平衡"],
+    "对中": ["轴对中不良"],
+    "不对中": ["轴对中不良"],
+    "过热": ["发电机过热", "变压器过热"],
+    "电蚀": ["轴承电蚀"],
+    "绝缘": ["发电机绝缘老化"],
+    "变频": ["变频器故障"],
+    "变压器": ["变压器过热"],
+}
+
+
+def _extract_keywords(text: str) -> list[str]:
+    """Extract Chinese technical keywords from fault_type / title text."""
+    found: list[str] = []
+    for keyword in _KNOWLEDGE_KEYWORD_MAP:
+        if keyword in text:
+            found.append(keyword)
+    return found
+
+
 async def _fetch_fault_knowledge(wo: WorkOrder, db: AsyncSession) -> dict | None:
-    """Match fault_type against FaultKnowledgeNode table."""
-    if not wo.fault_type:
+    """Match fault_type against FaultKnowledgeNode with fuzzy fallback.
+
+    Strategy (best-effort, ordered):
+      0. Translate English fault_type code → Chinese label
+      1. Exact match on wo.fault_type
+      2. Keyword match via _KNOWLEDGE_KEYWORD_MAP → exact match on
+         candidate fault_type names
+      3. ILIKE fuzzy match on fault_knowledge.fault_type
+      4. Category ILIKE match on fault_knowledge.category
+    """
+    search_text = (wo.fault_type or "").strip()
+    if not search_text:
         return None
-    result = await db.execute(
-        select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == wo.fault_type)
-    )
-    node = result.scalar_one_or_none()
-    if not node:
-        return None
+
+    # ── 0. Translate English code → Chinese label ──
+    # Work orders store internal English codes (e.g. "generator_overheat")
+    # but knowledge base uses Chinese names (e.g. "发电机过热").
+    cn_label = _EN_TO_CN_FAULT.get(search_text, "")
+    search_texts: list[str] = [search_text]
+    if cn_label and cn_label != search_text:
+        search_texts.append(cn_label)
+
+    # ── 1. Exact match (try both EN code and CN label) ──
+    for text in search_texts:
+        result = await db.execute(
+            select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == text)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    # ── 2. Keyword → candidate fault_type names ──
+    # Extract keywords from BOTH the original text and the CN translation
+    keywords: list[str] = []
+    seen_kw: set[str] = set()
+    for text in search_texts:
+        for kw in _extract_keywords(text):
+            if kw not in seen_kw:
+                seen_kw.add(kw)
+                keywords.append(kw)
+
+    if keywords:
+        # Collect unique candidate names
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for kw in keywords:
+            for name in _KNOWLEDGE_KEYWORD_MAP.get(kw, []):
+                if name not in seen:
+                    seen.add(name)
+                    candidates.append(name)
+
+        if candidates:
+            result = await db.execute(
+                select(FaultKnowledgeNode).where(
+                    FaultKnowledgeNode.fault_type.in_(candidates)
+                ).limit(1)
+            )
+            node = result.scalar_one_or_none()
+            if node:
+                return _knowledge_node_to_dict(node)
+
+    # ── 3. ILIKE fuzzy match on fault_type (try all search texts) ──
+    for text in search_texts:
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.fault_type.ilike(f"%{text}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    # ── 4. ILIKE fuzzy match with each keyword ──
+    for kw in keywords[:3]:
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.fault_type.ilike(f"%{kw}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    # ── 5. Category ILIKE match ──
+    for kw in keywords[:3]:
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.category.ilike(f"%{kw}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    return None
+
+
+def _knowledge_node_to_dict(node: FaultKnowledgeNode) -> dict:
     return {
+        "fault_type": node.fault_type,
+        "category": node.category,
+        "severity": node.severity,
+        "icon": node.icon or "",
+        "symptoms": node.symptoms or [],
         "root_causes": node.root_causes or [],
         "solutions": node.solutions or [],
         "spare_parts": node.spare_parts or [],
-        "category": node.category,
-        "severity": node.severity,
+        "related_faults": node.related_faults or [],
+        "cases": node.cases or [],
     }
 
 
@@ -316,7 +608,8 @@ async def _try_ai_analysis(
     or a local-fallback dict if the AI call fails,
     or None when the user has no API key configured at all.
     """
-    if not user.api_key:
+    effective_key = user.api_key or get_settings().DASHSCOPE_API_KEY or None
+    if not effective_key:
         return None
 
     turbine = await _fetch_turbine_info(wo, db)
@@ -361,17 +654,20 @@ async def _try_ai_analysis(
 
     try:
         anomalies = _detect_anomalies(scada_records, turbine.power_mw or 2.0)
-        diagnosis = await asyncio.to_thread(
-            diagnose_fault,
-            turbine_data,
-            fault_data,
-            model=user.model_preference,
-            api_key=user.api_key,
-            api_provider=user.api_provider,
-            base_url=user.api_base_url,
+        diagnosis = await asyncio.wait_for(
+            asyncio.to_thread(
+                diagnose_fault,
+                turbine_data,
+                fault_data,
+                model=user.model_preference,
+                api_key=effective_key,
+                api_provider=user.api_provider or get_settings().DASHSCOPE_API_KEY,
+                base_url=user.api_base_url,
+            ),
+            timeout=20.0,
         )
         return {"diagnosis": diagnosis, "anomalies": anomalies, "source": "ai"}
-    except Exception:
+    except (Exception, asyncio.TimeoutError):
         logger.warning("AI diagnosis failed for WO-%04d, falling back to local", wo.id)
         # Re-compute anomalies inside the handler in case _detect_anomalies was the failure point
         try:

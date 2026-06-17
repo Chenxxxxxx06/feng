@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import L from 'leaflet';
-import type { Turbine, Drone } from '../../types';
+import type { Turbine, Drone, NoFlyZone } from '../../types';
 
 interface Props {
   turbines: Turbine[];
@@ -8,9 +8,11 @@ interface Props {
   activeFarm: string | null;
   onFarmSelect: (farm: string | null) => void;
   onTurbineClick?: (turbine: Turbine) => void;
+  onMapClick?: (latlng: { lat: number; lng: number }) => void;
   showPaths: boolean;
   manualMode: boolean;
   selectedDroneId: number | null;
+  noFlyZones?: NoFlyZone[];
 }
 
 type MappedTurbine = Turbine & { lat: number; lng: number; region: string };
@@ -39,17 +41,20 @@ function paddedBounds(points: MappedTurbine[], ratio = 0.34): L.LatLngBounds {
 }
 
 export default function DroneMap({
-  turbines, drones, activeFarm, onFarmSelect, onTurbineClick,
-  showPaths, manualMode, selectedDroneId,
+  turbines, drones, activeFarm, onFarmSelect, onTurbineClick, onMapClick,
+  showPaths, manualMode, selectedDroneId, noFlyZones = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const staticLayerRef = useRef<L.LayerGroup | null>(null);
   const droneLayerRef = useRef<L.LayerGroup | null>(null);
+  const nfzLayerRef = useRef<L.LayerGroup | null>(null);
   const onFarmRef = useRef(onFarmSelect);
   const onTurbineRef = useRef(onTurbineClick);
+  const onMapRef = useRef(onMapClick);
   onFarmRef.current = onFarmSelect;
   onTurbineRef.current = onTurbineClick;
+  onMapRef.current = onMapClick;
 
   const mapped = useMemo(() => turbines.filter(hasCoords), [turbines]);
 
@@ -91,11 +96,23 @@ export default function DroneMap({
     }).addTo(map);
     staticLayerRef.current = L.layerGroup().addTo(map);
     droneLayerRef.current = L.layerGroup().addTo(map);
+    nfzLayerRef.current = L.layerGroup().addTo(map);
+
+    // Map click for no-fly zone selection
+    map.on('click', (e: L.LeafletMouseEvent) => {
+      onMapRef.current?.({ lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+
     mapRef.current = map;
     const ro = new ResizeObserver(() => map.invalidateSize());
     ro.observe(el);
     return () => { ro.disconnect(); map.remove(); mapRef.current = null; };
   }, []);
+
+  // Track previous activeFarm to avoid fitBounds on completedIds change
+  const prevActiveFarmRef = useRef(activeFarm);
+  const farmChanged = prevActiveFarmRef.current !== activeFarm;
+  prevActiveFarmRef.current = activeFarm;
 
   // Render static: farm zones + turbine markers
   useEffect(() => {
@@ -106,10 +123,12 @@ export default function DroneMap({
 
     if (!activeFarm) {
       // ── Overview: show farm rectangles ──
-      map.fitBounds(SHAANXI_WIND_BOUNDS, {
-        paddingTopLeft: [56, 56], paddingBottomRight: [420, 56],
-        maxZoom: OVERVIEW_ZOOM, animate: false,
-      });
+      if (farmChanged) {
+        map.fitBounds(SHAANXI_WIND_BOUNDS, {
+          paddingTopLeft: [56, 56], paddingBottomRight: [420, 56],
+          maxZoom: OVERVIEW_ZOOM, animate: false,
+        });
+      }
       farms.forEach(([region, items]) => {
         const bounds = paddedBounds(items, 0.5);
         const center = bounds.getCenter();
@@ -141,11 +160,13 @@ export default function DroneMap({
     // ── Farm detail: show turbines ──
     const farmItems = farms.find(([, items]) => items[0]?.region === activeFarm)?.[1] || [];
     if (!farmItems.length) return;
-    const bounds = paddedBounds(farmItems, 0.34);
-    map.fitBounds(bounds, {
-      paddingTopLeft: [64, 64], paddingBottomRight: [420, 96],
-      maxZoom: 14, animate: true, duration: 0.6, easeLinearity: 0.25,
-    });
+    if (farmChanged) {
+      const bounds = paddedBounds(farmItems, 0.34);
+      map.fitBounds(bounds, {
+        paddingTopLeft: [64, 64], paddingBottomRight: [420, 96],
+        maxZoom: 14, animate: true, duration: 0.6, easeLinearity: 0.25,
+      });
+    }
 
     farmItems.forEach((t) => {
       const shot = completedIds.has(t.id);
@@ -173,6 +194,27 @@ export default function DroneMap({
       layer.addLayer(marker);
     });
   }, [activeFarm, farms, completedIds, assignedIds]);
+
+  // Render no-fly zones
+  useEffect(() => {
+    const layer = nfzLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    noFlyZones.forEach((zone) => {
+      const bounds: L.LatLngBoundsExpression = [
+        [zone.south_lat, zone.west_lng],
+        [zone.north_lat, zone.east_lng],
+      ];
+      L.rectangle(bounds, {
+        color: '#ef4444', weight: 2, opacity: 0.7,
+        fillColor: '#ef4444', fillOpacity: 0.15,
+        dashArray: '6 4',
+      }).bindTooltip(
+        `<div style="font-size:11px"><b>🚫 ${zone.name}</b><br/>${zone.min_altitude}-${zone.max_altitude}m</div>`,
+        { direction: 'center' },
+      ).addTo(layer);
+    });
+  }, [noFlyZones]);
 
   // Render drone paths + animated markers
   useEffect(() => {

@@ -74,12 +74,14 @@ interface Props {
   onAutoSchedule: () => void;
   onScheduleItem: (task: ScheduledTask, date: Date) => void;
   scheduling: boolean;
+  farmLat?: number;
+  farmLng?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════
 export default function MaintenanceCalendar({
   workOrders, rulItems, turbines, scheduledTasks, conflicts,
-  onAutoSchedule, onScheduleItem, scheduling,
+  onAutoSchedule, onScheduleItem, scheduling, farmLat = 37.84, farmLng = 107.74,
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [cursor, setCursor] = useState(new Date()); // navigate month/week
@@ -89,7 +91,7 @@ export default function MaintenanceCalendar({
 
   // Load weather
   useEffect(() => {
-    api.get('/prediction/weather-windows', { params: { days: 60, lat: 37.3, lng: 107.6 } })
+    api.get('/prediction/weather-windows', { params: { days: 60, lat: farmLat, lng: farmLng } })
       .then(r => setWeather(r.data.windows || []))
       .catch(() => {});
   }, []);
