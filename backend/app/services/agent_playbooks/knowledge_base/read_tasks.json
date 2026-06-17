@@ -1,0 +1,159 @@
+{
+  "version": "2026-06-16",
+  "description": "只读和页面操作类任务。此类任务不修改业务数据，可由页面导航、数据工具或AI总结完成。",
+  "tasks": [
+    {
+      "id": "monitoring.view_fleet_status",
+      "name": "查看风场群体监控",
+      "category": "monitoring",
+      "keywords": ["风场", "监控", "总览", "地图", "健康", "预警", "故障风机", "运行状态", "整体状态", "当前状态", "运行"],
+      "intent_examples": ["查看风场整体状态", "打开风场监控", "看看A组风机情况", "当前风场运行状态如何"],
+      "required_slots": [],
+      "optional_slots": ["region", "status", "hi_range", "model"],
+      "standard_workflow": [
+        {"step": "query_fleet_overview", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_fleet_overview"],
+      "page_targets": ["/dashboard"],
+      "requirement_refs": ["4.2.1", "4.2.2", "4.2.3"]
+    },
+    {
+      "id": "monitoring.view_turbine_detail",
+      "name": "查看单机详情",
+      "category": "monitoring",
+      "keywords": ["单机", "风机详情", "SCADA", "健康指数", "风况", "告警"],
+      "intent_examples": ["查看YD-B-007详情", "打开3号风机详情页", "看这台风机的SCADA"],
+      "required_slots": ["turbine_ref"],
+      "optional_slots": ["window_hours"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read"},
+        {"step": "query_turbine_detail", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_turbine_detail"],
+      "page_targets": ["/turbine/{id}"],
+      "requirement_refs": ["4.2.3"]
+    },
+    {
+      "id": "diagnosis.list_faulty_turbines",
+      "name": "查看故障风机列表",
+      "category": "diagnosis",
+      "keywords": ["故障风机", "哪些风机有故障", "故障列表", "异常风机", "问题风机"],
+      "intent_examples": ["哪些风机有故障", "列出当前故障风机", "有问题的风机有哪些"],
+      "required_slots": [],
+      "optional_slots": ["status", "region", "limit"],
+      "standard_workflow": [
+        {"step": "query_faulty_turbines", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_faulty_turbines"],
+      "page_targets": ["/diagnosis"],
+      "requirement_refs": ["4.3.1", "4.3.4"]
+    },
+    {
+      "id": "diagnosis.inspect_turbine_faults",
+      "name": "查看风机故障诊断",
+      "category": "diagnosis",
+      "keywords": ["故障", "诊断", "置信度", "故障拓扑", "原因", "排查", "有故障吗", "是否故障", "有什么故障", "单机故障"],
+      "intent_examples": ["查看YD-B-007的故障", "这台风机有什么故障原因", "打开故障诊断页面", "YD-B-007有故障吗"],
+      "required_slots": [],
+      "optional_slots": ["turbine_ref", "fault_keyword", "status", "confidence_range"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read", "optional": true},
+        {"step": "query_turbine_fault_context", "type": "read"},
+        {"step": "query_knowledge_context", "type": "read", "optional": true},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_turbine_fault_context", "query_knowledge_context"],
+      "page_targets": ["/diagnosis"],
+      "requirement_refs": ["4.3.1", "4.3.4"]
+    },
+    {
+      "id": "diagnosis.view_vibration",
+      "name": "查看振动波形和频谱",
+      "category": "diagnosis",
+      "keywords": ["振动", "波形", "频谱", "RMS", "主频", "FFT", "齿轮箱频谱", "看频谱", "看振动"],
+      "intent_examples": ["查看YD-B-007的振动波形", "看齿轮箱频谱", "看YD-B-007齿轮箱频谱", "RMS最近怎么样"],
+      "required_slots": ["turbine_ref"],
+      "optional_slots": ["component", "window_hours"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read"},
+        {"step": "query_vibration_context", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "query_vibration_context"],
+      "page_targets": ["/diagnosis", "/turbine/{id}"],
+      "requirement_refs": ["4.3.3"]
+    },
+    {
+      "id": "prediction.view_rul_and_plan",
+      "name": "查看RUL与维护计划",
+      "category": "prediction",
+      "keywords": ["RUL", "剩余寿命", "维护计划", "成本", "天气窗口", "预测"],
+      "intent_examples": ["查看剩余寿命预测", "哪些风机要优先维修", "查看维护计划"],
+      "required_slots": [],
+      "optional_slots": ["turbine_ref", "component", "priority"],
+      "standard_workflow": [
+        {"step": "query_rul_predictions", "type": "read"},
+        {"step": "query_maintenance_plan", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_rul_predictions", "query_maintenance_plan"],
+      "page_targets": ["/prediction"],
+      "requirement_refs": ["4.4.1", "4.4.2", "4.4.3"]
+    },
+    {
+      "id": "workorder.query_workorders",
+      "name": "查询维修工单",
+      "category": "workorder",
+      "keywords": ["工单", "维修记录", "责任人", "状态", "查询"],
+      "intent_examples": ["查看待处理工单", "查张三负责的工单", "YD-B-007有哪些工单"],
+      "required_slots": [],
+      "optional_slots": ["workorder_ref", "turbine_ref", "status", "assignee_name"],
+      "standard_workflow": [
+        {"step": "resolve_turbine_by_ref", "type": "read", "optional": true},
+        {"step": "resolve_personnel_by_name", "type": "read", "optional": true},
+        {"step": "query_workorder_context", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["resolve_turbine_by_ref", "resolve_personnel_by_name", "query_workorder_context"],
+      "page_targets": ["/workorder"],
+      "requirement_refs": ["4.5.1"]
+    },
+    {
+      "id": "knowledge.search_fault_knowledge",
+      "name": "查询故障知识库",
+      "category": "knowledge",
+      "keywords": ["知识库", "故障知识", "根因", "方案", "备件", "案例"],
+      "intent_examples": ["查齿轮箱点蚀怎么处理", "轴承故障有哪些根因", "打开知识图谱"],
+      "required_slots": [],
+      "optional_slots": ["fault_keyword", "category"],
+      "standard_workflow": [
+        {"step": "query_knowledge_context", "type": "read"},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_knowledge_context"],
+      "page_targets": ["/knowledge"],
+      "requirement_refs": ["4.3.4"]
+    },
+    {
+      "id": "settings.view_system_configuration",
+      "name": "查看系统设置和数据源状态",
+      "category": "settings",
+      "keywords": ["系统设置", "阈值", "通知", "数据源", "AI配置", "供应商"],
+      "intent_examples": ["查看AI供应商配置", "看数据源连接状态", "查看HI阈值"],
+      "required_slots": [],
+      "optional_slots": ["setting_type", "provider"],
+      "standard_workflow": [
+        {"step": "query_ai_provider_config", "type": "read", "optional": true},
+        {"step": "query_threshold_config", "type": "read", "optional": true},
+        {"step": "query_data_source_status", "type": "read", "optional": true},
+        {"step": "present_result", "type": "verify"}
+      ],
+      "allowed_actions": ["query_ai_provider_config", "query_threshold_config", "query_data_source_status"],
+      "page_targets": ["/settings"],
+      "requirement_refs": ["4.5.2", "4.7.1"]
+    }
+  ]
+}

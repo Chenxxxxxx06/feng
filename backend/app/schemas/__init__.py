@@ -544,3 +544,99 @@ class AgentExecuteResponse(BaseModel):
     follow_up_analysis: Optional[str] = None
     requires_clarification: bool = False
     clarification_question: Optional[str] = None
+
+
+# --- Agent Action Gateway ---
+class AgentActionPlanRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=512)
+    page_context: dict = Field(default_factory=dict)
+
+
+class AgentActionConfirmation(BaseModel):
+    title: str
+    summary: str
+    before: dict = Field(default_factory=dict)
+    after: dict = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AgentActionPlanResponse(BaseModel):
+    status: str
+    task_type: Optional[str] = None
+    workflow: Optional[str] = None
+    request_id: Optional[str] = None
+    action: Optional[str] = None
+    confidence: float = 0.0
+    confirmation: Optional[AgentActionConfirmation] = None
+    missing_slots: list[str] = Field(default_factory=list)
+    clarification_question: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class AgentActionConfirmResponse(BaseModel):
+    request_id: str
+    action: str
+    status: str
+    result: Optional[dict] = None
+    display: Optional[dict] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+# --- Unified Agent Task Planner ---
+class AgentTaskPlanRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=512)
+    page_context: dict = Field(default_factory=dict)
+    plan_id: Optional[str] = None
+    provider_config_id: Optional[int] = Field(default=None, gt=0)
+    model: Optional[str] = Field(default=None, max_length=128)
+
+    model_config = {"protected_namespaces": ()}
+
+
+class AgentTaskStep(BaseModel):
+    order: int
+    step: str
+    type: str = "read"
+    status: str = "planned"
+    description: str = ""
+
+
+class AgentTaskCandidate(BaseModel):
+    id: str
+    name: str = ""
+    category: str = ""
+    implementation_status: Optional[str] = None
+    task_kind: str = ""
+    score: Optional[int] = None
+
+
+class AgentTaskPlanResponse(BaseModel):
+    status: str
+    task_type: Optional[str] = None
+    task_kind: Optional[str] = None
+    planner_source: Optional[str] = None
+    plan_id: Optional[str] = None
+    playbook_id: Optional[str] = None
+    workflow: Optional[str] = None
+    action: Optional[str] = None
+    request_id: Optional[str] = None
+    confidence: float = 0.0
+    answer: Optional[str] = None
+    slots: dict = Field(default_factory=dict)
+    steps: list[AgentTaskStep] = Field(default_factory=list)
+    candidates: list[AgentTaskCandidate] = Field(default_factory=list)
+    display: Optional[dict] = None
+    confirmation: Optional[AgentActionConfirmation] = None
+    missing_slots: list[str] = Field(default_factory=list)
+    clarification_question: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class AgentTaskCancelResponse(BaseModel):
+    plan_id: str
+    status: str
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None

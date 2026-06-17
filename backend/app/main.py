@@ -171,7 +171,7 @@ async def health_check():
 # --- Router registration ---
 from app.api import (
     auth, turbines, diagnosis, prediction,
-    workorders, settings as settings_api, ai, personnel, knowledge, agent
+    workorders, settings as settings_api, ai, personnel, knowledge, agent, agent_actions, agent_tools, agent_tasks
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证管理"])
@@ -181,6 +181,9 @@ app.include_router(prediction.router, prefix="/api/prediction", tags=["预测决
 app.include_router(workorders.router, prefix="/api/workorders", tags=["工单管理"])
 app.include_router(knowledge.router, prefix="/api", tags=["故障百科"])
 app.include_router(agent.router, prefix="/api", tags=["AI诊断"])
+app.include_router(agent_actions.router, prefix="/api", tags=["Agent动作"])
+app.include_router(agent_tools.router, prefix="/api", tags=["Agent数据工具"])
+app.include_router(agent_tasks.router, prefix="/api", tags=["Agent任务"])
 app.include_router(settings_api.router, prefix="/api/settings", tags=["系统设置"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
 app.include_router(personnel.router, prefix="/api/personnel", tags=["人员管理"])
