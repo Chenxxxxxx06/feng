@@ -648,14 +648,25 @@ async def send_workorder_email(
 
     config_result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
     config = config_result.scalar_one_or_none()
+    if not config:
+        config = NotificationConfig(
+            user_id=user.id,
+            hi_threshold=70.0,
+            email_enabled=True,
+            email_address=user.email,
+            wechat_enabled=False,
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
     logger.info(
         "Workorder email setting: user_id=%s username=%s config_id=%s email_enabled=%s",
         user.id,
         user.username,
-        getattr(config, "id", None),
-        getattr(config, "email_enabled", None),
+        config.id,
+        config.email_enabled,
     )
-    if not config or not config.email_enabled:
+    if not config.email_enabled:
         raise HTTPException(status_code=400, detail="Email notification is disabled in settings")
 
     recipients = await _recipient_emails(data, wo, db)
