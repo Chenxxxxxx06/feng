@@ -23,7 +23,7 @@ interface MaintenancePlanResponse {
   high_count: number; total_cost_estimate: number;
 }
 
-const FAULT_TYPES = [
+const FAULT_TYPES_DEFAULT = [
   { value: 'bearing_wear', label: '轴承磨损' }, { value: 'gearbox_failure', label: '齿轮箱故障' },
   { value: 'blade_damage', label: '叶片损伤' }, { value: 'generator_failure', label: '发电机故障' },
   { value: 'pitch_system_fault', label: '变桨系统故障' }, { value: 'main_shaft_misalignment', label: '主轴不对中' },
@@ -75,7 +75,8 @@ export default function PredictionPage() {
   const [overflowTasks, setOverflowTasks] = useState<any[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [scheduling, setScheduling] = useState(false);
-  const [schedulePreview, setSchedulePreview] = useState<any[] | null>(null); // null = no preview, array = show modal
+  const [schedulePreview, setSchedulePreview] = useState<any[] | null>(null);
+  const [faultTypes, setFaultTypes] = useState<{value:string;label:string}[]>(FAULT_TYPES_DEFAULT as unknown as {value:string;label:string}[]);
 
   const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('bearing_wear');
   const [costResult, setCostResult] = useState<CostComparison | null>(null); const [costLoading, setCostLoading] = useState(false);
@@ -86,13 +87,19 @@ export default function PredictionPage() {
   const loadData = useCallback(async () => {
     setError(null);
     try {
-      const [rulData, woRes, turbData, sumData, planRes] = await Promise.all([
+      const [rulData, woRes, turbData, sumData, planRes, ftData] = await Promise.all([
         predictionService.getRUL(), api.get('/workorders/'), predictionService.getTurbines(),
         predictionService.getSummary(), api.get('/prediction/maintenance-plan', { params: { top_n: 50 } }),
+        predictionService.getFaultTypes(),
       ]);
       setPredictions(rulData); const d = woRes.data; setWorkOrders(Array.isArray(d) ? d : d.workorders || []);
       setTurbines(turbData); setSummary(sumData); setMaintPlan(planRes.data);
+      const loadedFt = ftData.length > 0 ? ftData.map((ft: {value:string;label:string}) => ({value: ft.value, label: ft.label})) : FAULT_TYPES_DEFAULT as unknown as {value:string;label:string}[];
+      setFaultTypes(loadedFt);
       if (turbData.length > 0 && !costTurbineId) setCostTurbineId(turbData[0].id);
+      if (loadedFt.length > 0 && costFaultType && !loadedFt.find(ft => ft.value === costFaultType)) {
+        setCostFaultType(loadedFt[0].value);
+      }
     } catch (err: any) { setError(err?.response?.data?.detail || err?.message || '加载失败'); }
     finally { setLoading(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,7 +259,7 @@ export default function PredictionPage() {
           <div className="ops-panel p-4"><h3 className="text-sm font-medium mb-3">维护成本对比</h3>
             <div className="flex gap-3 mb-4 flex-wrap">
               <select value={costTurbineId ?? ''} onChange={e => setCostTurbineId(e.target.value ? Number(e.target.value) : null)} className="min-w-[200px] px-3 py-2 text-sm text-text-primary"><option value="" disabled>选择风机</option>{turbines.map(t => <option key={t.id} value={t.id}>{t.name} — {t.model || '未知型号'} ({t.region})</option>)}</select>
-              <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="px-3 py-2 text-sm text-text-primary">{FAULT_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
+              <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="px-3 py-2 text-sm text-text-primary">{faultTypes.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
               <button onClick={handleCostCompare} disabled={!costTurbineId || costLoading} className="ops-btn ops-btn-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">{costLoading ? '计算中...' : '计算对比'}</button>
             </div>
             {selectedTurbine && <p className="text-[11px] text-text-muted -mt-2 mb-3">当前: {selectedTurbine.name} · {selectedTurbine.power_mw}MW · HI {selectedTurbine.hi_value}</p>}

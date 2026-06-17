@@ -353,13 +353,17 @@ async def seed():
         print("\n📋 创建工单...")
         wo_count = 0
         for i, (t, template) in enumerate(zip(turbine_objs[:8], WORK_ORDER_TEMPLATES)):
+            has_assignee = random.random() > 0.3
+            assigned_user = random.choice(tech_objs) if has_assignee else None
             wo = WorkOrder(
                 turbine_id=t.id,
                 fault_id=fault_objs[i].id if i < len(fault_objs) else None,
                 title=f"{t.name} {template['title']}",
                 description=template["desc"],
                 status=random.choice(["pending", "assigned", "in_progress", "completed"]),
-                assignee=random.choice(tech_objs).username if random.random() > 0.3 else None,
+                assignee=assigned_user.username if assigned_user else None,
+                assignee_id=assigned_user.id if assigned_user else None,
+                assignee_email=assigned_user.email if assigned_user else None,
                 cost_estimate=template["cost"],
                 cost_actual=template["cost"] * random.uniform(0.8, 1.2) if random.random() > 0.5 else None,
                 due_date=now + timedelta(days=random.randint(1, 90)),
@@ -374,7 +378,7 @@ async def seed():
         config = NotificationConfig(
             user_id=admin.id,
             hi_threshold=70.0,
-            email_enabled=False,
+            email_enabled=True,
             email_address="admin@fengdiao.com",
             wechat_enabled=False,
         )
@@ -442,7 +446,7 @@ async def create_default_admin():
         config = NotificationConfig(
             user_id=admin.id,
             hi_threshold=70.0,
-            email_enabled=False,
+            email_enabled=True,
             email_address="admin@fengdiao.com",
             wechat_enabled=False,
         )
