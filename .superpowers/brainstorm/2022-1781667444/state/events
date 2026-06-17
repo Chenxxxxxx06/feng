@@ -1,0 +1,2 @@
+{"type":"click","text":"T\n      \n        单机模式：2-opt 改进的最近邻 TSP\n        从起飞点出发，贪心选择最近未访问风机，构建初始路径。再用 2-opt 局部优化（交换两条边消除交叉），反复迭代至收敛。\n        计算量：N≤50 → <10ms  |  路径质量：最优解的 95-98%","choice":"nearest-neighbor","id":null,"timestamp":1781667586897}
+{"type":"click","text":"V\n      \n        多机模式：K-Means 分区 + 各片区 TSP\n        步骤 1：用 K-Means (K=无人机数) 按地理位置聚类风机。步骤 2：每架无人机在自己片区内跑 TSP。步骤 3：负载均衡 — 如果某片区风机过多，迁移边界点到相邻片区。\n        计算量：K×N≤50 → <30ms  |  分区可视化 + 手动调整","choice":"kmeans-vrp","id":null,"timestamp":1781667587846}

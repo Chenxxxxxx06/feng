@@ -186,6 +186,13 @@ const GRAPH_EDGE_COLOR: Record<string, string> = {
   default: '#30363d',
 };
 
+const topologyEdgeLabel = (type: string, label: string) => {
+  if (type === 'fault_record') return label ? `发生 · ${label}` : '发生故障';
+  if (type === 'workorder') return label?.startsWith('工单') ? '生成工单' : '关联工单';
+  if (type === 'personnel') return '负责人';
+  return label || '关联';
+};
+
 const graphNodeSymbol = (view: 'topology' | 'knowledge', category: string) => {
   if (view === 'topology') {
     return {
@@ -210,6 +217,7 @@ const inferGraphEdgeType = (sourceCategory?: string, targetCategory?: string) =>
   if (!sourceCategory || !targetCategory) return 'default';
   if (sourceCategory === 'turbine' && targetCategory === 'fault_record') return 'fault_record';
   if (sourceCategory === 'fault_record' && targetCategory === 'workorder') return 'workorder';
+  if (sourceCategory === 'turbine' && targetCategory === 'workorder') return 'workorder';
   if (sourceCategory === 'workorder' && targetCategory === 'personnel') return 'personnel';
   if (sourceCategory === 'fault' && targetCategory === 'symptom') return 'symptom';
   if (sourceCategory === 'fault' && targetCategory === 'root_cause') return 'root_cause';
@@ -347,16 +355,25 @@ export default function KnowledgeBasePage() {
           color = STATUS_COLOR[n.status || 'normal'] || color;
           borderColor = color;
           borderW = 2;
+          if (n.status === 'warning' || n.status === 'fault' || (n.fault_count || 0) > 0) {
+            shadow = 14;
+          }
         }
         if (n.category === 'fault_record') {
           color = n.active ? '#da3633' : '#484f58';
           if (n.active) {
             borderColor = '#ff6b6b';
-            borderW = 1;
+            borderW = 3;
+            shadow = 18;
           }
         }
         if (n.category === 'workorder') {
           color = STATUS_COLOR[n.status || 'pending'] || color;
+          if (n.status === 'pending' || n.status === 'in_progress') {
+            borderColor = color;
+            borderW = 2;
+            shadow = 10;
+          }
         }
       } else if (isRoot) {
         color = STATUS_COLOR[n.severity || 'medium'] || color;
@@ -371,6 +388,7 @@ export default function KnowledgeBasePage() {
 
       return {
         ...n,
+        draggable: true,
         symbol: graphNodeSymbol(graphView, n.category),
         itemStyle: { color, borderColor, borderWidth: borderW, shadowBlur: shadow, shadowColor: color },
         symbolSize: isRoot ? Math.max(n.symbolSize, 62) : n.symbolSize,
@@ -417,6 +435,7 @@ export default function KnowledgeBasePage() {
         layout: 'force',
         roam: true,
         draggable: true,
+        cursor: 'grab',
         force: {
           repulsion: isTopo ? 350 : 260,
           edgeLength: isTopo ? [120, 400] : [90, 220],
@@ -427,19 +446,23 @@ export default function KnowledgeBasePage() {
         links: data.edges.map(e => {
           const type = e.type || inferGraphEdgeType(nodeCategoryById.get(e.source), nodeCategoryById.get(e.target));
           const color = GRAPH_EDGE_COLOR[type] || GRAPH_EDGE_COLOR.default;
+          const edgeLabel = isTopo ? topologyEdgeLabel(type, e.label) : e.label;
           return {
             source: e.source,
             target: e.target,
             label: {
-              show: Boolean(e.label),
-              formatter: e.label,
+              show: Boolean(edgeLabel),
+              formatter: edgeLabel,
               fontSize: 9,
-              color,
-              backgroundColor: 'rgba(8,12,18,0.72)',
-              borderColor: 'rgba(255,255,255,0.06)',
-              borderWidth: 1,
-              borderRadius: 3,
-              padding: [2, 4],
+              color: isTopo ? '#dbeafe' : '#e9edf5',
+              fontWeight: 600,
+              textShadowColor: 'rgba(0,0,0,0.75)',
+              textShadowBlur: isTopo ? 4 : 0,
+              backgroundColor: isTopo ? 'transparent' : 'rgba(8,12,18,0.88)',
+              borderColor: isTopo ? 'transparent' : color,
+              borderWidth: isTopo ? 0 : 1,
+              borderRadius: isTopo ? 0 : 4,
+              padding: isTopo ? [0, 0] : [3, 6],
             },
             lineStyle: {
               color,
@@ -452,8 +475,8 @@ export default function KnowledgeBasePage() {
         categories: cats.map(c => ({ name: c, itemStyle: { color: CAT_COLORS[c] || '#8b949e' } })),
         lineStyle: { color: '#30363d', curveness: isTopo ? 0.05 : 0.22, opacity: 0.5 },
         label: { show: true, formatter: '{b}' },
-        edgeSymbol: isTopo ? ['none', 'none'] : ['none', 'arrow'],
-        edgeSymbolSize: isTopo ? 0 : 7,
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: isTopo ? 6 : 7,
         emphasis: {
           focus: 'adjacency',
           blurScope: 'coordinateSystem',
@@ -619,10 +642,10 @@ export default function KnowledgeBasePage() {
   }, [graphData, graphView]);
 
   return (
-    <div className="flex h-full bg-bg-deep">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="border-b border-border-subtle bg-bg-panel/90 p-4">
-          <div className="mb-4 flex items-start justify-between gap-4">
+    <div className="flex h-full min-h-0 bg-bg-deep">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden scroll-smooth pb-8">
+        <div className="border-b border-border-subtle bg-bg-panel/90 p-3">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-lg font-bold text-text-primary">故障百科</h1>
               <p className="mt-1 text-xs text-text-muted">沉淀故障症状、根因、方案和案例，并对 AI 抽取知识进行审核。</p>
@@ -632,16 +655,16 @@ export default function KnowledgeBasePage() {
             </button>
           </div>
 
-          <div className="mb-4 grid grid-cols-4 gap-3">
+          <div className="mt-3 grid grid-cols-4 gap-2">
             <SummaryTile label="知识节点" value={stats.total} tone="blue" />
             <SummaryTile label="高危知识" value={stats.high} tone="red" />
             <SummaryTile label="待审核" value={stats.pendingReview} tone="yellow" active={reviewFilter === 'pending'} onClick={() => setReviewFilter('pending')} />
             <SummaryTile label="AI 提取" value={stats.aiExtracted} tone="cyan" />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
-              className="min-w-[240px] flex-1 rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm placeholder-text-muted focus:border-accent-blue focus:outline-none"
+              className="min-w-[260px] flex-1 rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm placeholder-text-muted focus:border-accent-blue focus:outline-none"
               placeholder="搜索故障名称、症状、根因或方案"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -678,7 +701,6 @@ export default function KnowledgeBasePage() {
             )}
           </div>
         </div>
-
         {gStats && graphView === 'topology' && (
           <div className="flex items-center gap-4 border-b border-border-subtle bg-bg-deep/50 px-4 py-2">
             <StatBadge label="活跃故障" value={gStats.active_faults} color="text-accent-red" />
@@ -732,6 +754,12 @@ export default function KnowledgeBasePage() {
           </div>
         </div>
 
+        {graphView === 'topology' && (
+          <div className="border-b border-border-subtle bg-accent-blue/5 px-4 py-2 text-[10px] text-text-muted">
+            现场链路：风机 → 故障事件 → 工单 → 负责人；高亮节点表示当前需要关注的异常或待处理事项。
+          </div>
+        )}
+
         {graphSummary && (
           <div className="flex items-center gap-3 border-b border-border-subtle bg-bg-panel/40 px-4 py-2">
             <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
@@ -754,7 +782,7 @@ export default function KnowledgeBasePage() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-[760px] flex-1 xl:min-h-[820px]">
           {graphLoading ? (
             <div className="flex flex-1 items-center justify-center">
               <div className="flex flex-col items-center gap-3">
@@ -771,7 +799,11 @@ export default function KnowledgeBasePage() {
             <>
               <div className="relative flex-1 overflow-hidden bg-[radial-gradient(circle_at_50%_35%,rgba(56,139,253,0.12),transparent_34%),linear-gradient(180deg,rgba(13,19,30,0.7),rgba(8,12,18,0.92))]">
                 <div className="pointer-events-none absolute inset-0 opacity-[0.14] [background-image:linear-gradient(rgba(233,237,245,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(233,237,245,0.08)_1px,transparent_1px)] [background-size:32px_32px]" />
-                <div ref={chartRef} className="relative h-full w-full" />
+                <div
+                  ref={chartRef}
+                  className="relative h-full w-full"
+                  style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
+                />
               </div>
               {graphNode && <NodeInfoPanel node={graphNode} view={graphView} onViewKnowledge={switchToKnowledge} onClose={() => setGraphNode(null)} />}
             </>
@@ -788,8 +820,18 @@ export default function KnowledgeBasePage() {
         <KnowledgeDetailDrawer
           detail={detail}
           nodes={nodes}
-          onClose={() => setDetail(null)}
+          editingNode={formMode === 'edit' ? formNode : null}
+          categories={categories.filter(c => c !== ALL_CATEGORY)}
+          saving={formSaving}
+          error={formError}
+          onClose={() => {
+            closeKnowledgeForm();
+            setDetail(null);
+          }}
           onEdit={openEditForm}
+          onEditChange={setFormNode}
+          onCancelEdit={closeKnowledgeForm}
+          onSaveEdit={handleSaveKnowledgeNode}
           onDelete={handleDeleteNode}
           onVerify={handleVerifyNode}
           onReject={handleRejectNode}
@@ -799,7 +841,7 @@ export default function KnowledgeBasePage() {
         />
       )}
 
-      {formMode && formNode && (
+      {formMode === 'create' && formNode && (
         <KnowledgeNodeForm
           mode={formMode}
           node={formNode}
@@ -852,8 +894,15 @@ function KnowledgeCard({ node, active, onClick }: { node: FaultNode; active: boo
 function KnowledgeDetailDrawer({
   detail,
   nodes,
+  editingNode,
+  categories,
+  saving,
+  error,
   onClose,
   onEdit,
+  onEditChange,
+  onCancelEdit,
+  onSaveEdit,
   onDelete,
   onVerify,
   onReject,
@@ -863,8 +912,15 @@ function KnowledgeDetailDrawer({
 }: {
   detail: FaultNode;
   nodes: FaultNode[];
+  editingNode: FaultNode | null;
+  categories: string[];
+  saving: boolean;
+  error: string;
   onClose: () => void;
   onEdit: (node: FaultNode) => void;
+  onEditChange: (node: FaultNode | null) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (node: FaultNode) => void;
   onDelete: (node: FaultNode) => void;
   onVerify: (node: FaultNode) => void;
   onReject: (node: FaultNode) => void;
@@ -873,9 +929,23 @@ function KnowledgeDetailDrawer({
   onSelectDetail: (node: FaultNode) => void;
 }) {
   const pending = isPendingReview(detail);
+  if (editingNode) {
+    return (
+      <KnowledgeNodeForm
+        mode="edit"
+        node={editingNode}
+        categories={categories}
+        saving={saving}
+        error={error}
+        onChange={onEditChange}
+        onClose={onCancelEdit}
+        onSave={onSaveEdit}
+      />
+    );
+  }
 
   return (
-    <div className="w-[440px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
+    <div className="w-[520px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
       <div className="sticky top-0 z-10 border-b border-border-subtle bg-bg-card/95 p-5 backdrop-blur-sm">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -1099,7 +1169,7 @@ function KnowledgeNodeForm({
     : [node.category, ...categories];
 
   return (
-    <div className="w-[460px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
+    <div className="w-[520px] flex-shrink-0 overflow-auto border-l border-border-subtle bg-bg-card">
       <div className="sticky top-0 z-20 border-b border-border-subtle bg-bg-card/95 p-5 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div>
@@ -1202,7 +1272,7 @@ function KnowledgeNodeForm({
                 <input className="form-input" type="date" value={item.date} onChange={e => updateListItem('cases', node.cases, index, { ...item, date: e.target.value })} />
                 <RemoveButton onClick={() => removeListItem('cases', node.cases, index)} />
               </div>
-              <textarea className="form-input min-h-[64px]" placeholder="案例摘要" value={item.summary} onChange={e => updateListItem('cases', node.cases, index, { ...item, summary: e.target.value })} />
+              <textarea className="form-input min-h-[112px] w-full resize-y" placeholder="案例摘要" value={item.summary} onChange={e => updateListItem('cases', node.cases, index, { ...item, summary: e.target.value })} />
               <div className="grid grid-cols-[1fr_86px_86px] gap-2">
                 <input className="form-input" placeholder="处理结果" value={item.resolution} onChange={e => updateListItem('cases', node.cases, index, { ...item, resolution: e.target.value })} />
                 <input className="form-input" type="number" min="0" placeholder="成本" value={item.total_cost} onChange={e => updateListItem('cases', node.cases, index, { ...item, total_cost: Number(e.target.value) || 0 })} />
@@ -1250,7 +1320,7 @@ function FormSection({ title, onAdd, children }: { title: string; onAdd: () => v
     <section className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">{title}</h3>
-        <button onClick={onAdd} className="rounded border border-border-subtle bg-bg-deep px-2 py-1 text-[10px] text-accent-blue hover:border-accent-blue/50">添加</button>
+        <button onClick={onAdd} className="px-1 py-1 text-[10px] font-medium text-accent-blue hover:text-blue-300">添加</button>
       </div>
       <div className="space-y-2">{children}</div>
     </section>
@@ -1259,7 +1329,7 @@ function FormSection({ title, onAdd, children }: { title: string; onAdd: () => v
 
 function RemoveButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="h-9 rounded border border-border-subtle text-text-muted hover:border-accent-red/40 hover:text-accent-red">x</button>
+    <button onClick={onClick} className="h-9 px-2 text-sm font-medium text-text-muted hover:text-accent-red">x</button>
   );
 }
 

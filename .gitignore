@@ -88,6 +88,10 @@ backend/data/uploads/
 
 # --- Local verification artifacts ---
 frontend/prediction-cost-verified.png
+backend/venv/.requirements.stamp
+backend/.seed.stamp
+frontend/.npm-install.stamp
+runtime/logs/
 
 # --- Local handoff packages ---
 handoff_packages/

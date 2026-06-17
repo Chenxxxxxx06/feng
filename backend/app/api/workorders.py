@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from smtplib import SMTPRecipientsRefused
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ai import _detect_anomalies, _generate_local_diagnosis
@@ -56,6 +56,19 @@ def _model_fields() -> set[str]:
 def _filter_model_data(data: dict) -> dict:
     fields = _model_fields()
     return {key: val for key, val in data.items() if key in fields}
+
+
+def _fmt_item(item) -> str:
+    """Format a knowledge item that may be a str or dict."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("action") or item.get("name") or item.get("title") or str(item)
+    return str(item)
+
+
+def _fmt_items(items: list) -> list[str]:
+    return [_fmt_item(item) for item in items]
 
 
 def _utc_now() -> datetime:
@@ -126,11 +139,11 @@ def _workorder_plain_body(
     if knowledge:
         lines.append("【知识库参考】")
         if knowledge.get("root_causes"):
-            lines.append(f"  可能根因: {'; '.join(knowledge['root_causes'][:3])}")
+            lines.append(f"  可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:3]))}")
         if knowledge.get("solutions"):
-            lines.append(f"  建议方案: {'; '.join(knowledge['solutions'][:3])}")
+            lines.append(f"  建议方案: {'; '.join(_fmt_items(knowledge['solutions'][:3]))}")
         if knowledge.get("spare_parts"):
-            lines.append(f"  相关备件: {', '.join(knowledge['spare_parts'][:5])}")
+            lines.append(f"  相关备件: {', '.join(_fmt_items(knowledge['spare_parts'][:5]))}")
         lines.append("")
 
     lines += [
@@ -246,11 +259,11 @@ def _workorder_html_body(
     <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 知识库参考</h3>
     <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">"""
         if knowledge.get("root_causes"):
-            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(knowledge['root_causes'][:3])}</td></tr>"""
+            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:3]))}</td></tr>"""
         if knowledge.get("solutions"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(knowledge['solutions'][:3])}</td></tr>"""
+            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(_fmt_items(knowledge['solutions'][:3]))}</td></tr>"""
         if knowledge.get("spare_parts"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(knowledge['spare_parts'][:5])}</td></tr>"""
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(_fmt_items(knowledge['spare_parts'][:5]))}</td></tr>"""
         html += """
     </table>
   </td></tr>"""
@@ -433,7 +446,7 @@ async def list_workorders(
 ):
     q = select(WorkOrder).order_by(WorkOrder.created_at.desc())
     if not include_deleted:
-        q = q.where(or_(WorkOrder.deleted_at.is_(None), WorkOrder.status == "cancelled"))
+        q = q.where(WorkOrder.deleted_at.is_(None))
     if status:
         q = q.where(WorkOrder.status == status)
     if assignee:
@@ -450,7 +463,9 @@ async def list_workorders(
 
 @router.get("/{workorder_id}", response_model=WorkOrderDetailResponse)
 async def get_workorder(workorder_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -478,6 +493,10 @@ async def create_workorder(
     user: User = Depends(get_current_user),
 ):
     payload = data.model_dump(exclude_none=True)
+    turbine = await db.get(Turbine, data.turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
     if data.fault_id is not None:
         fault = await db.get(Fault, data.fault_id)
         if not fault:
@@ -510,7 +529,9 @@ async def update_workorder(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -557,28 +578,28 @@ async def update_workorder(
 
 
 @router.delete("/{workorder_id}", response_model=WorkOrderResponse)
-async def cancel_workorder(
+async def delete_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
 
-    before_status = wo.status
     now = _utc_now()
-    wo.status = "cancelled"
-    wo.cancelled_at = now
+    wo.deleted_at = now
     wo.updated_at = now
     await _add_record(
         db,
         wo,
         user,
-        "cancelled",
-        content="Work order cancelled",
-        before_status=before_status,
+        "deleted",
+        content="Work order deleted",
+        before_status=wo.status,
         after_status=wo.status,
     )
 
@@ -594,7 +615,9 @@ async def add_workorder_record(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -629,21 +652,34 @@ async def send_workorder_email(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
 
     config_result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
     config = config_result.scalar_one_or_none()
+    if not config:
+        config = NotificationConfig(
+            user_id=user.id,
+            hi_threshold=70.0,
+            email_enabled=True,
+            email_address=user.email,
+            wechat_enabled=False,
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
     logger.info(
         "Workorder email setting: user_id=%s username=%s config_id=%s email_enabled=%s",
         user.id,
         user.username,
-        getattr(config, "id", None),
-        getattr(config, "email_enabled", None),
+        config.id,
+        config.email_enabled,
     )
-    if not config or not config.email_enabled:
+    if not config.email_enabled:
         raise HTTPException(status_code=400, detail="Email notification is disabled in settings")
 
     recipients = await _recipient_emails(data, wo, db)

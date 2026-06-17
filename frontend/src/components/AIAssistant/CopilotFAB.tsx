@@ -7,9 +7,28 @@ import type { Message } from '../../services/copilotStore';
 
 const PANEL_W = 560;
 const PANEL_H = 560;
+const PANEL_MIN_W = 420;
+const PANEL_MIN_H = 420;
+const PANEL_MAX_W = 920;
+const PANEL_MAX_H = 820;
 const FAB_W = 56;
 const FAB_H = 56;
 const EDGE_GAP = 24;
+const PANEL_SIZE_STORAGE_KEY = 'copilot.panelSize.v1';
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
+
+function loadPanelSize() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PANEL_SIZE_STORAGE_KEY) || '{}') as { width?: number; height?: number };
+    return {
+      width: clamp(Number(parsed.width) || PANEL_W, PANEL_MIN_W, PANEL_MAX_W),
+      height: clamp(Number(parsed.height) || PANEL_H, PANEL_MIN_H, PANEL_MAX_H),
+    };
+  } catch {
+    return { width: PANEL_W, height: PANEL_H };
+  }
+}
 
 export interface PageContext {
   turbine_id?: number;
@@ -671,7 +690,9 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const chatRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+  const isResizing = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const resizeStart = useRef({ x: 0, y: 0, width: PANEL_W, height: PANEL_H });
   const initialSent = useRef(false);
   const fabRef = useRef<HTMLButtonElement>(null);
   const fabDragging = useRef(false);
@@ -694,7 +715,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         if (/^\d+\.\s/.test(line) || line.startsWith('- ')) {
           return <div key={i} className="flex gap-1"><span className="text-accent-blue">•</span><span dangerouslySetInnerHTML={{ __html: html.replace(/^\d+\.\s|-\s/, '') }} /></div>;
         }
-        if (line.includes('📊') || line.includes('📚') || line.includes('🎯') || line.includes('🧠') || line.includes('📝')) {
+        if (line.includes('数据') || line.includes('知识') || line.includes('意图') || line.includes('汇总')) {
           return <div key={i} className="font-medium text-accent-cyan text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />;
         }
         return <p key={i} className="text-xs" dangerouslySetInnerHTML={{ __html: html }} />;
@@ -713,6 +734,8 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   const [selectedContextIds, setSelectedContextIds] = useState<string[]>(loadSelectedDataContexts);
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction | null>(null);
   const [pendingAgentPlanId, setPendingAgentPlanId] = useState<string | null>(null);
+  const [panelSize, setPanelSize] = useState(loadPanelSize);
+  const panelSizeRef = useRef(panelSize);
   const currentSession = sessions.find((session) => session.id === currentSessionId) || sessions[0];
   const pendingDeleteSession = pendingDeleteSessionId
     ? sessions.find((session) => session.id === pendingDeleteSessionId)
@@ -837,6 +860,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
 
   // Keep fabPosRef in sync with store
   useEffect(() => { fabPosRef.current = fabPos; }, [fabPos]);
+  useEffect(() => { panelSizeRef.current = panelSize; }, [panelSize]);
 
   useEffect(() => {
     setModelDraft(currentSession?.model || selectedProvider?.default_model || selectedProvider?.model_options?.[0] || '');
@@ -881,8 +905,9 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   // Initialize panel position to bottom-right when opened
   useEffect(() => {
     if (open) {
-      const x = Math.max(0, window.innerWidth - PANEL_W - EDGE_GAP);
-      const y = Math.max(0, window.innerHeight - PANEL_H - EDGE_GAP);
+      const size = panelSizeRef.current;
+      const x = Math.max(0, window.innerWidth - size.width - EDGE_GAP);
+      const y = Math.max(0, window.innerHeight - size.height - EDGE_GAP);
       setPanelPos({ x, y });
     }
   }, [open, setPanelPos]);
@@ -900,9 +925,10 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   // Clamp panel position on window resize
   useEffect(() => {
     const handleResize = () => {
+      const size = panelSizeRef.current;
       setPanelPos({
-        x: Math.max(0, Math.min(panelPos.x, window.innerWidth - PANEL_W)),
-        y: Math.max(0, Math.min(panelPos.y, window.innerHeight - PANEL_H)),
+        x: Math.max(0, Math.min(panelPos.x, window.innerWidth - size.width)),
+        y: Math.max(0, Math.min(panelPos.y, window.innerHeight - size.height)),
       });
     };
     window.addEventListener('resize', handleResize);
@@ -944,8 +970,9 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   useEffect(() => {
     const onDragMove = (e: MouseEvent) => {
       if (!isDragging.current) return;
-      const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, window.innerWidth - PANEL_W));
-      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - PANEL_H));
+      const size = panelSizeRef.current;
+      const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, window.innerWidth - size.width));
+      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - size.height));
       setPanelPos({ x, y });
     };
     const onDragEnd = () => {
@@ -958,6 +985,46 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       document.removeEventListener('mouseup', onDragEnd);
     };
   }, [setPanelPos]);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    isResizing.current = true;
+    resizeStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: panelSize.width,
+      height: panelSize.height,
+    };
+    document.body.style.cursor = 'nwse-resize';
+    document.body.style.userSelect = 'none';
+    e.stopPropagation();
+    e.preventDefault();
+  }, [panelSize.height, panelSize.width]);
+
+  useEffect(() => {
+    const onResizeMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const maxWidth = Math.min(PANEL_MAX_W, window.innerWidth - panelPos.x);
+      const maxHeight = Math.min(PANEL_MAX_H, window.innerHeight - panelPos.y);
+      const next = {
+        width: clamp(resizeStart.current.width + e.clientX - resizeStart.current.x, PANEL_MIN_W, Math.max(PANEL_MIN_W, maxWidth)),
+        height: clamp(resizeStart.current.height + e.clientY - resizeStart.current.y, PANEL_MIN_H, Math.max(PANEL_MIN_H, maxHeight)),
+      };
+      panelSizeRef.current = next;
+      setPanelSize(next);
+      localStorage.setItem(PANEL_SIZE_STORAGE_KEY, JSON.stringify(next));
+    };
+    const onResizeEnd = () => {
+      isResizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeEnd);
+    return () => {
+      document.removeEventListener('mousemove', onResizeMove);
+      document.removeEventListener('mouseup', onResizeEnd);
+    };
+  }, [panelPos.x, panelPos.y]);
 
   // FAB drag handlers — direct DOM manipulation for zero-lag dragging
   const onFabMouseDown = useCallback((e: React.MouseEvent) => {
@@ -1028,7 +1095,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         allowTaint: true,
         scale: 0.5,
         ignoreElements: (el) => el.closest('[data-copilot-ignore]') !== null,
-        backgroundColor: '#080c12',
+        backgroundColor: '#071A35',
       });
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
@@ -1290,10 +1357,10 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           data-copilot-ignore
           onMouseDown={onFabMouseDown}
           onClick={() => { if (!fabHasMoved.current) setOpen(true); }}
-          className="fixed z-50 w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
-          style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(88,166,255,0.4)' }}
+          className="fixed z-[850] w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
+          style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(59,130,246,0.4)' }}
         >
-          <span className="text-2xl">💬</span>
+          <span className="text-lg font-bold">AI</span>
           <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-accent-green border-2 border-bg-primary animate-pulse" />
         </button>
       )}
@@ -1303,16 +1370,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         <div
           ref={panelRef}
           data-copilot-ignore
-          className="fixed z-50 shadow-2xl flex flex-col overflow-hidden rounded-xl border border-border-default bg-bg-card"
-          style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W, height: PANEL_H }}
+          className="fixed z-[850] shadow-2xl flex flex-col overflow-hidden ops-panel rounded-2xl"
+          style={{ left: panelPos.x, top: panelPos.y, width: panelSize.width, height: panelSize.height }}
         >
           {/* Header — drag handle */}
           <div
-            className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-secondary cursor-move select-none"
+            className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-panel/95 cursor-move select-none"
             onMouseDown={onDragStart}
           >
             <div className="flex items-center gap-2">
-              <span className="text-lg">🤖</span>
+              <span className="ops-icon rounded-full bg-accent-blue/20 text-[10px] font-bold text-accent-blue">AI</span>
               <div>
                 <h3 className="text-sm font-medium">风调AI助手</h3>
                 <p className="text-[10px] text-accent-green">
@@ -1326,7 +1393,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           </div>
 
           {/* Mode Toggle — AI对话 / Agent诊断 */}
-          <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-secondary">
+          <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-panel/90">
             <button
               onClick={() => switchMode('chat')}
               className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
@@ -1335,7 +1402,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                   : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
               }`}
             >
-              💬 AI对话
+              AI 对话
             </button>
             <button
               onClick={() => switchMode('agent')}
@@ -1345,7 +1412,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                   : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
               }`}
             >
-              🔧 Agent任务
+              Agent 任务
             </button>
           </div>
 
@@ -1489,7 +1556,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 </div>
               </div>
             ))}
-            {loading && <p className="text-text-muted animate-pulse">AI思考中...</p>}
+            {loading && <p className="text-text-muted animate-pulse">AI 思考中...</p>}
           </div>
 
           {/* Input */}
@@ -1566,7 +1633,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                     ? '输入任务指令，如：查看故障诊断页面'
                     : '输入问题, 如: 当前风场运行状态如何?'
                 }
-                className="flex-1 bg-bg-secondary border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+                className="flex-1 rounded-lg border border-accent-blue/25 bg-bg-deep px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent-cyan focus:outline-none focus:ring-2 focus:ring-accent-cyan/15"
               />
               {mode === 'chat' && (
                 <button
@@ -1592,14 +1659,14 @@ function renderMessageContent(text: string, isProgress?: boolean) {
               </button>
             </div>
             <div className="flex gap-2 mt-2">
-              {(mode === 'agent'
+                {(mode === 'agent'
                 ? ['查看故障诊断页面', '查看维护人员工作量', '查看所有工单']
                 : ['总结当前状态', '最近故障', '健康趋势分析']
               ).map((q) => (
                 <button
                   key={q}
                   onClick={() => { setInput(q); }}
-                  className="text-[10px] px-2 py-1 rounded border border-border-default text-text-muted hover:text-accent-blue hover:border-accent-blue transition-colors"
+                  className="rounded border border-accent-blue/25 bg-bg-card px-2 py-1 text-[10px] text-text-secondary transition-colors hover:border-accent-cyan hover:bg-accent-cyan/10 hover:text-accent-cyan"
                 >
                   {q}
                 </button>
@@ -1608,6 +1675,15 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           </div>
             </div>
           </div>
+          <button
+            type="button"
+            aria-label="调整AI助手窗口大小"
+            title="拖动调整窗口大小"
+            onMouseDown={onResizeStart}
+            className="absolute bottom-0 right-0 z-10 h-5 w-5 cursor-nwse-resize rounded-tl-md border-l border-t border-border-default bg-bg-secondary/90 text-[10px] text-text-muted hover:text-accent-blue"
+          >
+            <span className="absolute bottom-1 right-1 h-2.5 w-2.5 border-b border-r border-current" />
+          </button>
         </div>
       )}
     </>
