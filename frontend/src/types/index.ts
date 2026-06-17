@@ -236,3 +236,37 @@ export interface AISummary {
   } | null;
   warnings?: string[];
 }
+// ── Drone Scheduler Types ──
+
+export interface Drone {
+  id: number;
+  name: string;
+  status: 'idle' | 'flying' | 'returning' | 'charging';
+  battery: number;
+  range: number;
+  speed: number;
+  color: string;
+  assignedTurbines: number[];
+  completedTurbines: number[];
+  currentPosition: { lat: number; lng: number } | null;
+  path: { lat: number; lng: number }[];
+  progress: number;
+}
+
+export interface DroneFleetConfig {
+  count: number;
+  range: number;
+  speed: number;
+}
+
+export interface DroneSimState {
+  fleet: Drone[];
+  config: DroneFleetConfig;
+  mode: 'tsp' | 'vrp';
+  activeFarm: string | null;
+  isRunning: boolean;
+  speedMultiplier: number;
+  totalTurbines: number;
+  completedTurbines: number;
+  elapsedTime: number;
+}

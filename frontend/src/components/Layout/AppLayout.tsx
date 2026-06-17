@@ -13,6 +13,16 @@ const navItems = [
     ), label: '风场监控',
   },
   {
+    path: '/drone-scheduler',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 19h20L12 2z" />
+        <circle cx="12" cy="13" r="3" />
+        <line x1="12" y1="16" x2="12" y2="22" />
+      </svg>
+    ), label: '数据获取',
+  },
+  {
     path: '/diagnosis',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
