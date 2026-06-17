@@ -13,6 +13,7 @@ import type {
   VibrationPreview,
 } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import { fetchUserPreferences, loadLocalPreferences, PREFERENCES_UPDATED_EVENT, type UserPreferences } from '../../services/preferences';
 
 const COMPONENT_OPTIONS = [
   { value: 'blade', label: '叶片' },
@@ -694,6 +695,7 @@ export default function DiagnosisPage() {
   const [autoLoading, setAutoLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [error, setError] = useState('');
+  const [riskFirst, setRiskFirst] = useState(() => loadLocalPreferences().riskFirst);
   const waveformRef = useRef<HTMLDivElement>(null);
   const spectrumRef = useRef<HTMLDivElement>(null);
 
@@ -731,6 +733,17 @@ export default function DiagnosisPage() {
       .finally(() => setLoading(false));
     return () => { mounted = false; };
   }, [viewDetail]);
+
+  useEffect(() => {
+    const applyPrefs = (prefs: UserPreferences) => setRiskFirst(prefs.riskFirst);
+    applyPrefs(loadLocalPreferences());
+    fetchUserPreferences().then(applyPrefs).catch(() => undefined);
+    const handlePreferences = (event: Event) => {
+      applyPrefs((event as CustomEvent<UserPreferences>).detail || loadLocalPreferences());
+    };
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+  }, []);
 
   useEffect(() => {
     if (!selectedTurbineId) return;
@@ -844,12 +857,13 @@ export default function DiagnosisPage() {
         latestDetection,
       };
     }).sort((a, b) => {
+      if (!riskFirst) return a.turbine.name.localeCompare(b.turbine.name, 'zh-CN');
       const statusRank = (status: string) => (status === 'fault' ? 0 : status === 'warning' ? 1 : 2);
       return statusRank(a.turbine.status) - statusRank(b.turbine.status)
         || b.activeFaultCount - a.activeFaultCount
         || a.turbine.name.localeCompare(b.turbine.name, 'zh-CN');
       });
-  }, [batchResult?.records, faults, turbines]);
+  }, [batchResult?.records, faults, riskFirst, turbines]);
 
   const turbineRowById = useMemo(() => {
     const map = new Map<number, TurbineOptionRow>();
@@ -867,7 +881,7 @@ export default function DiagnosisPage() {
     const fromTime = faultDateFrom ? new Date(`${faultDateFrom}T00:00:00`).getTime() : null;
     const toTime = faultDateTo ? new Date(`${faultDateTo}T23:59:59`).getTime() : null;
 
-    return faults.filter((fault) => {
+    const filtered = faults.filter((fault) => {
       if (faultRegionFilter !== 'all' && fault.turbine_region !== faultRegionFilter) return false;
       if (faultStatusFilter !== 'all' && fault.status !== faultStatusFilter) return false;
       if (faultProcessingFilter !== 'all' && (fault.processing_status || 'pending') !== faultProcessingFilter) return false;
@@ -896,6 +910,14 @@ export default function DiagnosisPage() {
       if (toTime && recordTime && recordTime > toTime) return false;
       return true;
     });
+    if (!riskFirst) return filtered;
+    const priorityRank: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+    const processingRank: Record<string, number> = { failed: 0, pending: 1, assigned: 2, processing: 3, closed: 4 };
+    return filtered.sort((a, b) => (
+      (priorityRank[a.priority || 'medium'] ?? 4) - (priorityRank[b.priority || 'medium'] ?? 4)
+      || (processingRank[a.processing_status || 'pending'] ?? 5) - (processingRank[b.processing_status || 'pending'] ?? 5)
+      || new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime()
+    ));
   }, [
     faultDateFrom,
     faultDateTo,
@@ -907,6 +929,7 @@ export default function DiagnosisPage() {
     faults,
     faultStatusFilter,
     faultTimeField,
+    riskFirst,
   ]);
 
   const faultManagementCounts = useMemo(() => ({
@@ -1900,6 +1923,7 @@ export default function DiagnosisPage() {
         top_fault_types: [...new Set(faults.map(f => f.fault_type))].slice(0, 10),
         auto_detect_result: autoResult ? { fault_type: autoResult.fault_type, confidence: autoResult.confidence } : undefined,
         batch_summary: batchResult?.group_summary,
+        risk_first: riskFirst,
       }} />
     </div>
   );

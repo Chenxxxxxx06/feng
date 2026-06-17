@@ -1,9 +1,10 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './services/authStore';
 import AppLayout from './components/Layout/AppLayout';
 import ErrorBoundary from './components/Common/ErrorBoundary';
 import LoginPage from './pages/Login/LoginPage';
+import { applyPreferences, fetchUserPreferences, loadLocalPreferences } from './services/preferences';
 
 // Route-based code splitting — each page loads on demand
 const DashboardPage = lazy(() => import('./pages/Dashboard/DashboardPage'));
@@ -29,8 +30,30 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function IndexRedirect() {
+  const token = useAuthStore((s) => s.token);
+  const [landing, setLanding] = useState(() => loadLocalPreferences().landingPage);
+
+  useEffect(() => {
+    let cancelled = false;
+    const localPrefs = loadLocalPreferences();
+    applyPreferences(localPrefs);
+    setLanding(localPrefs.landingPage);
+    if (!token) return () => { cancelled = true; };
+    fetchUserPreferences()
+      .then((prefs) => {
+        if (!cancelled) setLanding(prefs.landingPage);
+      })
+      .catch(() => {
+        if (!cancelled) setLanding(localPrefs.landingPage);
+      });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  return <Navigate to={`/${landing || 'dashboard'}`} replace />;
+}
+
 export default function App() {
-  const landing = localStorage.getItem('landingPage') || 'dashboard';
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -44,7 +67,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to={`/${landing}`} replace />} />
+        <Route index element={<IndexRedirect />} />
         <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
         <Route path="drone-scheduler" element={<Suspense fallback={<PageLoader />}><DroneSchedulerPage /></Suspense>} />
         <Route path="turbine/:id" element={<Suspense fallback={<PageLoader />}><TurbineDetailPage /></Suspense>} />

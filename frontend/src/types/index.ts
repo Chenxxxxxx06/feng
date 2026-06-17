@@ -265,10 +265,24 @@ export interface Drone {
   assignedTurbines: number[];
   completedTurbines: number[];
   currentPosition: { lat: number; lng: number } | null;
-  path: { lat: number; lng: number }[];
+  path: { lat: number; lng: number; alt?: number; turbineId?: number; kind?: 'takeoff' | 'climb' | 'inspect' | 'return' }[];
   progress: number;
-  /** 3D 飞行高度 (m)，由巡航高度设定 */
+  /** 3D 飞行高度 (m) */
   _altitude?: number;
+}
+
+export type InspectionTargetPart = 'blade_tip' | 'blade_root' | 'leading_edge' | 'trailing_edge' | 'hub' | 'nacelle';
+
+export interface InspectionWaypoint {
+  id: string;
+  turbineId: number;
+  position: [number, number, number];
+  targetOffset: [number, number, number];
+  targetPart: string;
+  cameraYaw: number;
+  cameraPitch: number;
+  shootDistance: number;
+  action: '拍照' | '悬停';
 }
 
 export interface DroneFleetConfig {
