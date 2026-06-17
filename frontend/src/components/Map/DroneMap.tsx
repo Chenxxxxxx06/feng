@@ -150,26 +150,23 @@ export default function DroneMap({
     farmItems.forEach((t) => {
       const shot = completedIds.has(t.id);
       const assigned = assignedIds.has(t.id);
-      const color = t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : shot ? '#3fb950' : assigned ? '#388bfd' : '#54657e';
-      const glow = shot ? `0 0 10px ${color}` : assigned ? `0 0 5px ${color}` : 'none';
-      const size = assigned ? 18 : 14;
+      const borderColor = t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : shot ? '#3fb950' : assigned ? '#388bfd' : '#54657e';
+      const size = 32;
 
-      const icon = L.divIcon({
-        className: 'drone-turbine',
-        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};
-          border:2px solid ${shot ? '#3fb950' : assigned ? '#388bfd' : '#3a4a5e'};
-          box-shadow:${glow};cursor:pointer;
-          display:flex;align-items:center;justify-content:center;">
-          <span style="font-size:${assigned ? 7 : 6}px;color:#fff;font-weight:700;">${Math.round(t.hi_value)}</span></div>`,
-        iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+      const icon = L.icon({
+        iconUrl: '/turbine-marker.png',
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+        className: 'drone-turbine-icon',
       });
 
       const marker = L.marker([t.lat, t.lng], { icon, riseOnHover: true });
+      const hiBadge = `<div style="display:inline-block;background:${borderColor};color:#fff;font-size:8px;font-weight:700;border-radius:50%;width:15px;height:15px;text-align:center;line-height:15px;margin-left:4px;border:1px solid rgba(0,0,0,0.4);">${Math.round(t.hi_value)}</div>`;
       marker.bindTooltip(
-        `<div style="font-size:11px;font-family:sans-serif"><b>${t.name}</b><br/>
+        `<div style="font-size:11px;font-family:sans-serif"><b>${t.name}</b>${hiBadge}<br/>
         <span style="color:#8fa2bc">HI: ${t.hi_value.toFixed(0)} | ${t.region}</span><br/>
-        <span style="color:#8fa2bc">${shot ? '✅ 已拍摄' : assigned ? '📍 已分配' : '⚪ 未分配'}</span></div>`,
-        { direction: 'top', offset: [0, -8] },
+        <span style="color:#8fa2bc">${shot ? '已拍摄' : assigned ? '已分配' : '未分配'}</span></div>`,
+        { direction: 'top', offset: [0, -14] },
       );
       marker.on('click', () => onTurbineRef.current?.(t));
       layer.addLayer(marker);
@@ -202,6 +199,19 @@ export default function DroneMap({
           color, weight: 2, opacity: 0.35, dashArray: '6 6',
         }).addTo(layer);
       }
+      // Takeoff marker
+      if (drone.path.length > 0) {
+        const takeoff = drone.path[0];
+        L.marker([takeoff.lat, takeoff.lng], {
+          icon: L.icon({
+            iconUrl: '/takeoff.png',
+            iconSize: [28, 28],
+            iconAnchor: [14, 28],
+            className: '',
+          }), zIndexOffset: 500,
+        }).bindTooltip(`<div style="font-size:10px"><b>${drone.name} 起飞点</b></div>`, { direction: 'top' }).addTo(layer);
+      }
+
       // Arrows
       const step = Math.max(1, Math.floor(drone.path.length / 8));
       for (let i = 0; i < drone.path.length - 1; i += step) {
@@ -217,16 +227,22 @@ export default function DroneMap({
       }
       // Drone position
       if (drone.currentPosition && drone.status === 'flying') {
+        const angle = drone.progress > 0 && drone.path.length >= 2
+          ? (Math.atan2(
+              drone.path[Math.min(Math.floor(drone.progress) + 1, drone.path.length - 1)].lat - drone.currentPosition.lat,
+              drone.path[Math.min(Math.floor(drone.progress) + 1, drone.path.length - 1)].lng - drone.currentPosition.lng,
+            ) * 180) / Math.PI
+          : 0;
         L.marker([drone.currentPosition.lat, drone.currentPosition.lng], {
           icon: L.divIcon({
             className: '',
-            html: `<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;
-              filter:drop-shadow(0 0 10px ${color});">
-              <svg width="34" height="34" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${color}" opacity="0.2"/>
-              <circle cx="12" cy="12" r="6" fill="${color}" opacity="0.5"/>
-              <circle cx="12" cy="12" r="3" fill="${color}"/>
-              <text x="12" y="16" text-anchor="middle" fill="white" font-size="8" font-weight="700">${drone.id}</text></svg></div>`,
-            iconSize: [34, 34], iconAnchor: [17, 17],
+            html: `<div style="width:42px;height:42px;display:flex;align-items:center;justify-content:center;
+              filter:drop-shadow(0 0 14px ${color});transform:rotate(${angle - 90}deg);">
+              <img src="/drone.png" width="38" height="38" style="display:block;" />
+              <span style="position:absolute;top:-4px;right:-8px;color:#fff;background:${color};
+                font-size:7px;font-weight:700;border-radius:50%;width:14px;height:14px;
+                display:flex;align-items:center;justify-content:center;border:1px solid rgba(0,0,0,0.4);">${drone.id}</span></div>`,
+            iconSize: [42, 42], iconAnchor: [21, 21],
           }), zIndexOffset: 1000,
         }).bindTooltip(
           `<div style="font-size:11px"><b>${drone.name}</b><br/>🔋 ${drone.battery.toFixed(0)}% | 📸 ${drone.completedTurbines.length}/${drone.assignedTurbines.length}</div>`,
