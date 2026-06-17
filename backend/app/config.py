@@ -123,6 +123,10 @@ def get_offline_database_path() -> Path | None:
     """
     Get the path to the SQLite database in the offline dataset folder.
 
+    Also checks backend/ directory as fallback, so that the correct database
+    is discovered regardless of the working directory from which the server
+    is started.
+
     Returns:
         Path to the SQLite database file if exists, None otherwise.
     """
@@ -131,6 +135,13 @@ def get_offline_database_path() -> Path | None:
         db_path = dataset_path / "database" / "fengdiao_phm.db"
         if db_path.exists():
             return db_path
+
+    # Fallback: backend/fengdiao_phm.db (relative to project root)
+    project_root = get_project_root()
+    backend_db = project_root / "backend" / "fengdiao_phm.db"
+    if backend_db.exists():
+        return backend_db
+
     return None
 
 

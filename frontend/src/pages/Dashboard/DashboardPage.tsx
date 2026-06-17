@@ -158,13 +158,13 @@ function WorkOrderPreview({ id, title, status, priority, assignee }: { id: numbe
 }
 
 /* ── Component Health Card ── */
-function ComponentHealthCard({ label, temperature, maxTemp, status }: { label: string; temperature: number; maxTemp: number; status: 'normal' | 'warning' | 'fault' }) {
+function ComponentHealthCard({ label, temperature, maxTemp, unit = '°C', status }: { label: string; temperature: number; maxTemp: number; unit?: string; status: 'normal' | 'warning' | 'fault' }) {
   const pct = Math.min(100, (temperature / maxTemp) * 100);
   const color = status === 'normal' ? '#10B981' : status === 'warning' ? '#F59E0B' : '#EF4444';
   return (
     <div className="px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-bg-hover/50" style={{ border: '1px solid rgba(59,130,246,0.08)' }}>
       <div className="flex items-center justify-between mb-1.5"><span className="text-[11px] text-text-secondary">{label}</span><span className="w-1.5 h-1.5 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}` }} /></div>
-      <p className="text-lg font-bold" style={{ color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{temperature.toFixed(1)}°C</p>
+      <p className="text-lg font-bold" style={{ color, fontFamily: "'SF Mono', 'JetBrains Mono', monospace" }}>{temperature.toFixed(1)}{unit}</p>
       <div className="mt-1.5 h-1 rounded-full" style={{ background: 'rgba(59,130,246,0.10)' }}><div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${color}88, ${color})` }} /></div>
     </div>
   );
@@ -184,11 +184,13 @@ export default function DashboardPage() {
   const [alarms, setAlarms] = useState<Fault[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [aggregate, setAggregate] = useState<{
-    component_temps: { label: string; temperature: number; maxTemp: number; status: string }[];
+    component_temps: { label: string; temperature: number; maxTemp: number; unit?: string; status: string }[];
     scada_trends: { wind_speed_ms: { time: string; value: number }[]; power_kw: { time: string; value: number }[]; gearbox_temp_c: { time: string; value: number }[] };
     total_power_kw: number;
     today_energy_kwh: number;
     data_available: boolean;
+    power_is_per_unit?: boolean;
+    power_multiplier?: number;
   } | null>(null);
 
   const fetchData = async () => { setLoading(true); try { const params = new URLSearchParams(filters); const { data } = await api.get(`/turbines/?${params}`); setSummary(data); } catch { setSummary(EMPTY_SUMMARY); } finally { setLoading(false); } };
@@ -252,7 +254,7 @@ export default function DashboardPage() {
   const scopedTurbines = summary.turbines;
   const stats = useMemo(() => scopedStats(scopedTurbines), [scopedTurbines]);
 
-  const fmtMtbf = (h: number | null) => { if (h == null) return '--'; if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`; if (h >= 720) return `${(h / 720).toFixed(0)} 月`; if (h >= 24) return `${(h / 24).toFixed(0)} 天`; return h.toFixed(0); };
+  const fmtMtbf = (h: number | null) => { if (h == null) return '--'; const days = h / 24; if (days >= 365) return `${(days / 365).toFixed(1)} 年 (${days.toFixed(1)} 天)`; return `${days.toFixed(0)} 天`; };
 
   // ── SCADA trends from real aggregate API ──
   const windSpeedData = aggregate?.scada_trends?.wind_speed_ms || [];
@@ -266,11 +268,15 @@ export default function DashboardPage() {
         label: c.label,
         temperature: c.temperature,
         maxTemp: c.maxTemp,
+        unit: c.unit || '°C',
         status: c.status as 'normal' | 'warning' | 'fault',
       }));
     }
     return [];
   }, [aggregate]);
+
+  // Power unit label: p.u. scaled to kW, or raw kW
+  const powerUnit = aggregate?.power_is_per_unit ? 'kW (≈)' : 'kW';
 
   const avgHealth = scopedTurbines.length > 0 ? scopedTurbines.reduce((s, t) => s + t.hi_value, 0) / scopedTurbines.length : 0;
 
@@ -466,7 +472,7 @@ export default function DashboardPage() {
               {windSpeedData.length > 0 ? (
                 <>
                   <ScadaTrendChart title="风速趋势" data={windSpeedData} color="#22D3EE" unit="m/s" height={76} />
-                  <ScadaTrendChart title="发电功率" data={powerData} color="#3B82F6" unit="kW" height={76} />
+                  <ScadaTrendChart title="发电功率" data={powerData} color="#3B82F6" unit={powerUnit} height={76} />
                   <ScadaTrendChart title="齿轮箱温度" data={tempData} color="#F59E0B" unit="°C" height={76} />
                 </>
               ) : (

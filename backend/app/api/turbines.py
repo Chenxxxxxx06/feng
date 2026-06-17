@@ -425,12 +425,15 @@ async def get_dashboard_aggregate(
     latest_result = await db.execute(latest_sql, params)
     latest_rows = latest_result.mappings().all()
 
-    # Aggregate component temps
+    # Aggregate component temps (all temperatures from SCADA)
     bearing_temps = [r["bearing_temperature_c"] for r in latest_rows if r["bearing_temperature_c"] is not None]
     gearbox_temps = [r["gearbox_temperature_c"] for r in latest_rows if r["gearbox_temperature_c"] is not None]
     gen_temps = [r["gen_temperature_c"] for r in latest_rows if r["gen_temperature_c"] is not None]
     pitch_angles = [r["pitch_angle_deg"] for r in latest_rows if r["pitch_angle_deg"] is not None]
     power_values = [r["power_kw"] for r in latest_rows if r["power_kw"] is not None]
+
+    # Avg rated power for p.u. → kW conversion (CARE data uses per-unit power)
+    avg_rated_kw = sum((t.power_mw or 3.2) * 1000 for t in turbines) / max(len(turbines), 1)
 
     def _avg(vals: list[float]) -> float:
         return round(sum(vals) / len(vals), 1) if vals else 0.0
@@ -447,29 +450,42 @@ async def get_dashboard_aggregate(
             "label": "主轴承",
             "temperature": _avg(bearing_temps),
             "maxTemp": 85.0,
+            "unit": "°C",
             "status": _status(_avg(bearing_temps), 85.0),
         },
         {
             "label": "齿轮箱",
             "temperature": _avg(gearbox_temps),
             "maxTemp": 90.0,
+            "unit": "°C",
             "status": _status(_avg(gearbox_temps), 90.0),
         },
         {
             "label": "发电机",
             "temperature": _avg(gen_temps),
             "maxTemp": 80.0,
+            "unit": "°C",
             "status": _status(_avg(gen_temps), 80.0),
         },
         {
-            "label": "变桨系统",
+            "label": "变桨角度",
             "temperature": _avg(pitch_angles),
-            "maxTemp": 65.0,
-            "status": _status(_avg(pitch_angles), 65.0),
+            "maxTemp": 90.0,
+            "unit": "°",
+            "status": _status(abs(_avg(pitch_angles)), 45.0),
         },
     ]
 
-    total_power_kw = round(sum(power_values), 1)
+    # Convert p.u. power to approximate kW using avg rated power
+    raw_total = sum(power_values)
+    # CARE power values are p.u. (0-1 range) — scale to kW if needed
+    is_per_unit = all(abs(p) <= 1.5 for p in power_values) if power_values else False
+    if is_per_unit and power_values:
+        total_power_kw = round(raw_total * avg_rated_kw, 1)
+        power_multiplier = avg_rated_kw
+    else:
+        total_power_kw = round(raw_total, 1)
+        power_multiplier = 1.0
 
     # ── 24h SCADA trends (latest data window, not wall-clock) ──
     # Find the latest timestamp in the dataset for these turbines
@@ -516,16 +532,16 @@ async def get_dashboard_aggregate(
         if len(hour_str) >= 16:
             hour_str = hour_str[11:16]
         w = round(row["avg_wind"] or 0, 1)
-        p = round(row["avg_power"] or 0, 1)
+        raw_p = row["avg_power"] or 0
+        p = round(raw_p * power_multiplier, 1)  # p.u. → kW
         t = round(row["avg_gearbox_temp"] or 0, 1)
         wind_trend.append({"time": hour_str, "value": w})
         power_trend.append({"time": hour_str, "value": p})
         temp_trend.append({"time": hour_str, "value": t})
-        total_power_for_energy += (p or 0)
+        total_power_for_energy += p
 
     # If no hourly trends found, sample individual records
     if not trends_rows:
-        # Get the latest 24 records across all turbines as fallback
         fallback_sql = text(f"""
             SELECT turbine_id, timestamp, wind_speed_ms, power_kw, gearbox_temperature_c
             FROM scada_records
@@ -541,10 +557,11 @@ async def get_dashboard_aggregate(
                 hour_str = f"{ts.strftime('%m/%d %H:%M')}" if hasattr(ts, 'strftime') else str(ts)[:16]
             else:
                 hour_str = f"T{r['turbine_id']}"
+            raw_p = r["power_kw"] or 0
             wind_trend.append({"time": hour_str, "value": round(r["wind_speed_ms"] or 0, 1)})
-            power_trend.append({"time": hour_str, "value": round(r["power_kw"] or 0, 1)})
+            power_trend.append({"time": hour_str, "value": round(raw_p * power_multiplier, 1)})
             temp_trend.append({"time": hour_str, "value": round(r["gearbox_temperature_c"] or 0, 1)})
-            total_power_for_energy += (r["power_kw"] or 0)
+            total_power_for_energy += raw_p * power_multiplier
 
     # Energy: avg hourly power × 24h → kWh
     trend_count = max(len(trends_rows), len(wind_trend), 1)
@@ -562,8 +579,11 @@ async def get_dashboard_aggregate(
         },
         "total_power_kw": total_power_kw,
         "today_energy_kwh": today_energy_kwh,
+        "power_is_per_unit": is_per_unit,
+        "power_multiplier": power_multiplier,
+        "avg_rated_power_kw": avg_rated_kw,
         "data_available": bool(component_temps or wind_trend or power_trend or temp_trend),
         "data_window": data_window,
         "latest_data_ts": latest_ts.isoformat() if latest_ts else None,
-        "note": f"数据集最新时间: {latest_ts.isoformat() if latest_ts else 'N/A'}; 窗口模式: {data_window}",
+        "note": f"数据集最新时间: {latest_ts.isoformat() if latest_ts else 'N/A'}; 窗口模式: {data_window}; 功率因数: ×{power_multiplier:.0f}",
     }
