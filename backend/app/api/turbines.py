@@ -29,6 +29,15 @@ CARE_POWER_SOURCE_FIELDS = {
 }
 
 
+def _source_dataset_filter(source_dataset) -> str | None:
+    if not isinstance(source_dataset, str):
+        return CARE_DATASET_ID
+    value = source_dataset.strip()
+    if not value or value.lower() in {"all", "*"}:
+        return None
+    return value
+
+
 @router.get("/monitoring-metrics")
 async def get_monitoring_metrics(
     source_dataset: str = Query(CARE_DATASET_ID, description="数据集ID"),
@@ -70,12 +79,13 @@ async def list_turbines(
     hi_min: float | None = Query(None, description="HI最小值"),
     hi_max: float | None = Query(None, description="HI最大值"),
     status: str | None = Query(None, description="状态"),
-    source_dataset: str | None = Query(None, description="数据集ID"),
+    source_dataset: str | None = Query(CARE_DATASET_ID, description="数据集ID；传 all 返回全部"),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Turbine)
-    if source_dataset:
-        q = q.where(Turbine.source_dataset == source_dataset)
+    dataset_filter = _source_dataset_filter(source_dataset)
+    if dataset_filter:
+        q = q.where(Turbine.source_dataset == dataset_filter)
     if model:
         q = q.where(Turbine.model == model)
     if region:
@@ -100,9 +110,16 @@ async def list_turbines(
 
 
 @router.get("/geojson")
-async def get_turbines_geojson(db: AsyncSession = Depends(get_db)):
+async def get_turbines_geojson(
+    source_dataset: str | None = Query(CARE_DATASET_ID, description="数据集ID；传 all 返回全部"),
+    db: AsyncSession = Depends(get_db),
+):
     """Return all turbines as GeoJSON FeatureCollection for map display."""
-    result = await db.execute(select(Turbine))
+    q = select(Turbine)
+    dataset_filter = _source_dataset_filter(source_dataset)
+    if dataset_filter:
+        q = q.where(Turbine.source_dataset == dataset_filter)
+    result = await db.execute(q)
     turbines = result.scalars().all()
     turbine_dicts = [
         {

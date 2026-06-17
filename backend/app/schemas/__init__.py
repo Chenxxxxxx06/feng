@@ -1,6 +1,20 @@
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
+
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def validate_email_format(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return value
+    cleaned = value.strip()
+    if not cleaned or not EMAIL_PATTERN.fullmatch(cleaned):
+        raise ValueError("Invalid email format")
+    return cleaned
 
 
 # --- Auth ---
@@ -9,6 +23,11 @@ class UserRegister(BaseModel):
     email: str
     password: str = Field(min_length=6)
     role: str = "viewer"
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return validate_email_format(value) or value
 
 class UserLogin(BaseModel):
     username: str
@@ -351,6 +370,11 @@ class ThresholdConfigRequest(BaseModel):
     email_address: Optional[str] = None
     wechat_enabled: bool = False
 
+    @field_validator("email_address")
+    @classmethod
+    def validate_email_address(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_format(value) if value else None
+
 class ThresholdConfigResponse(BaseModel):
     id: int
     hi_threshold: float
@@ -389,14 +413,59 @@ class AITestConnectionRequest(BaseModel):
     base_url: str
 
 
+class AIProviderConfigCreate(BaseModel):
+    provider: str = Field(min_length=1, max_length=64)
+    display_name: Optional[str] = Field(default=None, max_length=128)
+    api_key: Optional[str] = Field(default=None, max_length=512)
+    base_url: str = Field(min_length=1, max_length=512)
+    api_style: str = Field(default="openai", max_length=32)
+    default_model: Optional[str] = Field(default=None, max_length=128)
+    model_options: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+    model_config = {"protected_namespaces": ()}
+
+
+class AIProviderConfigResponse(BaseModel):
+    id: int
+    provider: str
+    display_name: Optional[str] = None
+    base_url: str
+    api_style: str
+    default_model: Optional[str] = None
+    model_options: list[str] = Field(default_factory=list)
+    enabled: bool
+    has_api_key: bool = False
+    last_test_status: Optional[str] = None
+    last_test_message: Optional[str] = None
+    last_test_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True, "protected_namespaces": ()}
+
+
+class AIProviderTestRequest(BaseModel):
+    model: Optional[str] = Field(default=None, max_length=128)
+
+    model_config = {"protected_namespaces": ()}
+
+
 # --- AI ---
 class AISummaryRequest(BaseModel):
     page_type: str = Field(min_length=1, max_length=64)
     page_data: dict
+    provider_config_id: Optional[int] = Field(default=None, gt=0)
+    model: Optional[str] = Field(default=None, max_length=128)
+
+    model_config = {"protected_namespaces": ()}
 
 class AISummaryResponse(BaseModel):
     conclusions: list[str]
     suggestions: list[str]
+    status: str = "success"
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    model_status: Optional[dict] = None
+    warnings: list[str] = Field(default_factory=list)
     provider: Optional[str] = None
     api_provider: Optional[str] = None
     model: Optional[str] = None
@@ -405,6 +474,8 @@ class AISummaryResponse(BaseModel):
     billing: Optional[str] = None
     requires_api_key: Optional[bool] = None
     has_api_key: Optional[bool] = None
+
+    model_config = {"protected_namespaces": ()}
 
 class AIFaultAnalysisRequest(BaseModel):
     turbine_id: int = Field(gt=0)
@@ -428,9 +499,25 @@ class AICopilotRequest(BaseModel):
     page_context: Optional[dict] = None
     knowledge_results: Optional[list[str]] = None
     screenshot: Optional[str] = None  # base64-encoded JPEG screenshot of current page
+    selected_contexts: list[str] = Field(default_factory=list)
+    session_id: Optional[str] = Field(default=None, max_length=128)
+    provider_config_id: Optional[int] = Field(default=None, gt=0)
+    model: Optional[str] = Field(default=None, max_length=128)
+    session_title_needed: bool = False
+
+    model_config = {"protected_namespaces": ()}
 
 class AICopilotResponse(BaseModel):
     reply: str
+    status: str = "success"
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    model_status: Optional[dict] = None
+    warnings: list[str] = Field(default_factory=list)
+    session_title: Optional[str] = None
+    context_sources: list[dict] = Field(default_factory=list)
+
+    model_config = {"protected_namespaces": ()}
 
 
 # --- Personnel ---
@@ -440,11 +527,21 @@ class PersonnelCreate(BaseModel):
     skills: list[str] = Field(default_factory=list)
     region: str = Field(default="陕北", max_length=32)
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return validate_email_format(value) or value
+
 class PersonnelUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=64)
     email: Optional[str] = Field(default=None, min_length=3, max_length=128)
     skills: Optional[list[str]] = None
     region: Optional[str] = Field(default=None, max_length=32)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_format(value) if value else None
 
 class PersonnelResponse(BaseModel):
     id: int

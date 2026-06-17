@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
-import type { WorkOrder, TurbineDetail } from '../../types';
+import type { WorkOrder, Turbine } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
 const STATUS_FLOW = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'closed'];
@@ -27,19 +26,22 @@ const emptyForm = {
 };
 
 export default function WorkOrderPage() {
-  const [searchParams] = useSearchParams();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
+  const [turbines, setTurbines] = useState<Turbine[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [previewWO, setPreviewWO] = useState<WorkOrder | null>(null);
-  const [previewTurbine, setPreviewTurbine] = useState<TurbineDetail | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkOrder | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState(false);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [createResult, setCreateResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [creating, setCreating] = useState(false);
   const [editingWO, setEditingWO] = useState(false);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -62,70 +64,88 @@ export default function WorkOrderPage() {
   useEffect(() => {
     fetchOrders();
     api.get('/personnel/').then(({ data }) => setPersonnel(data)).catch(() => {});
-  }, [statusFilter]);
+    api.get<{ turbines: Turbine[] }>('/turbines/').then(({ data }) => setTurbines(data.turbines || [])).catch(() => {});
+  }, [statusFilter, priorityFilter]);
 
-  // Auto-open work order from URL param (used by Agent navigation)
-  useEffect(() => {
-    const previewId = searchParams.get('preview');
-    if (previewId && orders.length > 0) {
-      const wo = orders.find(o => o.id === Number(previewId));
-      if (wo) setPreviewWO(wo);
-    }
-  }, [orders, searchParams]);
-
-  // Fetch turbine data when previewing a work order
-  useEffect(() => {
-    if (!previewWO) { setPreviewTurbine(null); return; }
-    let cancelled = false;
-    api.get(`/turbines/${previewWO.turbine_id}`)
-      .then(({ data }) => { if (!cancelled) setPreviewTurbine(data); })
-      .catch(() => { if (!cancelled) setPreviewTurbine(null); });
-    return () => { cancelled = true; };
-  }, [previewWO]);
+  const stats = useMemo(() => {
+    const active = orders.filter((o) => !isTerminal(o.status));
+    return [
+      { label: '待处理', value: active.length, tone: 'text-accent-blue', hint: '未关闭工单' },
+      { label: '执行中', value: orders.filter((o) => o.status === 'in_progress').length, tone: 'text-accent-cyan', hint: '现场处理中' },
+      { label: '今日到期', value: orders.filter((o) => isDueToday(o.due_date) && !isTerminal(o.status)).length, tone: 'text-accent-yellow', hint: '需要关注' },
+      { label: '紧急工单', value: orders.filter((o) => o.priority === 'urgent' && !isTerminal(o.status)).length, tone: 'text-accent-red', hint: '高风险优先' },
+    ];
+  }, [orders]);
 
   const handleCreate = async () => {
+    setCreateResult(null);
+    const turbineId = Number(form.turbine_id);
+    if (!turbineId || turbineId <= 0) {
+      setCreateResult({ type: 'error', message: '请输入有效的风机 ID（正整数）' });
+      return;
+    }
+    if (!form.title.trim()) {
+      setCreateResult({ type: 'error', message: '请输入工单标题' });
+      return;
+    }
+    setCreating(true);
     try {
       await api.post('/workorders/', {
-        turbine_id: Number(form.turbine_id),
-        title: form.title,
-        description: form.description,
+        turbine_id: turbineId,
+        title: form.title.trim(),
+        description: form.description || null,
         assignee: form.assignee || null,
         assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
         assignee_email: form.assignee_email || null,
         priority: form.priority,
         fault_type: form.fault_type,
         due_date: form.due_date || null,
-        cost_estimate: Number(form.cost_estimate),
+        cost_estimate: Number(form.cost_estimate) || 0,
       });
       setShowCreate(false);
       setForm(emptyForm);
+      setCreateResult(null);
       fetchOrders();
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '创建工单失败，请检查必填字段(风机ID、标题)');
+    } catch (err: any) {
+      setCreateResult({ type: 'error', message: err.response?.data?.detail || '工单创建失败，请检查必填字段' });
+    } finally {
+      setCreating(false);
     }
   };
 
   const advanceStatus = async (id: number, current: string) => {
     const idx = STATUS_FLOW.indexOf(current);
     if (idx < STATUS_FLOW.length - 1) {
-      try {
-        await api.put(`/workorders/${id}`, { status: STATUS_FLOW[idx + 1] });
-        setOpenActionId(null);
-        fetchOrders();
-      } catch (e: any) {
-        alert(e?.response?.data?.detail || '状态更新失败');
-      }
+      await api.put(`/workorders/${id}`, { status: STATUS_FLOW[idx + 1] });
+      setOpenActionId(null);
+      fetchOrders();
     }
   };
 
   const cancelOrder = async (id: number) => {
-    try {
-      await api.delete(`/workorders/${id}`);
-      setOpenActionId(null);
-      fetchOrders();
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '取消工单失败');
+    const { data } = await api.put(`/workorders/${id}`, { status: 'cancelled' });
+    setOrders((prev) => prev.map((o) => (o.id === id ? data : o)));
+    setOpenActionId(null);
+    fetchOrders();
+  };
+
+  const requestDeleteOrder = (wo: WorkOrder) => {
+    setDeleteTarget(wo);
+    setOpenActionId(null);
+  };
+
+  const confirmDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    setDeletingOrder(true);
+    await api.delete(`/workorders/${deleteTarget.id}`);
+    setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+    if (previewWO?.id === deleteTarget.id) {
+      setPreviewWO(null);
+      setAiAnalysis(null);
+      setEditingWO(false);
     }
+    setDeleteTarget(null);
+    setDeletingOrder(false);
   };
 
   const startEdit = (wo: WorkOrder) => {
@@ -142,24 +162,22 @@ export default function WorkOrderPage() {
 
   const saveEdit = async () => {
     if (!previewWO) return;
-    try {
-      const assignee = personnel.find((p) => p.name === editForm.assignee);
-      const { data } = await api.put(`/workorders/${previewWO.id}`, {
-        title: editForm.title,
-        description: editForm.description || null,
-        status: editForm.status,
-        assignee: editForm.assignee || null,
-        assignee_id: assignee?.id || null,
-        assignee_email: assignee?.email || null,
-        fault_type: editForm.fault_type || null,
-        cost_estimate: Number(editForm.cost_estimate),
-      });
-      setPreviewWO(data);
-      setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
-      setEditingWO(false);
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || '保存工单失败');
-    }
+    const assignee = personnel.find((p) => p.name === editForm.assignee);
+    const { data } = await api.put(`/workorders/${previewWO.id}`, {
+      title: editForm.title,
+      description: editForm.description || null,
+      status: editForm.status,
+      assignee: editForm.assignee || null,
+      assignee_id: assignee?.id || null,
+      assignee_email: assignee?.email || null,
+      priority: editForm.priority,
+      fault_type: editForm.fault_type || null,
+      due_date: editForm.due_date || null,
+      cost_estimate: Number(editForm.cost_estimate),
+    });
+    setPreviewWO(data);
+    setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+    setEditingWO(false);
   };
 
   const sendEmail = async (wo: WorkOrder) => {
@@ -208,330 +226,449 @@ export default function WorkOrderPage() {
   };
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold">维修工单管理</h2>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-bg-secondary border border-border-default rounded px-2 py-1 text-xs text-text-primary">
-            <option value="">全部状态</option>
-            {STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-          </select>
-        </div>
-        <button onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-accent-blue text-white rounded text-sm hover:opacity-90">+ 创建工单</button>
-      </div>
+    <div className="h-full overflow-auto ops-page">
+      <div className="mx-auto max-w-[1480px] space-y-5 p-6">
+        <section className="ops-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="ops-eyebrow">维修记录与通知管理</p>
+            <h2 className="ops-title gradient-text">维修工单工作台</h2>
+            <p className="ops-subtitle">
+              汇总派工、进度、截止日期和通知状态，帮助运维人员优先处理高风险任务。
+            </p>
+          </div>
+          <button
+            data-action="create-workorder"
+            onClick={() => setShowCreate(true)}
+            className="ops-btn ops-btn-primary h-10 px-4 text-sm"
+          >
+            创建工单
+          </button>
+        </section>
 
-      {/* Status flow */}
-      <div className="flex items-center gap-1 mb-4 text-[10px]">
-        <span className="text-text-muted mr-2">流转:</span>
-        {STATUS_FLOW.map((s, i) => (
-          <span key={s} className="flex items-center gap-1">
-            <span className={`px-1.5 py-0.5 rounded ${STATUS_COLOR[s]}`}>{STATUS_LABEL[s]}</span>
-            {i < STATUS_FLOW.length - 1 && <span className="text-text-muted">→</span>}
-          </span>
-        ))}
-      </div>
-
-      {/* Create Modal */}
-      {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="bg-bg-card border border-border-default rounded-lg w-[520px] p-6 space-y-4 max-h-[90vh] overflow-auto">
-            <h3 className="font-medium">创建新工单</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <input placeholder="风机ID *" value={form.turbine_id} onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
-                className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue" />
-              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary">
-                <option value="low">低优先级</option><option value="medium">中优先级</option><option value="high">高优先级</option><option value="urgent">紧急</option>
-              </select>
-              <input placeholder="工单标题 *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
-                className="col-span-2 bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue" />
-              <select value={form.fault_type} onChange={(e) => setForm({ ...form, fault_type: e.target.value })}
-                className="col-span-2 bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary">
-                {FAULT_TYPES.map(ft => <option key={ft} value={ft}>{ft}</option>)}
-              </select>
-              <textarea placeholder="工单描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3}
-                className="col-span-2 bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue" />
-              {/* Personnel selector */}
-              <div className="col-span-2">
-                <label className="text-[10px] text-text-muted block mb-1">选择责任人</label>
-                <select value={form.assignee} onChange={(e) => {
-                  const p = personnel.find(pp => pp.name === e.target.value);
-                  setForm({ ...form, assignee: e.target.value, assignee_id: p ? String(p.id) : '', assignee_email: p?.email || '' });
-                }} className="w-full bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary">
-                  <option value="">-- 选择责任人 --</option>
-                  {personnel.map(p => (
-                    <option key={p.id} value={p.name}>{p.name} ({p.skills.join(', ')} | {p.region} | 负载:{p.load})</option>
-                  ))}
-                </select>
+        <section className="grid gap-3 md:grid-cols-4">
+          {stats.map((item) => (
+            <div key={item.label} className="ops-panel p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">{item.label}</span>
+                <span className="text-[10px] text-text-muted">{item.hint}</span>
               </div>
-              <input placeholder="预估成本" type="number" value={form.cost_estimate} onChange={(e) => setForm({ ...form, cost_estimate: e.target.value })}
-                className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue" />
-              <label className="bg-bg-secondary border border-border-default rounded px-3 py-2 text-sm text-text-primary focus-within:border-accent-blue">
-                <span className="block text-[10px] text-text-muted mb-1">DDL截止日期</span>
-                <input
-                  type="date"
-                  value={form.due_date || ''}
-                  onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                  onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                  onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-                  className="w-full bg-transparent text-text-primary focus:outline-none [color-scheme:dark]"
-                />
-              </label>
+              <p className={`mt-3 font-mono text-3xl font-semibold ${item.tone}`}>{item.value}</p>
             </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowCreate(false)} className="px-4 py-2 border border-border-default rounded text-sm text-text-secondary">取消</button>
-              <button onClick={handleCreate} className="px-4 py-2 bg-accent-blue text-white rounded text-sm">创建</button>
+          ))}
+        </section>
+
+        <section className="ops-panel p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                data-action="filter-status"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-9 px-3 text-sm text-text-primary"
+              >
+                <option value="">全部状态</option>
+                {STATUS_FILTERS.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+              </select>
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                className="h-9 px-3 text-sm text-text-primary"
+              >
+                <option value="">全部优先级</option>
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high">高</option>
+                <option value="urgent">紧急</option>
+              </select>
+              {(statusFilter || priorityFilter) && (
+                <button
+                  onClick={() => { setStatusFilter(''); setPriorityFilter(''); }}
+                  className="ops-btn h-9 px-3 text-xs"
+                >
+                  清空筛选
+                </button>
+              )}
+            </div>
+            <div className="text-xs text-text-muted">
+              当前显示 <span className="font-mono text-text-primary">{orders.length}</span> 条工单
             </div>
           </div>
-        </div>
-      )}
+        </section>
 
-      {/* Orders List */}
-      {loading ? <p className="text-text-muted text-sm">加载中...</p> : (
-        <div className="space-y-2">
-          {orders.map((o) => (
-            <div key={o.id} className="bg-bg-card border border-border-default rounded-lg p-4 hover:border-border-active transition-colors">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-text-muted font-mono">WO-{String(o.id).padStart(4, '0')}</span>
-                  <span className="text-sm font-medium">{o.title}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_COLOR[o.status] || ''}`}>{STATUS_LABEL[o.status] || o.status}</span>
+        {showCreate && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-[620px] ops-panel shadow-2xl">
+              <div className="border-b border-border-default px-6 py-4">
+                <h3 className="text-base font-medium">创建新工单</h3>
+                <p className="mt-1 text-xs text-text-muted">填写故障、派工和截止日期信息。</p>
+              </div>
+              <div className="max-h-[72vh] space-y-5 overflow-auto p-6">
+                <div>
+                  <p className="mb-3 text-xs font-medium text-text-secondary">基础信息</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <select value={form.turbine_id} onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
+                      className="form-input px-3 py-2 text-sm text-text-primary">
+                      <option value="">选择风机 *</option>
+                      {turbines.map((t) => (
+                        <option key={t.id} value={String(t.id)}>{t.name} · {t.region}</option>
+                      ))}
+                    </select>
+                    <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                      className="form-input px-3 py-2 text-sm text-text-primary">
+                      <option value="low">低优先级</option><option value="medium">中优先级</option><option value="high">高优先级</option><option value="urgent">紧急</option>
+                    </select>
+                    <input placeholder="工单标题 *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      className="col-span-2 form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                    <select value={form.fault_type} onChange={(e) => setForm({ ...form, fault_type: e.target.value })}
+                      className="col-span-2 form-input px-3 py-2 text-sm text-text-primary">
+                      {FAULT_TYPES.map(ft => <option key={ft} value={ft}>{ft}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 relative">
-                  <button
-                    onClick={() => runAIAnalysis(o)}
-                    className="px-3 py-1.5 border border-accent-cyan/50 text-accent-cyan rounded text-xs hover:bg-accent-cyan/10 transition-colors"
-                  >
-                    📧 预览工单
-                  </button>
-                  <button
-                    onClick={() => setOpenActionId(openActionId === o.id ? null : o.id)}
-                    className="w-20 px-3 py-1.5 bg-accent-blue/10 text-accent-blue rounded text-xs hover:bg-accent-blue/20"
-                  >
-                    操作 ▾
-                  </button>
-                  {openActionId === o.id && (
-                    <div className="absolute right-0 top-8 z-20 w-36 bg-bg-card border border-border-default rounded shadow-xl py-1 text-xs">
-                      {o.status !== 'closed' && o.status !== 'cancelled' && (
+
+                <div>
+                  <p className="mb-3 text-xs font-medium text-text-secondary">派工信息</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <select value={form.assignee} onChange={(e) => {
+                      const p = personnel.find(pp => pp.name === e.target.value);
+                      setForm({ ...form, assignee: e.target.value, assignee_id: p ? String(p.id) : '', assignee_email: p?.email || '' });
+                    }} className="col-span-2 form-input px-3 py-2 text-sm text-text-primary">
+                      <option value="">选择责任人</option>
+                      {personnel.map(p => (
+                        <option key={p.id} value={p.name}>{p.name} | {p.email} | {p.region} | 负载:{p.load}</option>
+                      ))}
+                    </select>
+                    <div className="col-span-2 rounded border border-border-default bg-bg-secondary/70 px-3 py-2 text-xs text-text-secondary">
+                      责任人邮箱：
+                      <span className="ml-1 font-mono text-text-primary">
+                        {form.assignee_email || '选择责任人后自动显示'}
+                      </span>
+                    </div>
+                    <input placeholder="预估成本" type="number" value={form.cost_estimate} onChange={(e) => setForm({ ...form, cost_estimate: e.target.value })}
+                      className="form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                    <input
+                      type="date"
+                      value={form.due_date || ''}
+                      onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+                      className="form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none [color-scheme:dark]"
+                    />
+                  </div>
+                </div>
+
+                <textarea placeholder="工单描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4}
+                  className="w-full form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+
+                {createResult && (
+                  <div className={`rounded border px-3 py-2 text-xs ${createResult.type === 'success' ? 'border-accent-green/40 bg-accent-green/10 text-accent-green' : 'border-accent-red/40 bg-accent-red/10 text-accent-red'}`}>
+                    {createResult.message}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border-default px-6 py-4">
+                <button onClick={() => { setShowCreate(false); setCreateResult(null); }} className="ops-btn px-4 py-2 text-sm">取消</button>
+                <button disabled={creating} onClick={handleCreate} className="ops-btn ops-btn-primary px-4 py-2 text-sm disabled:opacity-50">
+                  {creating ? '创建中...' : '创建'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((item) => (
+              <div key={item} className="h-28 animate-pulse premium-card rounded-2xl" />
+            ))}
+          </div>
+        ) : loadError ? (
+          <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-6 text-sm text-accent-red">
+            {loadError}
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="premium-card rounded-2xl p-12 text-center border-dashed">
+            <p className="text-base font-medium text-text-primary">暂无符合条件的维修工单</p>
+            <p className="mt-2 text-sm text-text-muted">可以调整筛选条件，或创建一条新的维修任务。</p>
+            <button onClick={() => setShowCreate(true)} className="mt-5 rounded bg-accent-blue px-4 py-2 text-sm text-white">创建工单</button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {orders.map((o) => {
+              const priority = priorityOf(o);
+              return (
+                <article
+                  key={o.id}
+                  data-wo-id={o.id}
+                  data-wo-assignee={o.assignee || ''}
+                  data-wo-title={o.title}
+                  className={`ops-list-card border-l-4 ${PRIORITY_BORDER[priority]} p-4`}
+                >
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-[11px] text-text-muted">WO-{String(o.id).padStart(4, '0')}</span>
+                        <span className={`rounded border px-2 py-0.5 text-[11px] ${STATUS_COLOR[o.status] || STATUS_COLOR.pending}`}>
+                          {STATUS_LABEL[o.status] || o.status}
+                        </span>
+                        <span className={`text-[11px] font-medium ${PRIORITY_COLOR[priority]}`}>{PRIORITY_LABEL[priority]}优先级</span>
+                        {isOverdue(o) && <span className="rounded bg-accent-red/15 px-2 py-0.5 text-[11px] text-accent-red">已超期</span>}
+                      </div>
+                      <h3 className="mt-3 truncate text-base font-semibold text-text-primary">{o.title}</h3>
+                      <p className="mt-2 line-clamp-2 max-w-3xl text-sm leading-6 text-text-secondary">{o.description || '暂无工单描述'}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                      <button
+                        onClick={() => runAIAnalysis(o)}
+                        className="h-8 rounded border border-accent-cyan/50 px-3 text-xs text-accent-cyan hover:bg-accent-cyan/10"
+                      >
+                        预览
+                      </button>
+                      {!isTerminal(o.status) && (
                         <button
                           onClick={() => advanceStatus(o.id, o.status)}
-                          className="block w-full text-left px-3 py-2 text-text-secondary hover:bg-bg-hover hover:text-accent-blue"
+                          className="ops-btn h-8 px-3 text-xs"
                         >
                           {nextStatusLabel(o.status)}
                         </button>
                       )}
                       {!['closed', 'completed', 'cancelled'].includes(o.status) && (
                         <button
-                          onClick={() => cancelOrder(o.id)}
-                          className="block w-full text-left px-3 py-2 text-accent-red hover:bg-accent-red/10"
+                          onClick={() => setOpenActionId(openActionId === o.id ? null : o.id)}
+                          className="ops-btn h-8 px-3 text-xs"
                         >
                           取消工单
                         </button>
-                      )}
-                      {(o.status === 'closed' || o.status === 'cancelled') && (
-                        <div className="px-3 py-2 text-text-muted">暂无操作</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-4 mt-2 text-[10px] text-text-muted">
-                <span>风机 #{o.turbine_id}</span>
-                <span className={PRIORITY_COLOR[priorityOf(o)]}>优先级: {PRIORITY_LABEL[priorityOf(o)]}</span>
-                <span>故障: {o.fault_type || '未设置'}</span>
-                <span>DDL: {formatDate(o.due_date)}</span>
-                {o.assignee && <span>👤 {o.assignee}</span>}
-                <span>¥{o.cost_estimate.toLocaleString()}</span>
-                {o.notification_sent_at && <span className="text-accent-green">已通知</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Preview Modal — email template + AI analysis */}
-      {previewWO && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); }}>
-          <div className="bg-bg-card border border-border-default rounded-lg w-[640px] max-h-[85vh] overflow-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="sticky top-0 bg-bg-secondary border-b border-border-default px-5 py-3 flex items-center justify-between z-10">
-              <div>
-                <h3 className="font-medium text-sm">{editingWO ? '编辑工单' : '📧 邮件预览'} — WO-{String(previewWO.id).padStart(4, '0')}</h3>
-                <p className="text-[10px] text-text-muted">Subject: [风调预顺] WO-{String(previewWO.id).padStart(4, '0')} {previewWO.title}</p>
-              </div>
-              <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); }} className="text-text-muted hover:text-text-primary text-lg">✕</button>
-            </div>
-
-            {/* Email Body */}
-            <div className="p-5 space-y-4 text-xs">
-              {editingWO && (
-                <div className="border border-border-default rounded-lg p-4 space-y-3 bg-bg-secondary">
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      value={editForm.title}
-                      onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                      placeholder="工单标题"
-                      className="col-span-2 bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
-                    />
-                    <select
-                      value={editForm.status}
-                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                      className="bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary"
-                    >
-                      {[...STATUS_FLOW, 'cancelled'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-                    </select>
-                    <input
-                      type="number"
-                      value={editForm.cost_estimate}
-                      onChange={(e) => setEditForm({ ...editForm, cost_estimate: e.target.value })}
-                      placeholder="预估成本（元）"
-                      className="bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
-                    />
-                    <select
-                      value={editForm.assignee}
-                      onChange={(e) => setEditForm({ ...editForm, assignee: e.target.value })}
-                      className="col-span-2 bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary"
-                    >
-                      <option value="">待分配</option>
-                      {personnel.map((p) => <option key={p.id} value={p.name}>{p.name} ({p.email})</option>)}
-                    </select>
-                    <select
-                      value={editForm.fault_type}
-                      onChange={(e) => setEditForm({ ...editForm, fault_type: e.target.value })}
-                      className="col-span-2 bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary"
-                    >
-                      <option value="">未设置故障类型</option>
-                      {FAULT_TYPES.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
-                    </select>
-                    <textarea
-                      value={editForm.description}
-                      onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                      placeholder="工单描述"
-                      rows={3}
-                      className="col-span-2 bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-blue"
-                    />
-                  </div>
-                </div>
-              )}
-              <div className="border-2 border-border-default rounded-lg p-4 space-y-3 font-mono bg-bg-secondary">
-                <div className="text-center border-b border-border-default pb-2">
-                  <p className="font-bold text-sm">工单通知 — {previewWO.title}</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-text-muted">工单编号:</span> WO-{String(previewWO.id).padStart(4, '0')}</div>
-                  <div><span className="text-text-muted">优先级:</span> <span className={PRIORITY_COLOR[priorityOf(previewWO)]}>{PRIORITY_LABEL[priorityOf(previewWO)]}</span></div>
-                  <div><span className="text-text-muted">创建时间:</span> {new Date(previewWO.created_at).toLocaleString('zh-CN')}</div>
-                  <div><span className="text-text-muted">DDL截止:</span> <span className="text-accent-yellow">{formatDate(previewWO.due_date)}</span></div>
-                  <div><span className="text-text-muted">故障类型:</span> {previewWO.fault_type || aiAnalysis?.fault_type || '未设置'}</div>
-                  <div><span className="text-text-muted">通知状态:</span> {previewWO.notification_sent_at ? `已通知 ${formatDate(previewWO.notification_sent_at)}` : '未发送'}</div>
-                </div>
-
-                <div className="border-t border-border-default pt-2">
-                  <p className="font-medium mb-1">📊 风机信息</p>
-                  <div className="grid grid-cols-2 gap-1 text-text-secondary">
-                    <div>风机: {previewTurbine?.name || previewWO.turbine_id}</div>
-                    <div>区域: {previewTurbine?.region || '--'}</div>
-                    <div>当前状态: {previewTurbine ? (previewTurbine.status === 'normal' ? '正常运行' : previewTurbine.status === 'warning' ? '预警' : '故障') : '--'}</div>
-                    <div>HI值: {previewTurbine?.hi_value != null ? previewTurbine.hi_value.toFixed(1) : '--'}</div>
-                  </div>
-                </div>
-
-                {/* AI Analysis section */}
-                <div className="border-t border-border-default pt-2">
-                  <p className="font-medium mb-1">🤖 AI分析报告</p>
-                  {analyzing ? (
-                    <p className="text-text-muted animate-pulse">AI分析中, 正在获取风机数据...</p>
-                  ) : aiAnalysis ? (
-                    <div className="space-y-2">
-                      <p className="text-text-secondary">{aiAnalysis.diagnosis}</p>
-                      <div className="mt-2">
-                        <p className="text-accent-red font-medium mb-1">⚠️ 异常指标 (超出置信范围):</p>
-                        {aiAnalysis.anomalies.map((a, i) => (
-                          <div key={i} className={`flex items-center gap-2 py-1 border-b border-border-default last:border-0 ${a.level === 'high' ? 'text-accent-red' : 'text-accent-yellow'}`}>
-                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: a.level === 'high' ? '#f85149' : '#d29922' }} />
-                            <span className="font-medium w-20">{a.indicator}</span>
-                            <span>当前: <b>{a.value}</b></span>
-                            <span className="text-text-muted">正常: {a.normal}</span>
-                            <span className="font-bold">{a.deviation}</span>
+                        {openActionId === o.id && (
+                          <div className="absolute right-0 top-9 z-20 w-32 rounded border border-border-default bg-bg-card py-1 text-xs shadow-xl">
+                            {!isTerminal(o.status) && (
+                              <button onClick={() => cancelOrder(o.id)} className="block w-full px-3 py-2 text-left text-accent-red hover:bg-accent-red/10">
+                                取消工单
+                              </button>
+                            )}
+                            <button onClick={() => { setPreviewWO(o); startEdit(o); setOpenActionId(null); }} className="block w-full px-3 py-2 text-left text-text-secondary hover:bg-bg-hover hover:text-text-primary">
+                              编辑
+                            </button>
+                            <button onClick={() => requestDeleteOrder(o)} className="block w-full px-3 py-2 text-left text-accent-red hover:bg-accent-red/10">
+                              删除
+                            </button>
                           </div>
                         ))}
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 border-t border-border-default pt-4 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+                    <div>
+                      <p className="mb-2 text-[11px] text-text-muted">流程进度</p>
+                      <WorkOrderStepper status={o.status} />
+                    </div>
+                    <div className="text-xs">
+                      <p className="text-text-muted">风机与故障</p>
+                      <p className="mt-1 text-text-primary">#{o.turbine_id} · {o.fault_type || '未设置'}</p>
+                    </div>
+                    <div className="text-xs">
+                      <p className="text-text-muted">责任人与截止</p>
+                      <p className="mt-1 text-text-primary">{o.assignee || '待分配'} · <span className={dueTone(o)}>{dateOnly(o.due_date)}</span></p>
+                      {o.assignee_email && <p className="mt-1 truncate font-mono text-[11px] text-text-muted">{o.assignee_email}</p>}
+                    </div>
+                    <div className="text-xs">
+                      <p className="text-text-muted">成本与通知</p>
+                      <p className="mt-1 text-text-primary">¥{o.cost_estimate.toLocaleString()} · {o.notification_sent_at ? '已通知' : '未通知'}</p>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        {previewWO && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); }}>
+            <div className="ops-drawer h-full w-full max-w-[720px] overflow-auto" onClick={e => e.stopPropagation()}>
+              <div className="sticky top-0 z-10 border-b border-border-default bg-bg-panel/95 px-6 py-4 backdrop-blur">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-mono text-xs text-text-muted">WO-{String(previewWO.id).padStart(4, '0')}</p>
+                    <h3 className="mt-1 text-lg font-semibold">{editingWO ? '编辑工单' : previewWO.title}</h3>
+                    <p className="mt-1 text-xs text-text-muted">状态：{STATUS_LABEL[previewWO.status] || previewWO.status}</p>
+                  </div>
+                  <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); }} className="ops-btn px-3 py-1.5 text-sm">关闭</button>
+                </div>
+              </div>
+
+              <div className="space-y-5 p-6 text-sm">
+                {editingWO && (
+                  <div className="premium-card rounded-2xl p-4">
+                    <p className="mb-3 text-xs font-medium text-text-secondary">编辑信息</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="工单标题"
+                        className="col-span-2 form-input px-3 py-2 text-sm focus:border-accent-blue focus:outline-none" />
+                      <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })} className="form-input px-3 py-2 text-sm">
+                        {[...STATUS_FLOW, 'cancelled'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+                      </select>
+                      <select value={editForm.priority} onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })} className="form-input px-3 py-2 text-sm">
+                        <option value="low">低优先级</option>
+                        <option value="medium">中优先级</option>
+                        <option value="high">高优先级</option>
+                        <option value="urgent">紧急</option>
+                      </select>
+                      <input type="number" value={editForm.cost_estimate} onChange={(e) => setEditForm({ ...editForm, cost_estimate: e.target.value })} placeholder="预估成本"
+                        className="form-input px-3 py-2 text-sm focus:border-accent-blue focus:outline-none" />
+                      <input type="date" value={editForm.due_date} onChange={(e) => setEditForm({ ...editForm, due_date: e.target.value })}
+                        className="form-input px-3 py-2 text-sm focus:border-accent-blue focus:outline-none [color-scheme:dark]" />
+                      <select value={editForm.assignee} onChange={(e) => setEditForm({ ...editForm, assignee: e.target.value })} className="col-span-2 form-input px-3 py-2 text-sm">
+                        <option value="">待分配</option>
+                        {personnel.map((p) => <option key={p.id} value={p.name}>{p.name} | {p.email}</option>)}
+                      </select>
+                      <div className="col-span-2 premium-card rounded-2xl px-3 py-2 text-xs text-text-secondary">
+                        责任人邮箱：
+                        <span className="ml-1 font-mono text-text-primary">
+                          {personnel.find((p) => p.name === editForm.assignee)?.email || previewWO.assignee_email || '待分配'}
+                        </span>
+                      </div>
+                      <select value={editForm.fault_type} onChange={(e) => setEditForm({ ...editForm, fault_type: e.target.value })} className="col-span-2 form-input px-3 py-2 text-sm">
+                        <option value="">未设置故障类型</option>
+                        {FAULT_TYPES.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
+                      </select>
+                      <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} placeholder="工单描述" rows={3}
+                        className="col-span-2 form-input px-3 py-2 text-sm focus:border-accent-blue focus:outline-none" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="premium-card rounded-2xl p-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs text-text-muted">优先级</p>
+                      <p className={`mt-1 font-medium ${PRIORITY_COLOR[priorityOf(previewWO)]}`}>{PRIORITY_LABEL[priorityOf(previewWO)]}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-text-muted">截止日期</p>
+                      <p className={`mt-1 font-medium ${dueTone(previewWO)}`}>{dateOnly(previewWO.due_date)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-text-muted">故障类型</p>
+                      <p className="mt-1 text-text-primary">{previewWO.fault_type || aiAnalysis?.fault_type || '未设置'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-text-muted">责任人</p>
+                      <p className="mt-1 text-text-primary">{previewWO.assignee || '待分配'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="premium-card rounded-2xl p-4">
+                  <p className="mb-3 text-xs font-medium text-text-secondary">流程进度</p>
+                  <WorkOrderStepper status={previewWO.status} />
+                </div>
+
+                <div className="premium-card rounded-2xl p-4">
+                  <p className="mb-2 text-xs font-medium text-text-secondary">AI 分析报告</p>
+                  {analyzing ? (
+                    <p className="animate-pulse text-text-muted">正在获取风机数据并生成分析...</p>
+                  ) : aiAnalysis ? (
+                    <div className="space-y-3">
+                      <p className="leading-6 text-text-secondary">{aiAnalysis.diagnosis}</p>
+                      {aiAnalysis.anomalies.map((a, i) => (
+                        <div key={i} className={`premium-card rounded-2xl px-3 py-2 ${a.level === 'high' ? 'text-accent-red' : 'text-accent-yellow'}`}>
+                          <span className="font-medium">{a.indicator}</span>
+                          <span className="ml-3 text-text-secondary">当前 {a.value} / 正常 {a.normal}</span>
+                          <span className="ml-3">{a.deviation}</span>
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <p className="text-text-muted">AI分析加载失败</p>
                   )}
                 </div>
 
-                <div className="border-t border-border-default pt-2">
-                  <p className="font-medium mb-1">🔧 操作步骤</p>
-                  <ol className="list-decimal list-inside text-text-secondary space-y-0.5">
-                    <li>停机检查相关部件温度</li>
-                    <li>安排振动复测确认故障程度</li>
-                    <li>根据检查结果更换受损部件</li>
-                    <li>修复后运行24h监测确认</li>
-                  </ol>
-                </div>
-
-                <div className="border-t border-border-default pt-2 grid grid-cols-2 gap-2">
-                  <div><span className="text-text-muted">预估工时:</span> 4h</div>
-                  <div><span className="text-text-muted">预估成本:</span> ¥{previewWO.cost_estimate.toLocaleString()}</div>
-                  <div><span className="text-text-muted">收件邮箱:</span> {previewWO.assignee_email || '按责任人账号邮箱发送'}</div>
-                  <div><span className="text-text-muted">责任人:</span> {previewWO.assignee || '待分配'}</div>
+                <div className="premium-card rounded-2xl p-4">
+                  <p className="mb-2 text-xs font-medium text-text-secondary">通知信息</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <p className="text-text-secondary">收件邮箱：<span className="text-text-primary">{previewWO.assignee_email || '按责任人账号邮箱发送'}</span></p>
+                    <p className="text-text-secondary">通知状态：<span className="text-text-primary">{previewWO.notification_sent_at ? `已通知 ${dateOnly(previewWO.notification_sent_at)}` : '未发送'}</span></p>
+                    <p className="text-text-secondary">预估成本：<span className="text-text-primary">¥{previewWO.cost_estimate.toLocaleString()}</span></p>
+                    <p className="text-text-secondary">风机编号：<span className="text-text-primary">#{previewWO.turbine_id}</span></p>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Footer actions */}
-            <div className="sticky bottom-0 bg-bg-secondary border-t border-border-default px-5 py-3 flex gap-2 justify-end">
-              {editingWO ? (
-                <>
-                  <button onClick={() => setEditingWO(false)} className="px-4 py-2 border border-border-default rounded text-sm text-text-secondary">取消编辑</button>
-                  <button onClick={saveEdit} className="px-4 py-2 bg-accent-blue text-white rounded text-sm hover:opacity-90">保存修改</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); setEditingWO(false); }} className="px-4 py-2 border border-border-default rounded text-sm text-text-secondary">关闭</button>
-                  <button onClick={() => startEdit(previewWO)} className="px-4 py-2 border border-accent-blue/50 text-accent-blue rounded text-sm hover:bg-accent-blue/10">编辑工单</button>
-                  <button disabled={sendingEmail} onClick={() => sendEmail(previewWO)} className="px-4 py-2 bg-accent-green text-white rounded text-sm hover:opacity-90 disabled:opacity-50">
-                    {sendingEmail ? '发送中...' : '📧 发送邮件'}
-                  </button>
-                </>
-              )}
+              <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border-default bg-bg-secondary px-6 py-4">
+                {editingWO ? (
+                  <>
+                    <button onClick={() => setEditingWO(false)} className="ops-btn px-4 py-2 text-sm">取消编辑</button>
+                    <button onClick={saveEdit} className="ops-btn ops-btn-primary px-4 py-2 text-sm">保存修改</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEdit(previewWO)} className="ops-btn px-4 py-2 text-sm">编辑工单</button>
+                    <button disabled={sendingEmail} onClick={() => sendEmail(previewWO)} className="rounded border border-accent-green/40 bg-accent-green/20 px-4 py-2 text-sm font-semibold text-accent-green hover:bg-accent-green/30 disabled:opacity-50">
+                      {sendingEmail ? '发送中...' : '发送邮件'}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {emailResult && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setEmailResult(null)}>
-          <div className="w-[360px] bg-bg-card border border-border-default rounded-lg p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className={`text-sm font-medium mb-2 ${emailResult.type === 'success' ? 'text-accent-green' : 'text-accent-red'}`}>
-              {emailResult.type === 'success' ? '发送成功' : '发送失败'}
-            </h3>
-            <p className="text-xs text-text-secondary leading-relaxed break-words">{emailResult.message}</p>
-            <div className="flex justify-end mt-4">
-              <button onClick={() => setEmailResult(null)} className="px-4 py-2 bg-accent-blue text-white rounded text-sm">
-                知道了
-              </button>
+        {emailResult && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setEmailResult(null)}>
+            <div className="w-[380px] premium-card rounded-2xl p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className={`mb-2 text-sm font-medium ${emailResult.type === 'success' ? 'text-accent-green' : 'text-accent-red'}`}>
+                {emailResult.type === 'success' ? '发送成功' : '发送失败'}
+              </h3>
+              <p className="break-words text-xs leading-6 text-text-secondary">{emailResult.message}</p>
+              <div className="mt-4 flex justify-end">
+                <button onClick={() => setEmailResult(null)} className="rounded bg-accent-blue px-4 py-2 text-sm text-white">知道了</button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      <CopilotFAB pageContext={{
-        total_orders: orders.length,
-        pending: orders.filter(o => o.status === 'pending').length,
-        in_progress: orders.filter(o => o.status === 'in_progress').length,
-        preview_wo_id: previewWO?.id,
-        preview_wo_title: previewWO?.title,
-        preview_turbine_id: previewWO?.turbine_id,
-        ai_analysis_fault_type: aiAnalysis?.fault_type,
-        status_filter: statusFilter || undefined,
-        available_personnel: personnel.length,
-      }} />
+        {deleteTarget && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4" onClick={() => !deletingOrder && setDeleteTarget(null)}>
+            <div
+              className="w-full max-w-[420px] rounded-lg border border-accent-red/25 bg-bg-card shadow-2xl shadow-black/40"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="border-b border-border-default bg-bg-secondary px-5 py-4">
+                <p className="text-xs font-medium text-accent-red">删除确认</p>
+                <h3 className="mt-1 truncate text-base font-semibold text-text-primary">{deleteTarget.title}</h3>
+              </div>
+              <div className="space-y-3 px-5 py-4">
+                <div className="rounded border border-accent-red/20 bg-accent-red/10 px-3 py-2">
+                  <p className="text-sm leading-6 text-text-primary">删除后，这条工单将从默认列表、人员负载、诊断关联和知识图谱中隐藏。</p>
+                </div>
+                <p className="text-xs leading-5 text-text-muted">
+                  工单编号 WO-{String(deleteTarget.id).padStart(4, '0')} 的维护记录和通知日志会继续保留，便于后续审计。
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border-default bg-bg-secondary px-5 py-4">
+                <button
+                  disabled={deletingOrder}
+                  onClick={() => setDeleteTarget(null)}
+                  className="rounded border border-border-default px-4 py-2 text-sm text-text-secondary hover:border-border-active hover:text-text-primary disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  disabled={deletingOrder}
+                  onClick={confirmDeleteOrder}
+                  className="rounded bg-accent-red px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+                >
+                  {deletingOrder ? '删除中...' : '确认删除'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <CopilotFAB />
+      </div>
     </div>
   );
 }

@@ -1,14 +1,26 @@
+import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from smtplib import SMTPRecipientsRefused
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.ai import _detect_anomalies, _generate_local_diagnosis
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import Fault, MaintenanceRecord, NotificationConfig, NotificationLog, Turbine, User, WorkOrder
+from app.models import (
+    Fault,
+    FaultKnowledgeNode,
+    MaintenanceRecord,
+    NotificationConfig,
+    NotificationLog,
+    SCADARecord,
+    Turbine,
+    User,
+    WorkOrder,
+)
 from app.schemas import (
     MaintenanceRecordCreate,
     MaintenanceRecordResponse,
@@ -20,6 +32,7 @@ from app.schemas import (
     WorkOrderUpdate,
 )
 from app.services.email_service import EmailConfigError, send_email
+from app.services.qwen_client import diagnose_fault
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
@@ -45,26 +58,328 @@ def _filter_model_data(data: dict) -> dict:
     return {key: val for key, val in data.items() if key in fields}
 
 
+def _fmt_item(item) -> str:
+    """Format a knowledge item that may be a str or dict."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("action") or item.get("name") or item.get("title") or str(item)
+    return str(item)
+
+
+def _fmt_items(items: list) -> list[str]:
+    return [_fmt_item(item) for item in items]
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _workorder_email_body(wo: WorkOrder) -> str:
-    return "\n".join(
-        [
-            f"Work order: WO-{wo.id:04d}",
-            f"Title: {wo.title}",
-            f"Turbine ID: {wo.turbine_id}",
-            f"Priority: {wo.priority or 'medium'}",
-            f"Fault type: {wo.fault_type or '-'}",
-            f"Due date: {wo.due_date or '-'}",
-            f"Status: {wo.status}",
-            f"Assignee: {wo.assignee or 'unassigned'}",
-            f"Estimated cost: {wo.cost_estimate}",
-            "",
-            "Please log in to the PHM system to view and process this work order.",
+def _workorder_plain_body(
+    wo: WorkOrder,
+    turbine: Turbine | None,
+    ai_section: dict | None,
+    knowledge: dict | None,
+) -> str:
+    """Build structured plain-text work order email."""
+    priority_label = {"low": "低", "medium": "中", "high": "高", "urgent": "紧急"}.get(wo.priority or "medium", wo.priority or "中")
+    status_label = {
+        "pending": "待处理", "assigned": "已分配", "in_progress": "进行中",
+        "review": "审核中", "completed": "已完成", "closed": "已关闭", "cancelled": "已取消",
+    }.get(wo.status, wo.status)
+
+    lines = [
+        "╔══════════════════════════════════════════╗",
+        "║  风调预顺 PHM — 维修工单通知              ║",
+        f"║  WO-{wo.id:04d} | {priority_label}优先级 | {status_label}",
+        "╚══════════════════════════════════════════╝",
+        "",
+        "【工单概要】",
+        f"  编号:       WO-{wo.id:04d}",
+        f"  标题:       {wo.title}",
+        f"  描述:       {wo.description or '（无）'}",
+    ]
+    if turbine:
+        hi_str = f"{turbine.hi_value:.1f}" if turbine.hi_value is not None else "--"
+        lines += [
+            f"  风机:       {turbine.name} | 型号: {turbine.model or '--'} | 区域: {turbine.region or '--'}",
+            f"  健康指数:   {hi_str} | 状态: {turbine.status or '--'}",
         ]
+    else:
+        lines.append(f"  风机ID:     {wo.turbine_id}")
+
+    lines += [
+        f"  故障类型:   {wo.fault_type or '未设置'}",
+        f"  优先级:     {priority_label}",
+        f"  状态:       {status_label}",
+        f"  责任人:     {wo.assignee or '待分配'}",
+        f"  截止日期:   {wo.due_date.strftime('%Y-%m-%d') if wo.due_date else '未设置'}",
+        f"  预估成本:   ¥{wo.cost_estimate:,.0f}" if wo.cost_estimate else "  预估成本:   未设置",
+        "",
+    ]
+
+    # AI / diagnosis section
+    if ai_section:
+        source_tag = "🤖 AI诊断报告" if ai_section.get("source") == "ai" else "📋 本地规则诊断"
+        lines.append(f"【{source_tag}】")
+        lines.append(f"  {ai_section.get('diagnosis', '')}")
+        anomalies = ai_section.get("anomalies") or []
+        if anomalies:
+            lines.append("")
+            lines.append("  异常指标:")
+            for a in anomalies:
+                level_icon = "🔴" if a.get("level") == "high" else "🟡"
+                lines.append(
+                    f"  {level_icon} {a['indicator']}: 当前 {a['value']} "
+                    f"（正常: {a['normal']}）偏差: {a['deviation']}"
+                )
+        lines.append("")
+
+    # fault knowledge section
+    if knowledge:
+        lines.append("【知识库参考】")
+        if knowledge.get("root_causes"):
+            lines.append(f"  可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:3]))}")
+        if knowledge.get("solutions"):
+            lines.append(f"  建议方案: {'; '.join(_fmt_items(knowledge['solutions'][:3]))}")
+        if knowledge.get("spare_parts"):
+            lines.append(f"  相关备件: {', '.join(_fmt_items(knowledge['spare_parts'][:5]))}")
+        lines.append("")
+
+    lines += [
+        "【操作指引】",
+        "  请登录风调预顺PHM系统查看并处理此工单。",
+        "",
+        "────────────────────────────────────────",
+        "风调预顺 PHM 系统 | 预测性运维平台",
+        "此邮件由系统自动生成，请勿直接回复",
+    ]
+    return "\n".join(lines)
+
+
+def _workorder_html_body(
+    wo: WorkOrder,
+    turbine: Turbine | None,
+    ai_section: dict | None,
+    knowledge: dict | None,
+) -> str:
+    """Build HTML work order email with inline CSS."""
+    _PRIORITY = {"low": "低", "medium": "中", "high": "高", "urgent": "紧急"}
+    _PRIORITY_COLOR = {"low": "#2da44e", "medium": "#d29922", "high": "#cf222e", "urgent": "#cf222e"}
+    _STATUS = {
+        "pending": "待处理", "assigned": "已分配", "in_progress": "进行中",
+        "review": "审核中", "completed": "已完成", "closed": "已关闭", "cancelled": "已取消",
+    }
+    _STATUS_COLOR = {
+        "pending": "#6e7681", "assigned": "#58a6ff", "in_progress": "#d29922",
+        "review": "#a371f7", "completed": "#2da44e", "closed": "#6e7681", "cancelled": "#cf222e",
+    }
+
+    priority_key = wo.priority or "medium"
+    priority_label = _PRIORITY.get(priority_key, "中")
+    priority_color = _PRIORITY_COLOR.get(priority_key, "#d29922")
+    status_label = _STATUS.get(wo.status, wo.status)
+    status_color = _STATUS_COLOR.get(wo.status, "#6e7681")
+    # priority up-arrow indicator
+    arrow_bits = ""
+    if wo.priority:
+        try:
+            arrow_bits = "⬆" * ["low", "medium", "high", "urgent"].index(wo.priority)
+        except ValueError:
+            arrow_bits = ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f6f8fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f8fa;padding:20px 0;">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12);">
+
+  <!-- Header -->
+  <tr><td style="background:#1a1a2e;padding:20px 24px;color:#fff;">
+    <h2 style="margin:0 0 6px;font-size:18px;">🔧 风调预顺 PHM — 维修工单通知</h2>
+    <span style="background:{priority_color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;margin-right:8px;">
+      {arrow_bits}{priority_label}优先级
+    </span>
+    <span style="background:{status_color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">{status_label}</span>
+    <span style="float:right;font-size:13px;opacity:.7;">WO-{wo.id:04d}</span>
+  </td></tr>
+
+  <!-- Order Summary -->
+  <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📋 工单概要</h3>
+    <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">
+      <tr><td width="80" style="color:#24292f;font-weight:600;">编号</td><td>WO-{wo.id:04d}</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">标题</td><td style="color:#24292f;font-weight:500;">{wo.title}</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;vertical-align:top;">描述</td><td>{wo.description or '（无）'}</td></tr>"""
+
+    if turbine:
+        hi_str = f"{turbine.hi_value:.1f}" if turbine.hi_value is not None else "--"
+        html += f"""<tr><td style="color:#24292f;font-weight:600;">风机</td><td>{turbine.name} | 型号: {turbine.model or '--'} | 区域: {turbine.region or '--'}</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">健康指数</td><td>{hi_str} | 状态: {turbine.status or '--'}</td></tr>"""
+    else:
+        html += f"""<tr><td style="color:#24292f;font-weight:600;">风机ID</td><td>{wo.turbine_id}</td></tr>"""
+
+    cost_str = f"¥{wo.cost_estimate:,.0f}" if wo.cost_estimate else "未设置"
+    html += f"""<tr><td style="color:#24292f;font-weight:600;">故障类型</td><td>{wo.fault_type or '未设置'}</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">责任人</td><td>{wo.assignee or '待分配'}</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">截止日期</td><td>{wo.due_date.strftime('%Y-%m-%d') if wo.due_date else '未设置'}</td></tr>
+      <tr><td style="color:#24292f;font-weight:600;">预估成本</td><td style="color:#cf222e;font-weight:600;">{cost_str}</td></tr>
+    </table>
+  </td></tr>"""
+
+    # AI / diagnosis section
+    if ai_section:
+        source_tag = "🤖 AI 诊断报告" if ai_section.get("source") == "ai" else "📋 本地规则诊断"
+        html += f"""
+  <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">{source_tag}</h3>
+    <p style="margin:0 0 12px;font-size:13px;color:#57606a;line-height:1.6;">{ai_section.get('diagnosis', '')}</p>"""
+        anomalies = ai_section.get("anomalies") or []
+        if anomalies:
+            html += """<table width="100%" cellpadding="6" cellspacing="0" style="font-size:12px;border-collapse:collapse;">
+      <tr style="background:#f6f8fa;color:#24292f;font-weight:600;">
+        <td style="border:1px solid #e1e4e8;">指标</td><td style="border:1px solid #e1e4e8;">当前值</td>
+        <td style="border:1px solid #e1e4e8;">正常范围</td><td style="border:1px solid #e1e4e8;">偏差</td></tr>"""
+            for a in anomalies:
+                level_bg = "#fff1f0" if a.get("level") == "high" else "#fff8c5"
+                html += f"""<tr style="background:{level_bg};">
+        <td style="border:1px solid #e1e4e8;">{a['indicator']}</td>
+        <td style="border:1px solid #e1e4e8;font-weight:600;">{a['value']}</td>
+        <td style="border:1px solid #e1e4e8;">{a['normal']}</td>
+        <td style="border:1px solid #e1e4e8;color:{'#cf222e' if a.get('level') == 'high' else '#9a6700'};">{a['deviation']}</td></tr>"""
+            html += "</table>"
+        html += "\n  </td></tr>"
+
+    # fault knowledge section
+    if knowledge:
+        html += """
+  <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 知识库参考</h3>
+    <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">"""
+        if knowledge.get("root_causes"):
+            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:3]))}</td></tr>"""
+        if knowledge.get("solutions"):
+            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(_fmt_items(knowledge['solutions'][:3]))}</td></tr>"""
+        if knowledge.get("spare_parts"):
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(_fmt_items(knowledge['spare_parts'][:5]))}</td></tr>"""
+        html += """
+    </table>
+  </td></tr>"""
+
+    html += """
+  <!-- Footer -->
+  <tr><td style="background:#f6f8fa;padding:16px 24px;text-align:center;font-size:11px;color:#8b949e;">
+    <p style="margin:0 0 4px;">请登录 <b>风调预顺 PHM 系统</b> 查看并处理此工单</p>
+    <p style="margin:0;">此邮件由系统自动生成，请勿直接回复</p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+    return html
+
+
+async def _fetch_turbine_info(wo: WorkOrder, db: AsyncSession) -> Turbine | None:
+    """Fetch turbine record for a work order."""
+    return await db.get(Turbine, wo.turbine_id)
+
+
+async def _fetch_fault_knowledge(wo: WorkOrder, db: AsyncSession) -> dict | None:
+    """Match fault_type against FaultKnowledgeNode table."""
+    if not wo.fault_type:
+        return None
+    result = await db.execute(
+        select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == wo.fault_type)
     )
+    node = result.scalar_one_or_none()
+    if not node:
+        return None
+    return {
+        "root_causes": node.root_causes or [],
+        "solutions": node.solutions or [],
+        "spare_parts": node.spare_parts or [],
+        "category": node.category,
+        "severity": node.severity,
+    }
+
+
+async def _try_ai_analysis(
+    wo: WorkOrder, db: AsyncSession, user: User
+) -> dict | None:
+    """Try AI-powered fault diagnosis for the work order.
+
+    Returns dict with diagnosis / anomalies / source on success,
+    or a local-fallback dict if the AI call fails,
+    or None when the user has no API key configured at all.
+    """
+    if not user.api_key:
+        return None
+
+    turbine = await _fetch_turbine_info(wo, db)
+    if not turbine:
+        return None
+
+    # recent SCADA data
+    since = _utc_now() - timedelta(hours=24)
+    scada_result = await db.execute(
+        select(SCADARecord)
+        .where(SCADARecord.turbine_id == wo.turbine_id, SCADARecord.timestamp >= since)
+        .order_by(SCADARecord.timestamp.desc())
+        .limit(100)
+    )
+    scada_records = scada_result.scalars().all()
+
+    # fault history
+    fault_result = await db.execute(
+        select(Fault)
+        .where(Fault.turbine_id == wo.turbine_id)
+        .order_by(Fault.detected_at.desc())
+        .limit(10)
+    )
+    faults = fault_result.scalars().all()
+
+    turbine_data = {
+        "name": turbine.name,
+        "model": turbine.model,
+        "power_mw": turbine.power_mw,
+        "region": turbine.region,
+        "hi_value": turbine.hi_value,
+        "status": turbine.status,
+    }
+    fault_data = [
+        {
+            "type": f.fault_type,
+            "confidence": f.confidence,
+            "detected_at": f.detected_at.isoformat() if f.detected_at else None,
+        }
+        for f in faults
+    ]
+
+    try:
+        anomalies = _detect_anomalies(scada_records, turbine.power_mw or 2.0)
+        diagnosis = await asyncio.to_thread(
+            diagnose_fault,
+            turbine_data,
+            fault_data,
+            model=user.model_preference,
+            api_key=user.api_key,
+            api_provider=user.api_provider,
+            base_url=user.api_base_url,
+        )
+        return {"diagnosis": diagnosis, "anomalies": anomalies, "source": "ai"}
+    except Exception:
+        logger.warning("AI diagnosis failed for WO-%04d, falling back to local", wo.id)
+        # Re-compute anomalies inside the handler in case _detect_anomalies was the failure point
+        try:
+            anomalies = _detect_anomalies(scada_records, turbine.power_mw or 2.0)
+        except Exception:
+            anomalies = []
+        local_diag = _generate_local_diagnosis(turbine_data, anomalies)
+        return {"diagnosis": local_diag, "anomalies": anomalies, "source": "local"}
 
 
 async def _add_record(
@@ -131,7 +446,7 @@ async def list_workorders(
 ):
     q = select(WorkOrder).order_by(WorkOrder.created_at.desc())
     if not include_deleted:
-        q = q.where(or_(WorkOrder.deleted_at.is_(None), WorkOrder.status == "cancelled"))
+        q = q.where(WorkOrder.deleted_at.is_(None))
     if status:
         q = q.where(WorkOrder.status == status)
     if assignee:
@@ -148,7 +463,9 @@ async def list_workorders(
 
 @router.get("/{workorder_id}", response_model=WorkOrderDetailResponse)
 async def get_workorder(workorder_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -176,6 +493,10 @@ async def create_workorder(
     user: User = Depends(get_current_user),
 ):
     payload = data.model_dump(exclude_none=True)
+    turbine = await db.get(Turbine, data.turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
     if data.fault_id is not None:
         fault = await db.get(Fault, data.fault_id)
         if not fault:
@@ -208,7 +529,9 @@ async def update_workorder(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -255,28 +578,28 @@ async def update_workorder(
 
 
 @router.delete("/{workorder_id}", response_model=WorkOrderResponse)
-async def cancel_workorder(
+async def delete_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
 
-    before_status = wo.status
     now = _utc_now()
-    wo.status = "cancelled"
-    wo.cancelled_at = now
+    wo.deleted_at = now
     wo.updated_at = now
     await _add_record(
         db,
         wo,
         user,
-        "cancelled",
-        content="Work order cancelled",
-        before_status=before_status,
+        "deleted",
+        content="Work order deleted",
+        before_status=wo.status,
         after_status=wo.status,
     )
 
@@ -292,7 +615,9 @@ async def add_workorder_record(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
@@ -327,21 +652,34 @@ async def send_workorder_email(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
+    result = await db.execute(
+        select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
+    )
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="WorkOrder not found")
 
     config_result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
     config = config_result.scalar_one_or_none()
+    if not config:
+        config = NotificationConfig(
+            user_id=user.id,
+            hi_threshold=70.0,
+            email_enabled=True,
+            email_address=user.email,
+            wechat_enabled=False,
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
     logger.info(
         "Workorder email setting: user_id=%s username=%s config_id=%s email_enabled=%s",
         user.id,
         user.username,
-        getattr(config, "id", None),
-        getattr(config, "email_enabled", None),
+        config.id,
+        config.email_enabled,
     )
-    if not config or not config.email_enabled:
+    if not config.email_enabled:
         raise HTTPException(status_code=400, detail="Email notification is disabled in settings")
 
     recipients = await _recipient_emails(data, wo, db)
@@ -349,13 +687,24 @@ async def send_workorder_email(
         raise HTTPException(status_code=400, detail="No recipient email found for work order assignee")
 
     subject = data.subject or f"[Fengdiao PHM] WO-{wo.id:04d} {wo.title}"
-    body = data.content or _workorder_email_body(wo)
+
+    # Build rich email body (plain + HTML) unless caller already provided content
+    if data.content:
+        body = data.content
+        html_body = None
+    else:
+        turbine = await _fetch_turbine_info(wo, db)
+        ai_section = await _try_ai_analysis(wo, db, user)
+        knowledge = await _fetch_fault_knowledge(wo, db)
+        body = _workorder_plain_body(wo, turbine, ai_section, knowledge)
+        html_body = _workorder_html_body(wo, turbine, ai_section, knowledge)
+
     logs = []
     sent_count = 0
     failed_count = 0
     for recipient in recipients:
         try:
-            await send_email(recipient, subject, body)
+            await send_email(recipient, subject, body, html_body=html_body)
             logs.append({"recipient_email": recipient, "status": "sent", "error_message": None})
             db.add(
                 NotificationLog(

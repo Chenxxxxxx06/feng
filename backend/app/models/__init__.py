@@ -15,12 +15,38 @@ class User(Base):
     api_key = Column(String(256), nullable=True)
     api_provider = Column(String(64), nullable=True)
     api_base_url = Column(String(512), nullable=True)
-    model_preference = Column(String(64), default="gpt-4")
+    model_preference = Column(String(128), default="qwen-plus")
     preferences = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=func.now())
 
     notification_configs = relationship("NotificationConfig", back_populates="user")
+    ai_provider_configs = relationship("AIProviderConfig", back_populates="user", cascade="all, delete-orphan")
+
+
+class AIProviderConfig(Base):
+    __tablename__ = "ai_provider_configs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_ai_provider_user_provider"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String(64), nullable=False, index=True)
+    display_name = Column(String(128), nullable=True)
+    api_key = Column(String(512), nullable=True)
+    base_url = Column(String(512), nullable=False)
+    api_style = Column(String(32), default="openai")
+    default_model = Column(String(128), nullable=True)
+    model_options = Column(JSON, nullable=True)
+    enabled = Column(Boolean, default=True)
+    last_test_status = Column(String(32), default="untested")
+    last_test_message = Column(Text, nullable=True)
+    last_test_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="ai_provider_configs")
 
 
 class Turbine(Base):
@@ -141,13 +167,13 @@ class WorkOrder(Base):
     priority = Column(String(16), default="medium")
     fault_type = Column(String(64), nullable=True)
     assignee = Column(String(64), nullable=True)
-    assignee_id = Column(Integer, nullable=True)
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     assignee_email = Column(String(128), nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
     cost_estimate = Column(Float, default=0.0)
     cost_actual = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
@@ -195,32 +221,6 @@ class DataImportBatch(Base):
     rows_skipped = Column(Integer)
     anonymous_assets = Column(Integer)
     summary = Column(JSON)
-
-
-class NotificationLog(Base):
-    __tablename__ = "notification_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
-    recipient_email = Column(String(128), nullable=False)
-    subject = Column(String(256), nullable=True)
-    channel = Column(String(32), default="email")
-    status = Column(String(16), default="sent")
-    sent_at = Column(DateTime(timezone=True), default=func.now())
-    error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
-
-
-class MaintenanceRecord(Base):
-    __tablename__ = "maintenance_records"
-    id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
-    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action_type = Column(String(32), nullable=False)
-    content = Column(Text, nullable=True)
-    before_status = Column(String(16), nullable=True)
-    after_status = Column(String(16), nullable=True)
-    extra = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=func.now())
 
 
 class FaultKnowledgeNode(Base):

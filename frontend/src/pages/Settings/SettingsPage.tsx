@@ -81,6 +81,42 @@ interface AIModelOption {
   requiresKey: boolean;
 }
 
+interface AIProviderConfig {
+  id: number;
+  provider: string;
+  display_name: string | null;
+  base_url: string;
+  api_style: string;
+  default_model: string | null;
+  model_options: string[];
+  enabled: boolean;
+  has_api_key: boolean;
+  last_test_status: string | null;
+  last_test_message: string | null;
+  last_test_at: string | null;
+}
+
+interface AIProviderForm {
+  provider: string;
+  display_name: string;
+  api_key: string;
+  base_url: string;
+  api_style: string;
+  default_model: string;
+  model_options: string[];
+  enabled: boolean;
+}
+
+interface AIProviderTemplate {
+  provider: string;
+  display_name: string;
+  base_url: string;
+  default_model: string;
+  model_options: string[];
+  api_style: string;
+  requires_api_key: boolean;
+}
+
 const aiModelOptions: AIModelOption[] = [
   { value: 'qwen-plus', label: '通义千问 qwen-plus', provider: '通义千问 DashScope', note: '中文运维总结，质量/成本均衡', requiresKey: true },
   { value: 'qwen-turbo', label: '通义千问 qwen-turbo', provider: '通义千问 DashScope', note: '更快更便宜，适合页面摘要', requiresKey: true },
@@ -108,6 +144,80 @@ const normalizeModelPreference = (model?: string) => {
   return aliases[model || ''] || model || 'qwen-plus';
 };
 
+const aiProviderTemplates: AIProviderTemplate[] = [
+  { provider: 'dashscope', display_name: '通义千问 DashScope', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', default_model: 'qwen-plus', model_options: ['qwen-plus', 'qwen-turbo', 'qwen3.6-flash'], api_style: 'openai', requires_api_key: true },
+  { provider: 'deepseek', display_name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', default_model: 'deepseek-chat', model_options: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash'], api_style: 'openai', requires_api_key: true },
+  { provider: 'glm', display_name: '智谱GLM', base_url: 'https://open.bigmodel.cn/api/paas/v4', default_model: 'glm-5-flash', model_options: ['glm-5-flash'], api_style: 'openai', requires_api_key: true },
+  { provider: 'kimi', display_name: 'Kimi Moonshot', base_url: 'https://api.moonshot.cn/v1', default_model: 'kimi-k2.6', model_options: ['kimi-k2.6'], api_style: 'openai', requires_api_key: true },
+  { provider: 'openai', display_name: 'OpenAI', base_url: 'https://api.openai.com/v1', default_model: 'gpt-4o-mini', model_options: ['gpt-4o-mini', 'gpt-4.1', 'gpt-4', 'gpt-3.5-turbo'], api_style: 'openai', requires_api_key: true },
+  { provider: 'gemini', display_name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', default_model: 'gemini-2.5-flash', model_options: ['gemini-2.5-flash', 'gemini-3.5-flash'], api_style: 'openai', requires_api_key: true },
+  { provider: 'ollama', display_name: 'Ollama本地模型', base_url: 'http://localhost:11434/v1', default_model: 'qwen2.5', model_options: ['qwen2.5', 'llama3.1', 'deepseek-r1'], api_style: 'openai', requires_api_key: false },
+];
+
+const normalizeProviderKey = (provider: string) => {
+  const key = provider.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    qwen: 'dashscope',
+    tongyi: 'dashscope',
+    aliyun: 'dashscope',
+  };
+  return aliases[key] || key;
+};
+
+const providerTemplateByKey = (provider: string) => aiProviderTemplates.find((item) => item.provider === normalizeProviderKey(provider));
+const AI_PROVIDER_MEMORY_KEY = 'settings.aiProvider.lastProvider';
+
+const getRememberedAIProvider = () => {
+  if (typeof window === 'undefined') return null;
+  const provider = window.localStorage.getItem(AI_PROVIDER_MEMORY_KEY);
+  return providerTemplateByKey(provider || '') ? provider : null;
+};
+
+const rememberAIProvider = (provider: string) => {
+  if (typeof window === 'undefined') return;
+  if (provider.trim()) window.localStorage.setItem(AI_PROVIDER_MEMORY_KEY, normalizeProviderKey(provider));
+};
+
+const inferProviderFromModel = (model?: string) => {
+  const normalized = normalizeModelPreference(model);
+  const option = getModelOption(normalized);
+  if (option?.provider.includes('DeepSeek')) return 'deepseek';
+  if (option?.provider.includes('智谱')) return 'glm';
+  if (option?.provider.includes('Kimi')) return 'kimi';
+  if (option?.provider.includes('OpenAI')) return 'openai';
+  if (option?.provider.includes('Gemini')) return 'gemini';
+  if (option?.provider.includes('Ollama')) return 'ollama';
+  return 'dashscope';
+};
+
+const createAIProviderForm = (provider = 'deepseek', user?: CurrentUser | null): AIProviderForm => {
+  const inferredProvider = user?.model_preference ? inferProviderFromModel(user.model_preference) : '';
+  const key = provider || inferredProvider || 'deepseek';
+  const template = providerTemplateByKey(key) || aiProviderTemplates[1];
+  const useCurrentUserValues = Boolean(user && inferredProvider === template.provider);
+  return {
+    provider: template.provider,
+    display_name: template.display_name,
+    api_key: '',
+    base_url: useCurrentUserValues && user?.api_base_url ? user.api_base_url : template.base_url,
+    api_style: template.api_style,
+    default_model: normalizeModelPreference(useCurrentUserValues ? user?.model_preference : template.default_model),
+    model_options: template.model_options,
+    enabled: true,
+  };
+};
+
+const providerConfigToForm = (provider: AIProviderConfig): AIProviderForm => ({
+  provider: provider.provider,
+  display_name: provider.display_name || provider.provider,
+  api_key: '',
+  base_url: provider.base_url,
+  api_style: provider.api_style || 'openai',
+  default_model: provider.default_model || providerTemplateByKey(provider.provider)?.default_model || '',
+  model_options: provider.model_options?.length ? provider.model_options : providerTemplateByKey(provider.provider)?.model_options || [],
+  enabled: provider.enabled,
+});
+
 const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'overview', label: '总览', desc: '系统状态与最近操作' },
   { key: 'personal', label: '个人设置', desc: '账号资料与工作偏好' },
@@ -115,6 +225,7 @@ const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'alerts', label: '告警规则', desc: 'HI阈值和通知方式' },
   { key: 'pipeline', label: '数据源管理', desc: 'SCADA/振动/图像/气象' },
   { key: 'personnel', label: '人员管理', desc: '维护人员和负载' },
+  { key: 'logs', label: '操作记录', desc: '最近操作与保存反馈' },
 ];
 
 const sourceIcons: Record<string, string> = {
@@ -165,16 +276,28 @@ const loadTone = (load: number) => {
   return 'text-accent-green';
 };
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (email: string) => emailPattern.test(email.trim());
+const parseSkills = (skills: string) => (
+  skills
+    .split(/[,，]/)
+    .map((skill) => skill.trim())
+    .filter(Boolean)
+);
+
 export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [hiThreshold, setHiThreshold] = useState('70');
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
+  const [thresholdError, setThresholdError] = useState('');
   const [wechatEnabled, setWechatEnabled] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [apiBaseUrl, setApiBaseUrl] = useState('');
-  const [model, setModel] = useState(user?.model_preference || 'gpt-4');
+  const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
+  const [aiProviderLoading, setAiProviderLoading] = useState(false);
+  const [providerActionId, setProviderActionId] = useState<number | null>(null);
+  const [providerMessage, setProviderMessage] = useState('');
+  const [providerForm, setProviderForm] = useState<AIProviderForm>(() => createAIProviderForm(getRememberedAIProvider() || 'deepseek', user));
   const [personalForm, setPersonalForm] = useState<PersonalForm>({
     displayName: user?.username || '',
     email: user?.email || '',
@@ -190,8 +313,6 @@ export default function SettingsPage() {
     autoOpenCopilot: false,
   });
   const [personalSaved, setPersonalSaved] = useState(false);
-  const [profileSaved, setProfileSaved] = useState(false);
-  const [profileError, setProfileError] = useState('');
   const [thresholdSaved, setThresholdSaved] = useState(false);
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
@@ -204,8 +325,6 @@ export default function SettingsPage() {
   const [unlocked, setUnlocked] = useState(user?.role === 'admin');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [personForm, setPersonForm] = useState({ name: '', skills: '', region: '陕北', email: '' });
-  const [aiTestStatus, setAiTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
-  const [aiTestMessage, setAiTestMessage] = useState('');
   const [logs, setLogs] = useState<ActivityLog[]>([]);
 
   const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
@@ -222,17 +341,23 @@ export default function SettingsPage() {
     refreshPipeline();
     refreshPersonnel();
     loadPreferences();
+    loadAIProviders();
   }, []);
 
   useEffect(() => {
-    if (user?.model_preference) setModel(normalizeModelPreference(user.model_preference));
-    if (user?.api_base_url) setApiBaseUrl(user.api_base_url);
     if (user) {
       setPersonalForm((prev) => ({
         ...prev,
         displayName: prev.displayName || user.username,
         email: prev.email || user.email,
       }));
+      if (!getRememberedAIProvider()) {
+        setProviderForm((prev) => (
+          prev.provider === 'deepseek' && prev.default_model === 'deepseek-chat'
+            ? createAIProviderForm(inferProviderFromModel(user.model_preference), user)
+            : prev
+        ));
+      }
     }
     if (user?.role === 'admin') setUnlocked(true);
   }, [user]);
@@ -271,10 +396,15 @@ export default function SettingsPage() {
   };
 
   const saveThreshold = async () => {
+    if (emailEnabled && !isValidEmail(emailAddress)) {
+      setThresholdError('请输入正确邮箱地址，格式需包含 @ 和域名');
+      return;
+    }
+    setThresholdError('');
     await api.put('/settings/thresholds', {
       hi_threshold: Number(hiThreshold),
       email_enabled: emailEnabled,
-      email_address: emailEnabled ? emailAddress || null : null,
+      email_address: emailEnabled ? emailAddress.trim() || null : null,
     });
     setThresholdSaved(true);
     addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
@@ -313,48 +443,129 @@ export default function SettingsPage() {
     }
   };
 
-  const saveProfile = async () => {
-    const payload: Record<string, string> = {
-      model_preference: model,
-    };
-    if (apiKey.trim()) payload.api_key = apiKey.trim();
-    if (apiBaseUrl.trim()) payload.api_base_url = apiBaseUrl.trim();
-
+  const loadAIProviders = async () => {
+    setAiProviderLoading(true);
     try {
-      setProfileError('');
-      await api.put('/settings/profile', payload);
-      await fetchMe();
-      setApiKey('');
-      setProfileSaved(true);
-      addLog('保存AI设置', `默认模型: ${model}`);
-      setTimeout(() => setProfileSaved(false), 2200);
+      const { data } = await api.get<AIProviderConfig[]>('/settings/ai-providers');
+      setAiProviders(data);
+      setProviderForm((prev) => {
+        if (prev.api_key.trim()) return prev;
+        const rememberedProvider = getRememberedAIProvider() || prev.provider;
+        const savedProvider = data.find((item) => item.provider === rememberedProvider);
+        return savedProvider ? providerConfigToForm(savedProvider) : prev;
+      });
     } catch (error) {
       const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      setProfileError(detail || 'AI设置保存失败，请检查密钥供应商和模型是否匹配');
-      addLog('保存AI设置', detail || 'AI设置保存失败', 'error');
+      setProviderMessage(detail || 'AI供应商配置加载失败');
+      addLog('加载AI供应商', detail || 'AI供应商配置加载失败', 'error');
+    } finally {
+      setAiProviderLoading(false);
     }
   };
 
-  const testAiConnection = async () => {
-    setAiTestStatus('testing');
-    setAiTestMessage('');
+  const applyProviderTemplate = (provider: string) => {
+    const template = providerTemplateByKey(provider);
+    if (!template) return;
+    rememberAIProvider(template.provider);
+    setProviderForm({
+      provider: template.provider,
+      display_name: template.display_name,
+      api_key: '',
+      base_url: template.base_url,
+      api_style: template.api_style,
+      default_model: template.default_model,
+      model_options: template.model_options,
+      enabled: true,
+    });
+  };
+
+  const updateAIProviderForm = (value: AIProviderForm) => {
+    rememberAIProvider(value.provider);
+    setProviderForm(value);
+  };
+
+  const saveAIProvider = async () => {
+    if (!providerForm.provider.trim() || !providerForm.base_url.trim() || !providerForm.default_model.trim()) {
+      setProviderMessage('请填写供应商、API地址和默认模型');
+      return;
+    }
+    const customModel = providerForm.default_model.trim();
+    let modelOptions = providerForm.model_options.map((item) => item.trim()).filter(Boolean);
+    if (customModel && !modelOptions.includes(customModel)) {
+      modelOptions = [...modelOptions, customModel];
+    }
+    const payload = {
+      provider: providerForm.provider.trim().toLowerCase(),
+      display_name: providerForm.display_name.trim() || providerForm.provider.trim(),
+      api_key: providerForm.api_key.trim() || undefined,
+      base_url: providerForm.base_url.trim(),
+      api_style: providerForm.api_style || 'openai',
+      default_model: customModel,
+      model_options: modelOptions,
+      enabled: providerForm.enabled,
+    };
     try {
-      const { data } = await api.post('/ai/test-connection', {
-        api_key: apiKey || user?.api_key || '',
-        model: model,
-        base_url: user?.api_base_url || '',
+      setProviderMessage('');
+      await api.post('/settings/ai-providers', payload);
+      addLog('保存AI供应商', `${payload.display_name} 已保存`);
+      rememberAIProvider(payload.provider);
+      setProviderForm({
+        provider: payload.provider,
+        display_name: payload.display_name,
+        api_key: '',
+        base_url: payload.base_url,
+        api_style: payload.api_style,
+        default_model: payload.default_model,
+        model_options: payload.model_options,
+        enabled: payload.enabled,
       });
-      setAiTestStatus('success');
-      const message = data.success
-        ? `已连接 · ${data.model || model} (${data.latency_ms || 0}ms)`
-        : (data.message || 'AI服务连接失败');
-      setAiTestMessage(message);
-      addLog('测试AI连接', message);
-    } catch (e: any) {
-      setAiTestStatus('error');
-      const msg = e?.response?.data?.detail || 'AI服务请求失败，请确认已保存密钥、模型和网络可用';
-      setAiTestMessage(msg);
-      addLog('测试AI连接', msg, 'error');
+      await loadAIProviders();
+      window.dispatchEvent(new Event('ai-providers-updated'));
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setProviderMessage(detail || 'AI供应商保存失败');
+      addLog('保存AI供应商', detail || 'AI供应商保存失败', 'error');
+    }
+  };
+
+  const testAIProvider = async (provider: AIProviderConfig) => {
+    setProviderActionId(provider.id);
+    try {
+      const { data } = await api.post(`/settings/ai-providers/${provider.id}/test`, {
+        model: provider.default_model,
+      });
+      const message = data.status === 'success'
+        ? `${provider.display_name || provider.provider} 连接正常`
+        : (data.message || '连接失败');
+      addLog('测试AI供应商', message, data.status === 'success' ? 'success' : 'error');
+      await loadAIProviders();
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setProviderMessage(detail || 'AI供应商连接测试失败');
+      addLog('测试AI供应商', detail || 'AI供应商连接测试失败', 'error');
+    } finally {
+      setProviderActionId(null);
+    }
+  };
+
+  const deleteAIProvider = async (provider: AIProviderConfig) => {
+    setProviderActionId(provider.id);
+    try {
+      await api.delete(`/settings/ai-providers/${provider.id}`);
+      const label = provider.display_name || provider.provider;
+      setProviderMessage(`${label} 已删除`);
+      addLog('删除AI供应商', `${label} 配置已删除`);
+      if (providerForm.provider === provider.provider) {
+        setProviderForm(createAIProviderForm(getRememberedAIProvider() || 'deepseek', user));
+      }
+      await loadAIProviders();
+      window.dispatchEvent(new Event('ai-providers-updated'));
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setProviderMessage(detail || 'AI供应商删除失败');
+      addLog('删除AI供应商', detail || 'AI供应商删除失败', 'error');
+    } finally {
+      setProviderActionId(null);
     }
   };
 
@@ -393,15 +604,21 @@ export default function SettingsPage() {
   };
 
   const submitPerson = async () => {
-    if (!personForm.name || !personForm.email) {
+    const name = personForm.name.trim();
+    const email = personForm.email.trim();
+    if (!name || !email) {
       setPersonnelError('请填写姓名和邮箱');
       return;
     }
+    if (!isValidEmail(email)) {
+      setPersonnelError('请输入正确邮箱地址，格式需包含 @ 和域名');
+      return;
+    }
     const payload = {
-      name: personForm.name,
-      email: personForm.email,
+      name,
+      email,
       region: personForm.region,
-      skills: personForm.skills.split(',').map((s) => s.trim()).filter(Boolean),
+      skills: parseSkills(personForm.skills),
     };
     try {
       if (editingId) {
@@ -414,8 +631,9 @@ export default function SettingsPage() {
       resetPersonForm();
       setPersonnelError('');
       refreshPersonnel();
-    } catch {
-      setPersonnelError('人员保存失败，请检查姓名或邮箱是否重复');
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setPersonnelError(detail || '人员保存失败，请检查姓名或邮箱是否重复');
     }
   };
 
@@ -445,14 +663,14 @@ export default function SettingsPage() {
   }, [personnel, personnelFilter]);
 
   return (
-    <div className="h-full overflow-hidden bg-bg-primary p-5">
+    <div className="h-full overflow-hidden ops-page p-5">
       <div className="h-full flex flex-col gap-4">
-        <header className="shrink-0 border-b border-border-default pb-4">
+        <header className="ops-header">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs text-text-muted">配置中心</p>
-              <h2 className="mt-1 text-xl font-semibold text-text-primary">系统设置</h2>
-              <p className="mt-1 text-xs text-text-secondary">
+              <p className="ops-eyebrow">配置中心</p>
+              <h2 className="ops-title gradient-text">系统设置</h2>
+              <p className="ops-subtitle">
                 管理告警策略、数据接入、AI服务和维护人员，所有配置会同步到后端接口。
               </p>
             </div>
@@ -466,7 +684,7 @@ export default function SettingsPage() {
         </header>
 
         <div className="min-h-0 flex-1 grid grid-cols-1 gap-4 lg:grid-cols-[230px_minmax(0,1fr)]">
-          <aside className="rounded-lg border border-border-default bg-bg-card/70 p-2 lg:overflow-auto">
+          <aside className="ops-panel p-2 lg:overflow-auto">
             <nav className="grid gap-1">
               {sections.map((section) => (
                 <button
@@ -485,7 +703,7 @@ export default function SettingsPage() {
             </nav>
           </aside>
 
-          <main className="min-h-0 overflow-auto rounded-lg border border-border-default bg-bg-card/60">
+          <main className="min-h-0 overflow-auto ops-panel">
             {activeSection === 'overview' && (
               <OverviewSection
                 pipeline={pipeline}
@@ -510,18 +728,16 @@ export default function SettingsPage() {
             {activeSection === 'ai' && (
               <AISettingsSection
                 user={user}
-                apiKey={apiKey}
-                apiBaseUrl={apiBaseUrl}
-                model={model}
-                profileSaved={profileSaved}
-                profileError={profileError}
-                aiTestStatus={aiTestStatus}
-                aiTestMessage={aiTestMessage}
-                onApiKeyChange={setApiKey}
-                onApiBaseUrlChange={setApiBaseUrl}
-                onModelChange={setModel}
-                onSave={saveProfile}
-                onTestAi={testAiConnection}
+                providers={aiProviders}
+                loading={aiProviderLoading}
+                form={providerForm}
+                actionProviderId={providerActionId}
+                message={providerMessage}
+                onFormChange={updateAIProviderForm}
+                onApplyTemplate={applyProviderTemplate}
+                onSave={saveAIProvider}
+                onTest={testAIProvider}
+                onDelete={deleteAIProvider}
               />
             )}
             {activeSection === 'alerts' && (
@@ -531,9 +747,13 @@ export default function SettingsPage() {
                 emailAddress={emailAddress}
                 wechatEnabled={wechatEnabled}
                 thresholdSaved={thresholdSaved}
+                thresholdError={thresholdError}
                 onHiChange={setHiThreshold}
                 onEmailEnabledChange={setEmailEnabled}
-                onEmailAddressChange={setEmailAddress}
+                onEmailAddressChange={(value) => {
+                  setEmailAddress(value);
+                  if (!value || isValidEmail(value)) setThresholdError('');
+                }}
                 onWechatEnabledChange={setWechatEnabled}
                 onSave={saveThreshold}
               />
@@ -567,6 +787,9 @@ export default function SettingsPage() {
                 onEdit={startEditPerson}
                 onRemove={removePerson}
               />
+            )}
+            {activeSection === 'logs' && (
+              <LogsSection logs={logs} onBack={() => setActiveSection('overview')} />
             )}
           </main>
         </div>
@@ -686,6 +909,24 @@ function OverviewTile({ label, value, hint, tone }: { label: string; value: stri
       <p className="mt-3 text-xl font-semibold">{value}</p>
       <p className="mt-1 text-[10px] text-text-muted">{hint}</p>
     </div>
+  );
+}
+
+function LogsSection({ logs, onBack }: { logs: ActivityLog[]; onBack: () => void }) {
+  return (
+    <SectionShell
+      title="操作记录"
+      description="查看本次会话中的设置加载、保存、测试和人员维护反馈。"
+      actions={<button onClick={onBack} className="industrial-btn">返回总览</button>}
+    >
+      <div className="rounded-lg border border-border-default bg-navy-900/60">
+        {logs.length === 0 ? (
+          <div className="px-4 py-8 text-sm text-text-muted">暂无操作记录</div>
+        ) : (
+          logs.map((log) => <LogRow key={log.id} log={log} />)
+        )}
+      </div>
+    </SectionShell>
   );
 }
 
@@ -850,173 +1091,322 @@ function PersonalSettingsSection({
 
 function AISettingsSection({
   user,
-  apiKey,
-  apiBaseUrl,
-  model,
-  profileSaved,
-  profileError,
-  aiTestStatus,
-  aiTestMessage,
-  onApiKeyChange,
-  onApiBaseUrlChange,
-  onModelChange,
+  providers,
+  loading,
+  form,
+  actionProviderId,
+  message,
+  onFormChange,
+  onApplyTemplate,
   onSave,
-  onTestAi,
+  onTest,
+  onDelete,
 }: {
   user: CurrentUser | null;
-  apiKey: string;
-  apiBaseUrl: string;
-  model: string;
-  profileSaved: boolean;
-  profileError: string;
-  aiTestStatus: 'idle' | 'testing' | 'success' | 'error';
-  aiTestMessage: string;
-  onApiKeyChange: (value: string) => void;
-  onApiBaseUrlChange: (value: string) => void;
-  onModelChange: (value: string) => void;
+  providers: AIProviderConfig[];
+  loading: boolean;
+  form: AIProviderForm;
+  actionProviderId: number | null;
+  message: string;
+  onFormChange: (value: AIProviderForm) => void;
+  onApplyTemplate: (provider: string) => void;
   onSave: () => void;
-  onTestAi: () => void;
+  onTest: (provider: AIProviderConfig) => void;
+  onDelete: (provider: AIProviderConfig) => void;
 }) {
-  const hasTypedKey = Boolean(apiKey.trim());
-  const hasSavedKey = Boolean(user?.api_key);
-  const hasKey = hasSavedKey || hasTypedKey;
-  const hasUnsavedAIChanges = hasTypedKey || (user?.model_preference && normalizeModelPreference(user.model_preference) !== model);
-  const canTestAISettings = aiTestStatus !== 'testing' && hasKey;
-  const keyStatusTone = hasKey
-    ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
-    : 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow';
-  const keyStatusLabel = hasKey ? '密钥已配置' : '本地兜底';
-
-  const aiPresets = [
-    { name: '通义千问', model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-    { name: 'DeepSeek', model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
-    { name: '智谱GLM', model: 'glm-5-flash', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
-    { name: 'Kimi', model: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1' },
-    { name: 'Gemini', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-    { name: 'Ollama本地', model: 'ollama-local', baseUrl: 'http://localhost:11434/v1' },
-  ];
-
-  const handlePreset = (name: string) => {
-    const preset = aiPresets.find(p => p.name === name);
-    if (!preset) return;
-    onModelChange(preset.model);
-    onApiKeyChange('');
+  const currentModel = normalizeModelPreference(user?.model_preference);
+  const configuredCount = providers.filter((item) => item.enabled).length;
+  const currentProvider = providers.find((item) => item.base_url === user?.api_base_url && item.default_model === currentModel);
+  const modelOptions = form.model_options?.length ? form.model_options : [form.default_model].filter(Boolean);
+  const [modelOptionDraft, setModelOptionDraft] = useState('');
+  const [pendingDeleteProviderId, setPendingDeleteProviderId] = useState<number | null>(null);
+  const requiresKey = providerTemplateByKey(form.provider)?.requires_api_key ?? form.provider !== 'ollama';
+  const addModelOption = () => {
+    const value = modelOptionDraft.trim();
+    if (!value || form.model_options.includes(value)) return;
+    onFormChange({
+      ...form,
+      model_options: [...form.model_options, value],
+      default_model: form.default_model || value,
+    });
+    setModelOptionDraft('');
+  };
+  const removeModelOption = (model: string) => {
+    const nextOptions = form.model_options.filter((item) => item !== model);
+    onFormChange({
+      ...form,
+      model_options: nextOptions,
+      default_model: form.default_model === model ? (nextOptions[0] || '') : form.default_model,
+    });
   };
 
   return (
     <SectionShell
       title="AI设置"
-      description="配置智能总结、故障分析和运维助手实际调用的模型；保存后由后端按模型路由到对应供应商。"
-      actions={
-        <>
-          {profileSaved && <span className="text-xs text-accent-green">AI设置已保存</span>}
-          <button
-            onClick={onSave}
-            className="industrial-btn industrial-btn-primary"
-          >
-            保存AI设置
-          </button>
-        </>
-      }
+      description="按供应商分别保存API地址、密钥和默认模型；当前对话实际使用的供应商只在这里展示。"
+      actions={<button onClick={onSave} className="industrial-btn industrial-btn-primary">保存供应商</button>}
     >
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
           <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h4 className="text-sm font-medium">模型与密钥</h4>
-                <p className="mt-1 text-xs text-text-muted">密钥不在前端回显；输入新密钥后会通过后端个人配置接口保存。</p>
+                <h4 className="text-sm font-medium">供应商配置</h4>
+                <p className="mt-1 text-xs text-text-muted">每个供应商独立保存API地址、API Key和默认模型；密钥不会在前端回显。</p>
               </div>
-              <span className={`rounded-full border px-2 py-1 text-[10px] ${keyStatusTone}`}>
-                {keyStatusLabel}
+              <span className="rounded-full border border-accent-blue/30 bg-accent-blue/10 px-2 py-1 text-[10px] text-accent-blue">
+                {configuredCount} 个已启用
               </span>
             </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {aiProviderTemplates.map((template) => (
+                <button
+                  key={template.provider}
+                  onClick={() => onApplyTemplate(template.provider)}
+                  className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                    form.provider === template.provider
+                      ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue'
+                      : 'border-border-default bg-bg-card text-text-secondary hover:border-accent-blue/40'
+                  }`}
+                >
+                  {template.display_name}
+                </button>
+              ))}
+            </div>
+
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <label className="block">
+                <span className="text-xs text-text-muted">供应商标识</span>
+                <input
+                  value={form.provider}
+                  onChange={(e) => onFormChange({ ...form, provider: e.target.value })}
+                  placeholder="deepseek"
+                  className="industrial-input mt-1 w-full"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-text-muted">显示名称</span>
+                <input
+                  value={form.display_name}
+                  onChange={(e) => onFormChange({ ...form, display_name: e.target.value })}
+                  placeholder="DeepSeek"
+                  className="industrial-input mt-1 w-full"
+                />
+              </label>
               <label className="block">
                 <span className="text-xs text-text-muted">API Key</span>
                 <input
                   type="password"
                   autoComplete="off"
-                  placeholder={user?.api_key ? '已配置，输入新密钥可替换' : '请输入AI服务密钥'}
-                  value={apiKey}
-                  onChange={(e) => onApiKeyChange(e.target.value)}
+                  placeholder={requiresKey ? '请输入该供应商API Key；已配置时留空不替换' : '本地模型可留空'}
+                  value={form.api_key}
+                  onChange={(e) => onFormChange({ ...form, api_key: e.target.value })}
                   className="industrial-input mt-1 w-full"
                 />
               </label>
               <label className="block">
                 <span className="text-xs text-text-muted">默认模型</span>
                 <input
-                  type="text"
-                  placeholder="qwen-plus"
-                  value={model}
-                  onChange={(e) => onModelChange(e.target.value)}
+                  list="default-model-options"
+                  value={form.default_model}
+                  onChange={(e) => onFormChange({ ...form, default_model: e.target.value })}
+                  placeholder="输入模型名或从列表选择"
                   className="industrial-input mt-1 w-full"
                 />
+                <datalist id="default-model-options">
+                  {modelOptions.map((option) => <option key={option} value={option} />)}
+                </datalist>
+                {!modelOptions.includes(form.default_model) && form.default_model.trim() && (
+                  <p className="mt-1 text-[10px] text-accent-yellow">
+                    该模型不在当前供应商常用模型中，保存后自动加入列表。
+                  </p>
+                )}
               </label>
-            </div>
-            <div className="mt-4">
-              <label className="block">
-                <span className="text-xs text-text-muted">自定义API地址 (可选，自建代理或Ollama时填写)</span>
+              <label className="block lg:col-span-2">
+                <span className="text-xs text-text-muted">API地址</span>
                 <input
-                  type="text"
-                  placeholder={user?.api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1'}
-                  value={apiBaseUrl}
-                  onChange={(e) => onApiBaseUrlChange(e.target.value)}
+                  value={form.base_url}
+                  onChange={(e) => onFormChange({ ...form, base_url: e.target.value })}
+                  placeholder="https://api.deepseek.com/v1"
                   className="industrial-input mt-1 w-full text-xs"
                 />
               </label>
             </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              <InfoLine label="当前账号" value={user?.username || '-'} />
-              <InfoLine label="实际模型ID" value={model || 'qwen-plus'} />
+
+            <div className="mt-4 rounded-md border border-border-default bg-bg-card px-3 py-2">
+              <p className="text-[10px] text-text-muted">该供应商常用模型</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {modelOptions.map((option) => (
+                  <span key={option} className="inline-flex items-center gap-1 rounded border border-border-default px-2 py-1 text-[10px] text-text-secondary">
+                    <button
+                      onClick={() => onFormChange({ ...form, default_model: option })}
+                      className="hover:text-accent-blue"
+                    >
+                      {option}
+                    </button>
+                    <button
+                      onClick={() => removeModelOption(option)}
+                      className="text-text-muted hover:text-accent-red"
+                      title="删除模型"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {modelOptions.length === 0 && <span className="text-[10px] text-text-muted">暂无预设模型</span>}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={modelOptionDraft}
+                  onChange={(e) => setModelOptionDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addModelOption();
+                    }
+                  }}
+                  placeholder="新增模型ID"
+                  className="industrial-input flex-1 text-xs"
+                />
+                <button onClick={addModelOption} className="industrial-btn text-xs">新增</button>
+              </div>
             </div>
-            <div className="mt-3 rounded-md border border-border-default bg-bg-card px-3 py-2 text-xs text-text-secondary">
-              {hasKey
-                ? `使用模型 ${model || 'qwen-plus'}，调用远程模型可能按供应商规则计费。`
-                : '当前未配置AI服务密钥，后端不会调用远程收费模型，使用本地兜底结果，不产生AI调用费用。'}
+
+            <label className="mt-4 flex items-center gap-2 text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => onFormChange({ ...form, enabled: e.target.checked })}
+              />
+              启用该供应商配置
+            </label>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button onClick={onSave} className="industrial-btn industrial-btn-primary">
+                保存供应商
+              </button>
             </div>
-            {profileError && (
-              <div className="mt-3 rounded-md border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
-                {profileError}
+
+            {message && (
+              <div className="mt-3 rounded-md border border-border-default bg-bg-card px-3 py-2 text-xs text-text-secondary">
+                {message}
               </div>
             )}
           </div>
-
         </div>
 
         <div className="space-y-5">
           <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
-            <h4 className="text-sm font-medium">AI服务检查</h4>
-            <p className="mt-1 text-xs text-text-muted">
-              {hasUnsavedAIChanges ? '当前模型或密钥尚未保存，请先保存AI设置再测试。' : '测试当前已保存的密钥供应商和模型是否匹配并可用。'}
-            </p>
-            <button
-              onClick={onTestAi}
-              className={`industrial-btn mt-4 w-full ${!canTestAISettings ? 'cursor-not-allowed opacity-50' : ''}`}
-              disabled={!canTestAISettings}
-            >
-              {aiTestStatus === 'testing' ? '测试中...' : '测试AI连接'}
-            </button>
-            {aiTestStatus !== 'idle' && (
-              <p className={`mt-3 text-xs ${aiTestStatus === 'success' ? 'text-accent-green' : aiTestStatus === 'error' ? 'text-accent-red' : 'text-accent-blue'}`}>
-                {aiTestMessage || (aiTestStatus === 'success' ? 'AI服务响应正常' : aiTestStatus === 'error' ? 'AI服务请求失败' : '正在等待AI响应')}
-              </p>
-            )}
+            <h4 className="text-sm font-medium">当前AI对话配置</h4>
+            <div className="mt-4 grid gap-3">
+              <InfoLine label="当前账号" value={user?.username || '-'} />
+              <InfoLine label="供应商" value={currentProvider?.display_name || user?.api_provider || '-'} />
+              <InfoLine label="模型" value={currentModel} />
+              <InfoLine label="API地址" value={user?.api_base_url || '-'} />
+              <InfoLine label="密钥状态" value={user?.api_key ? '已配置' : '未配置'} />
+            </div>
           </div>
 
           <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
-            <h4 className="text-sm font-medium">快捷预设</h4>
-            <div className="mt-4 space-y-2">
-              {aiPresets.filter(p => p.name !== '自定义').map(p => (
-                <button
-                  key={p.name}
-                  onClick={() => handlePreset(p.name)}
-                  className="w-full text-left rounded-md border border-border-default bg-bg-card px-3 py-2 hover:border-accent-blue/50 transition-colors"
-                >
-                  <p className="text-xs font-medium text-text-primary">{p.name}</p>
-                  <p className="text-[10px] text-text-muted mt-0.5">{p.model} · {p.baseUrl}</p>
-                </button>
-              ))}
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium">供应商列表</h4>
+              {loading && <span className="text-[10px] text-accent-blue">加载中...</span>}
+            </div>
+            <div className="mt-4 space-y-3">
+              {providers.length === 0 && !loading && (
+                <div className="rounded-md border border-border-default bg-bg-card px-3 py-3 text-xs text-text-muted">
+                  暂无AI供应商配置，请先保存一条配置。
+                </div>
+              )}
+              {providers.map((provider) => {
+                const active = provider.id === currentProvider?.id || (
+                  provider.base_url === user?.api_base_url && provider.default_model === currentModel
+                );
+                const testing = actionProviderId === provider.id;
+                const pendingDelete = pendingDeleteProviderId === provider.id;
+                const statusLabel = provider.last_test_status === 'success'
+                  ? '可用'
+                  : provider.last_test_status === 'error'
+                    ? '失败'
+                    : '未测试';
+                const statusToneClass = provider.last_test_status === 'success'
+                  ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+                  : provider.last_test_status === 'error'
+                    ? 'border-accent-red/30 bg-accent-red/10 text-accent-red'
+                    : 'border-border-default bg-bg-card text-text-muted';
+                const badgeClass = provider.last_test_status === 'error'
+                  ? statusToneClass
+                  : active
+                    ? 'border-accent-blue/40 text-accent-blue'
+                    : statusToneClass;
+                return (
+                  <div key={provider.id} className={`rounded-md border p-3 ${active ? 'border-accent-blue/50 bg-accent-blue/10' : 'border-border-default bg-bg-card'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium text-text-primary">{provider.display_name || provider.provider}</p>
+                        <p className="mt-1 truncate text-[10px] text-text-muted">{provider.default_model || '-'} · {provider.base_url}</p>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${badgeClass}`}>
+                        {active ? `当前 · ${statusLabel}` : statusLabel}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-text-muted">
+                      <span>密钥：{provider.has_api_key ? '已保存' : provider.provider === 'ollama' ? '可留空' : '未配置'}</span>
+                      <span>状态：{provider.enabled ? '启用' : '停用'}</span>
+                    </div>
+                    {provider.last_test_message && (
+                      <div className={`mt-2 max-h-24 overflow-auto rounded border px-2 py-1.5 text-[10px] leading-5 ${
+                        provider.last_test_status === 'error'
+                          ? 'border-accent-red/20 bg-accent-red/5 text-accent-red/90'
+                          : 'border-border-default bg-bg-secondary text-text-muted'
+                      }`}>
+                        {provider.last_test_message}
+                      </div>
+                    )}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button disabled={testing} onClick={() => onTest(provider)} className="industrial-btn text-xs">
+                        {testing ? '处理中...' : '测试'}
+                      </button>
+                      <button
+                        disabled={testing}
+                        onClick={() => setPendingDeleteProviderId(provider.id)}
+                        className="industrial-btn text-xs text-accent-red hover:border-accent-red/50 disabled:opacity-40"
+                      >
+                        删除
+                      </button>
+                    </div>
+                    {pendingDelete && (
+                      <div className="mt-3 rounded-md border border-accent-red/30 bg-accent-red/10 px-3 py-2">
+                        <p className="text-[11px] font-medium text-accent-red">确认删除该供应商配置？</p>
+                        <p className="mt-1 line-clamp-2 text-[10px] text-text-secondary">
+                          {provider.display_name || provider.provider} · {provider.default_model || '-'}
+                        </p>
+                        <div className="mt-3 flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteProviderId(null)}
+                            className="rounded border border-border-default px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            disabled={testing}
+                            onClick={() => {
+                              onDelete(provider);
+                              setPendingDeleteProviderId(null);
+                            }}
+                            className="rounded border border-accent-red/40 bg-accent-red/15 px-3 py-1.5 text-[11px] text-accent-red hover:bg-accent-red/20 disabled:opacity-40"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1090,6 +1480,7 @@ function AlertSection({
   emailAddress,
   wechatEnabled,
   thresholdSaved,
+  thresholdError,
   onHiChange,
   onEmailEnabledChange,
   onEmailAddressChange,
@@ -1101,6 +1492,7 @@ function AlertSection({
   emailAddress: string;
   wechatEnabled: boolean;
   thresholdSaved: boolean;
+  thresholdError: string;
   onHiChange: (value: string) => void;
   onEmailEnabledChange: (value: boolean) => void;
   onEmailAddressChange: (value: string) => void;
@@ -1169,12 +1561,19 @@ function AlertSection({
               <input type="checkbox" checked={emailEnabled} onChange={(e) => onEmailEnabledChange(e.target.checked)} />
             </label>
             {emailEnabled && (
-              <input
-                value={emailAddress}
-                onChange={(e) => onEmailAddressChange(e.target.value)}
-                placeholder="ops@example.com"
-                className="industrial-input w-full"
-              />
+              <>
+                <input
+                  type="email"
+                  inputMode="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                  value={emailAddress}
+                  onChange={(e) => onEmailAddressChange(e.target.value)}
+                  placeholder="ops@example.com"
+                  aria-invalid={Boolean(thresholdError)}
+                  className={`industrial-input w-full ${thresholdError ? 'border-accent-red focus:border-accent-red' : ''}`}
+                />
+                {thresholdError && <p className="text-xs text-accent-red">{thresholdError}</p>}
+              </>
             )}
           </div>
         </div>
@@ -1227,6 +1626,20 @@ function PipelineSection({
             <p className={`mt-3 text-xs ${source.real_data_available ? 'text-accent-green' : 'text-accent-yellow'}`}>
               {source.note}
             </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <button type="button" onClick={() => onTest(source.type)} className="industrial-btn text-xs">
+                测试连接
+              </button>
+              {testResults[source.type] && (
+                <span className={`rounded-full border px-2 py-1 text-[10px] ${
+                  testResults[source.type] === 'success'
+                    ? 'border-accent-green/40 bg-accent-green/10 text-accent-green'
+                    : 'border-accent-red/40 bg-accent-red/10 text-accent-red'
+                }`}>
+                  {testResults[source.type] === 'success' ? '测试通过' : '测试失败'}
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -1274,6 +1687,9 @@ function PersonnelSection({
   onEdit: (person: Personnel) => void;
   onRemove: (person: Personnel) => void;
 }) {
+  const emailInvalid = Boolean(personForm.email) && !isValidEmail(personForm.email);
+  const submitDisabled = !personForm.name.trim() || !personForm.email.trim() || emailInvalid;
+
   return (
     <SectionShell
       title="人员管理"
@@ -1310,7 +1726,19 @@ function PersonnelSection({
             <h4 className="text-sm font-medium">{editingId ? '编辑人员' : '新增人员'}</h4>
             <div className="mt-4 space-y-3">
               <input placeholder="姓名" value={personForm.name} onChange={(e) => onFormChange({ ...personForm, name: e.target.value })} className="industrial-input w-full" />
-              <input placeholder="邮箱" value={personForm.email} onChange={(e) => onFormChange({ ...personForm, email: e.target.value })} className="industrial-input w-full" />
+              <div>
+                <input
+                  type="email"
+                  inputMode="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                  placeholder="邮箱"
+                  value={personForm.email}
+                  onChange={(e) => onFormChange({ ...personForm, email: e.target.value })}
+                  aria-invalid={emailInvalid}
+                  className={`industrial-input w-full ${emailInvalid ? 'border-accent-red focus:border-accent-red' : ''}`}
+                />
+                {emailInvalid && <p className="mt-1 text-[11px] text-accent-red">请输入正确邮箱地址，格式需包含 @ 和域名</p>}
+              </div>
               <input placeholder="技能，逗号分隔" value={personForm.skills} onChange={(e) => onFormChange({ ...personForm, skills: e.target.value })} className="industrial-input w-full" />
               <select value={personForm.region} onChange={(e) => onFormChange({ ...personForm, region: e.target.value })} className="industrial-input w-full">
                 <option>陕北</option>
@@ -1319,16 +1747,23 @@ function PersonnelSection({
               </select>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={onSubmit} className="industrial-btn industrial-btn-primary flex-1">{editingId ? '保存修改' : '添加人员'}</button>
+              <button
+                onClick={onSubmit}
+                disabled={submitDisabled}
+                className="industrial-btn industrial-btn-primary flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {editingId ? '保存修改' : '添加人员'}
+              </button>
               {editingId && <button onClick={onCancelEdit} className="industrial-btn">取消</button>}
             </div>
             {personnelError && <p className="mt-3 text-xs text-accent-red">{personnelError}</p>}
           </div>
 
           <div className="min-w-0 rounded-lg border border-border-default bg-navy-900/60">
-            <div className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
+            <div className="grid min-w-[820px] grid-cols-[90px_minmax(140px,1fr)_200px_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
               <span>姓名</span>
               <span>技能</span>
+              <span>邮箱</span>
               <span>区域</span>
               <span>负载</span>
               <span className="text-right">操作</span>
@@ -1340,12 +1775,20 @@ function PersonnelSection({
                 <p className="p-4 text-sm text-text-muted">暂无人员</p>
               ) : (
                 personnel.map((person) => (
-                  <div key={person.id} className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs last:border-0">
+                  <div key={person.id} className="grid min-w-[820px] grid-cols-[90px_minmax(140px,1fr)_200px_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs last:border-0">
                     <span className="font-medium text-text-primary">{person.name}</span>
                     <span className="flex flex-wrap gap-1">
                       {person.skills.map((skill) => (
                         <span key={skill} className="rounded bg-accent-blue/10 px-1.5 py-0.5 text-[10px] text-accent-blue">{skill}</span>
                       ))}
+                    </span>
+                    <span className="min-w-0" title={person.email}>
+                      <span className={`block truncate font-mono text-[11px] ${isValidEmail(person.email) ? 'text-text-secondary' : 'text-accent-red'}`}>
+                        {person.email || '-'}
+                      </span>
+                      {person.email && !isValidEmail(person.email) && (
+                        <span className="mt-0.5 block text-[10px] text-accent-red">格式异常</span>
+                      )}
                     </span>
                     <span className="text-text-secondary">{person.region}</span>
                     <span className={loadTone(person.load)}>负载 {person.load}/5</span>
