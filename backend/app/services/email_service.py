@@ -26,8 +26,13 @@ def _smtp_settings():
 
 def _plain_email(value: str, field_name: str) -> str:
     """Return an ASCII SMTP envelope address from a header-like value."""
+    if "\r" in value or "\n" in value:
+        raise EmailConfigError(f"{field_name} must not contain line breaks")
+
     _, address = parseaddr(value)
-    address = address or value
+    address = (address or value).strip()
+    if "\r" in address or "\n" in address:
+        raise EmailConfigError(f"{field_name} must not contain line breaks")
     try:
         address.encode("ascii")
     except UnicodeEncodeError as exc:
@@ -35,6 +40,13 @@ def _plain_email(value: str, field_name: str) -> str:
     if "@" not in address:
         raise EmailConfigError(f"{field_name} must be a valid email address")
     return address
+
+
+def _single_line_header(value: str, field_name: str) -> str:
+    text = " ".join(str(value or "").splitlines()).strip()
+    if not text:
+        raise EmailConfigError(f"{field_name} must not be empty")
+    return text
 
 
 async def send_email(to_email: str, subject: str, body: str, html_body: str | None = None) -> None:
@@ -50,10 +62,7 @@ async def send_email(to_email: str, subject: str, body: str, html_body: str | No
     message = EmailMessage()
     message["From"] = from_email
     message["To"] = recipient
-    # Use plain string — EmailMessage auto-encodes non-ASCII per RFC 2047.
-    # Do NOT wrap in Header(...).encode() — for long CJK subjects that
-    # produces folded header strings containing \r\n, which are rejected.
-    message["Subject"] = subject
+    message["Subject"] = _single_line_header(subject, "subject")
     message.set_content(body, charset="utf-8")
     if html_body:
         message.add_alternative(html_body, subtype="html", charset="utf-8")

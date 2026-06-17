@@ -963,7 +963,6 @@ async def send_workorder_email(
             hi_threshold=70.0,
             email_enabled=True,
             email_address=user.email,
-            wechat_enabled=False,
         )
         db.add(config)
         await db.commit()
