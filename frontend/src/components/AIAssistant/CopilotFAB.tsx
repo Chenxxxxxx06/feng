@@ -10,9 +10,28 @@ import type { Message } from '../../services/copilotStore';
 
 const PANEL_W = 560;
 const PANEL_H = 560;
+const PANEL_MIN_W = 420;
+const PANEL_MIN_H = 420;
+const PANEL_MAX_W = 920;
+const PANEL_MAX_H = 820;
 const FAB_W = 56;
 const FAB_H = 56;
 const EDGE_GAP = 24;
+const PANEL_SIZE_STORAGE_KEY = 'copilot.panelSize.v1';
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
+
+function loadPanelSize() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PANEL_SIZE_STORAGE_KEY) || '{}') as { width?: number; height?: number };
+    return {
+      width: clamp(Number(parsed.width) || PANEL_W, PANEL_MIN_W, PANEL_MAX_W),
+      height: clamp(Number(parsed.height) || PANEL_H, PANEL_MIN_H, PANEL_MAX_H),
+    };
+  } catch {
+    return { width: PANEL_W, height: PANEL_H };
+  }
+}
 
 export interface PageContext {
   turbine_id?: number;
@@ -223,7 +242,9 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const chatRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+  const isResizing = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const resizeStart = useRef({ x: 0, y: 0, width: PANEL_W, height: PANEL_H });
   const initialSent = useRef(false);
   const fabRef = useRef<HTMLButtonElement>(null);
   const fabDragging = useRef(false);
@@ -288,6 +309,8 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   const [modelDraft, setModelDraft] = useState('');
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null);
   const [selectedContextIds, setSelectedContextIds] = useState<string[]>(loadSelectedDataContexts);
+  const [panelSize, setPanelSize] = useState(loadPanelSize);
+  const panelSizeRef = useRef(panelSize);
   const currentSession = sessions.find((session) => session.id === currentSessionId) || sessions[0];
   const pendingDeleteSession = pendingDeleteSessionId
     ? sessions.find((session) => session.id === pendingDeleteSessionId)
@@ -358,6 +381,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
 
   // Keep fabPosRef in sync with store
   useEffect(() => { fabPosRef.current = fabPos; }, [fabPos]);
+  useEffect(() => { panelSizeRef.current = panelSize; }, [panelSize]);
 
   useEffect(() => {
     setModelDraft(currentSession?.model || selectedProvider?.default_model || selectedProvider?.model_options?.[0] || '');
@@ -402,8 +426,9 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   // Initialize panel position to bottom-right when opened
   useEffect(() => {
     if (open) {
-      const x = Math.max(0, window.innerWidth - PANEL_W - EDGE_GAP);
-      const y = Math.max(0, window.innerHeight - PANEL_H - EDGE_GAP);
+      const size = panelSizeRef.current;
+      const x = Math.max(0, window.innerWidth - size.width - EDGE_GAP);
+      const y = Math.max(0, window.innerHeight - size.height - EDGE_GAP);
       setPanelPos({ x, y });
     }
   }, [open, setPanelPos]);
@@ -421,9 +446,10 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   // Clamp panel position on window resize
   useEffect(() => {
     const handleResize = () => {
+      const size = panelSizeRef.current;
       setPanelPos({
-        x: Math.max(0, Math.min(panelPos.x, window.innerWidth - PANEL_W)),
-        y: Math.max(0, Math.min(panelPos.y, window.innerHeight - PANEL_H)),
+        x: Math.max(0, Math.min(panelPos.x, window.innerWidth - size.width)),
+        y: Math.max(0, Math.min(panelPos.y, window.innerHeight - size.height)),
       });
     };
     window.addEventListener('resize', handleResize);
@@ -465,8 +491,9 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   useEffect(() => {
     const onDragMove = (e: MouseEvent) => {
       if (!isDragging.current) return;
-      const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, window.innerWidth - PANEL_W));
-      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - PANEL_H));
+      const size = panelSizeRef.current;
+      const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, window.innerWidth - size.width));
+      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - size.height));
       setPanelPos({ x, y });
     };
     const onDragEnd = () => {
@@ -479,6 +506,46 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       document.removeEventListener('mouseup', onDragEnd);
     };
   }, [setPanelPos]);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    isResizing.current = true;
+    resizeStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: panelSize.width,
+      height: panelSize.height,
+    };
+    document.body.style.cursor = 'nwse-resize';
+    document.body.style.userSelect = 'none';
+    e.stopPropagation();
+    e.preventDefault();
+  }, [panelSize.height, panelSize.width]);
+
+  useEffect(() => {
+    const onResizeMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const maxWidth = Math.min(PANEL_MAX_W, window.innerWidth - panelPos.x);
+      const maxHeight = Math.min(PANEL_MAX_H, window.innerHeight - panelPos.y);
+      const next = {
+        width: clamp(resizeStart.current.width + e.clientX - resizeStart.current.x, PANEL_MIN_W, Math.max(PANEL_MIN_W, maxWidth)),
+        height: clamp(resizeStart.current.height + e.clientY - resizeStart.current.y, PANEL_MIN_H, Math.max(PANEL_MIN_H, maxHeight)),
+      };
+      panelSizeRef.current = next;
+      setPanelSize(next);
+      localStorage.setItem(PANEL_SIZE_STORAGE_KEY, JSON.stringify(next));
+    };
+    const onResizeEnd = () => {
+      isResizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeEnd);
+    return () => {
+      document.removeEventListener('mousemove', onResizeMove);
+      document.removeEventListener('mouseup', onResizeEnd);
+    };
+  }, [panelPos.x, panelPos.y]);
 
   // FAB drag handlers — direct DOM manipulation for zero-lag dragging
   const onFabMouseDown = useCallback((e: React.MouseEvent) => {
@@ -762,7 +829,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           ref={panelRef}
           data-copilot-ignore
           className="fixed z-50 shadow-2xl flex flex-col overflow-hidden ops-panel rounded-2xl"
-          style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W, height: PANEL_H }}
+          style={{ left: panelPos.x, top: panelPos.y, width: panelSize.width, height: panelSize.height }}
         >
           {/* Header — drag handle */}
           <div
@@ -1004,6 +1071,15 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           </div>
             </div>
           </div>
+          <button
+            type="button"
+            aria-label="调整AI助手窗口大小"
+            title="拖动调整窗口大小"
+            onMouseDown={onResizeStart}
+            className="absolute bottom-0 right-0 z-10 h-5 w-5 cursor-nwse-resize rounded-tl-md border-l border-t border-border-default bg-bg-secondary/90 text-[10px] text-text-muted hover:text-accent-blue"
+          >
+            <span className="absolute bottom-1 right-1 h-2.5 w-2.5 border-b border-r border-current" />
+          </button>
         </div>
       )}
     </>
