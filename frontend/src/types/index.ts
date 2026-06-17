@@ -205,8 +205,10 @@ export interface WorkOrder {
   title: string;
   description: string | null;
   status: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  fault_type?: string | null;
+  due_date?: string | null;
   assignee: string | null;
-  assignee_id?: number | null;
   assignee_email?: string | null;
   cost_estimate: number;
   cost_actual: number | null;
@@ -215,9 +217,6 @@ export interface WorkOrder {
   completed_at: string | null;
   cancelled_at?: string | null;
   deleted_at?: string | null;
-  due_date?: string | null;
-  fault_type?: string | null;
-  priority?: string;
   downtime_hours?: number | null;
   notification_sent_at?: string | null;
 }
@@ -225,4 +224,49 @@ export interface WorkOrder {
 export interface AISummary {
   conclusions: string[];
   suggestions: string[];
+  status?: 'success' | 'error';
+  error_code?: string | null;
+  error_message?: string | null;
+  model_status?: {
+    provider?: string;
+    api_provider?: string;
+    model?: string;
+    mode?: string;
+    has_api_key?: boolean;
+  } | null;
+  warnings?: string[];
+}
+// ── Drone Scheduler Types ──
+
+export interface Drone {
+  id: number;
+  name: string;
+  status: 'idle' | 'flying' | 'returning' | 'charging';
+  battery: number;
+  range: number;
+  speed: number;
+  color: string;
+  assignedTurbines: number[];
+  completedTurbines: number[];
+  currentPosition: { lat: number; lng: number } | null;
+  path: { lat: number; lng: number }[];
+  progress: number;
+}
+
+export interface DroneFleetConfig {
+  count: number;
+  range: number;
+  speed: number;
+}
+
+export interface DroneSimState {
+  fleet: Drone[];
+  config: DroneFleetConfig;
+  mode: 'tsp' | 'vrp';
+  activeFarm: string | null;
+  isRunning: boolean;
+  speedMultiplier: number;
+  totalTurbines: number;
+  completedTurbines: number;
+  elapsedTime: number;
 }

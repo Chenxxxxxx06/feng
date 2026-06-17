@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
-from openai import OpenAI
+from openai import OpenAI, DefaultHttpxClient
 
 from app.config import get_settings
 
@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 
 # Load from environment
 settings = get_settings()
+
+# Patterns that indicate a placeholder / unconfigured API key
+_PLACEHOLDER_PATTERNS = (
+    "your-", "change-me", "changeme", "change_me", "replace-me",
+    "sk-your-", "your_", "placeholder", "xxxxxx", "test-key",
+    "your-dashscope", "your-openai", "your-deepseek",
+)
 
 QWEN_CONFIG = {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -57,6 +64,8 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
     "qwen-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-plus", "qwen-plus", QWEN_CONFIG["base_url"]),
     "qwen-turbo": AIModelConfig("通义千问 DashScope", "通义千问 qwen-turbo", "qwen-turbo", QWEN_CONFIG["base_url"]),
     "qwen3.6-flash": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.6-flash", "qwen3.6-flash", QWEN_CONFIG["base_url"]),
+    "qwen3.7-max-2026-05-17": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-max", "qwen3.7-max-2026-05-17", QWEN_CONFIG["base_url"]),
+    "qwen3.7-plus-2026-05-26": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-plus", "qwen3.7-plus-2026-05-26", QWEN_CONFIG["base_url"]),
     "qwen-vl-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-vl-plus", "qwen-vl-plus", QWEN_CONFIG["base_url"]),
     "deepseek-v4-flash": AIModelConfig("DeepSeek", "DeepSeek deepseek-v4-flash", "deepseek-v4-flash", "https://api.deepseek.com"),
     "deepseek-chat": AIModelConfig("DeepSeek", "DeepSeek deepseek-chat", "deepseek-chat", "https://api.deepseek.com"),
@@ -77,6 +86,14 @@ MODEL_ALIASES = {
     "qwen3.5-flash": "qwen3.6-flash",
     "deepseek-v3": "deepseek-chat",
 }
+
+
+def _is_placeholder_key(key: Optional[str]) -> bool:
+    """Return True if the key looks like an unconfigured placeholder."""
+    if not key or not key.strip():
+        return True
+    lower = key.strip().lower()
+    return any(pat in lower for pat in _PLACEHOLDER_PATTERNS)
 
 
 def normalize_model_preference(model: Optional[str]) -> str:
@@ -147,9 +164,22 @@ def _ensure_remote_available(config: AIModelConfig, api_key: Optional[str], api_
         raise ValueError(f"API key belongs to {api_provider}, but selected model requires {config.provider}")
 
 
-def get_client(api_key: Optional[str], base_url: str) -> OpenAI:
-    """Create an OpenAI-compatible client for the selected provider."""
-    return OpenAI(base_url=base_url, api_key=api_key or "ollama")
+def get_client(api_key: Optional[str], base_url: str, timeout: float = 30.0) -> OpenAI:
+    """Create an OpenAI-compatible client for the selected provider.
+
+    Uses a bounded timeout (default 30s) and disables retries. Chat requests
+    may include tool planning plus answer generation, so the threshold needs
+    enough room for provider-side latency while still failing predictably.
+    """
+    http_client = DefaultHttpxClient(
+        timeout=httpx.Timeout(timeout, connect=10.0),
+    )
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key or "ollama",
+        http_client=http_client,
+        max_retries=0,
+    )
 
 
 def chat(
@@ -267,6 +297,52 @@ def _gemini_chat(
     return text
 
 
+def _build_copilot_messages(
+    messages: list[dict],
+    page_context: dict,
+    knowledge_results: Optional[list[str]] = None,
+    screenshot_description: Optional[str] = None,
+) -> list[dict]:
+    screenshot_section = ""
+    if screenshot_description:
+        screenshot_section = (
+            f"\n当前页面截图内容（由视觉模型分析）:\n"
+            f"{screenshot_description}\n"
+        )
+    structured_context = page_context.get("context_bundle")
+    structured_context_section = ""
+    if structured_context:
+        structured_context_section = (
+            "\n结构化上下文包（后端只读白名单工具生成，优先级高于页面零散字段）:\n"
+            f"{json.dumps(structured_context, ensure_ascii=False, default=str)[:7000]}\n"
+        )
+
+    task_prompt = (
+        f"当前页面上下文:\n"
+        f"- 页面: {page_context.get('page_type', 'unknown')}\n"
+        f"- 风机总数: {page_context.get('total_turbines', 0)}\n"
+        f"- 预警风机: {page_context.get('warning_count', 0)}\n"
+        f"- 故障风机: {page_context.get('fault_count', 0)}\n"
+        f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
+        f"{structured_context_section}"
+        f"{screenshot_section}"
+        f"\n"
+        f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
+        f"\n"
+        f"规则:\n"
+        f"1. 基于上下文给出准确回答\n"
+        f"2. 优先使用结构化上下文包中的结果；说明数据来源时使用业务名称，不要暴露内部工具函数名\n"
+        f'3. 涉及安全决策时提醒"建议人工复核"\n'
+        f"4. 回复简洁, 关键数据用数字\n"
+        f"5. 如果上下文信息不足, 诚实说明\n"
+        f"6. 如果有页面截图描述, 可作为页面状态补充，但不得覆盖结构化数据"
+    )
+    return [
+        {"role": "system", "content": _build_system_prompt(task_prompt)},
+        *messages,
+    ]
+
+
 def summarize_page(
     page_type: str,
     page_data: dict,
@@ -274,6 +350,7 @@ def summarize_page(
     api_key: Optional[str] = None,
     api_provider: Optional[str] = None,
     base_url: Optional[str] = None,
+    raise_on_error: bool = False,
 ) -> dict:
     """Generate AI summary for a page.
 
@@ -298,8 +375,8 @@ def summarize_page(
         "根据当前页面数据, 生成简洁的分析报告。\n\n"
         "输出格式必须是JSON:\n"
         "{\n"
-        '  "conclusions": ["3条关键结论, 每条25字以内"],\n'
-        '  "suggestions": ["2条可执行建议, 每条30字以内"]\n'
+        '  "conclusions": ["4到5条关键结论, 每条60字以内"],\n'
+        '  "suggestions": ["3到4条可执行建议, 每条60字以内"]\n'
         "}\n"
         "只输出JSON, 不要其他文字。"
     )
@@ -307,17 +384,28 @@ def summarize_page(
     user_prompt = f"""页面类型: {page_type}
 当前数据: {json.dumps(page_data, ensure_ascii=False)}
 
-请分析页面数据, 输出3条关键结论和2条建议。"""
+请分析页面数据, 输出4到5条关键结论和3到4条建议。"""
 
     # Use system-level API key + provider as fallback when user hasn't configured
     effective_key = api_key or settings.DASHSCOPE_API_KEY or None
     effective_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if effective_key else None)
 
+    # Short-circuit: placeholder key → skip network call entirely.
+    # Otherwise a fake key causes the OpenAI SDK to retry connection/auth
+    # failures for 15+ seconds before falling back.
+    if _is_placeholder_key(effective_key) or _is_placeholder_key(api_key):
+        logger.info("AI summary: API key is a placeholder, using local fallback immediately")
+        if raise_on_error:
+            raise ValueError("API key not configured")
+        fallback = fallback_summary(page_type, page_data)
+        fallback.update({**model_status, "mode": "local_fallback", "billing": "no_remote_charge"})
+        return fallback
+
     try:
         result = chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=effective_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=512)
+        ], model=model or QWEN_CONFIG["cheap_model"], api_key=effective_key, api_provider=effective_provider if not base_url else None, base_url=base_url, temperature=0.3, max_tokens=768)
 
         # Try to parse JSON from response
         result = result.strip()
@@ -328,6 +416,8 @@ def summarize_page(
         return parsed
     except Exception as e:
         logger.warning(f"AI summary failed, using fallback: {e}")
+        if raise_on_error:
+            raise
         fallback = fallback_summary(page_type, page_data)
         fallback_mode = model_status["mode"] if model_status["mode"] in {"key_unbound", "provider_mismatch"} else "local_fallback"
         fallback.update({**model_status, "mode": fallback_mode, "billing": "no_remote_charge"})
@@ -351,7 +441,15 @@ def diagnose_fault(
     Returns:
         Diagnosis report text
     """
-    config = describe_model(model, api_key, api_provider, base_url)
+    # Apply same fallback logic as copilot_chat for consistency
+    effective_key = api_key or settings.DASHSCOPE_API_KEY or None
+    effective_provider = (
+        api_provider
+        if (api_key and api_provider)
+        else ("通义千问 DashScope" if effective_key else None)
+    )
+
+    config = describe_model(model, effective_key, effective_provider, base_url)
     if config["mode"] != "remote":
         raise ValueError(f"{config['provider']} API key is not ready for selected model")
 
@@ -373,7 +471,9 @@ def diagnose_fault(
         return chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model, api_key=api_key, api_provider=api_provider if not base_url else None, base_url=base_url, temperature=0.5, max_tokens=512)
+        ], model=model, api_key=effective_key,
+           api_provider=effective_provider if not base_url else None,
+           base_url=base_url, temperature=0.5, max_tokens=512)
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
         raise
@@ -389,6 +489,7 @@ def copilot_chat(
     api_provider: Optional[str] = None,
     base_url: Optional[str] = None,
     stream: bool = False,
+    raise_on_error: bool = False,
 ) -> str:
     """Multi-turn Copilot chat with page context, optional RAG results,
     and optional screenshot description.
@@ -404,42 +505,14 @@ def copilot_chat(
     Returns:
         AI response text
     """
-    screenshot_section = ""
-    if screenshot_description:
-        screenshot_section = (
-            f"\n当前页面截图内容（由视觉模型分析）:\n"
-            f"{screenshot_description}\n"
-        )
-
-    task_prompt = (
-        f"当前页面上下文:\n"
-        f"- 页面: {page_context.get('page_type', 'unknown')}\n"
-        f"- 风机总数: {page_context.get('total_turbines', 0)}\n"
-        f"- 预警风机: {page_context.get('warning_count', 0)}\n"
-        f"- 故障风机: {page_context.get('fault_count', 0)}\n"
-        f"- 最近告警: {json.dumps(page_context.get('recent_alerts', []), ensure_ascii=False)}\n"
-        f"{screenshot_section}"
-        f"\n"
-        f"{('知识库参考:' + chr(10) + chr(10).join(knowledge_results)) if knowledge_results else ''}"
-        f"\n"
-        f"规则:\n"
-        f"1. 基于上下文给出准确回答\n"
-        f'2. 涉及安全决策时提醒"建议人工复核"\n'
-        f"3. 回复简洁, 关键数据用数字\n"
-        f"4. 如果上下文信息不足, 诚实说明\n"
-        f"5. 如果有页面截图描述, 优先参考截图中的实时数据"
-    )
-    system_prompt = _build_system_prompt(task_prompt)
-
     try:
+        eff_key = api_key or settings.DASHSCOPE_API_KEY or None
+        eff_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if eff_key else None)
         return chat(
-            [
-                {"role": "system", "content": system_prompt},
-                *messages,
-            ],
+            _build_copilot_messages(messages, page_context, knowledge_results, screenshot_description),
             model=model or QWEN_CONFIG["default_model"],
-            api_key=api_key,
-            api_provider=api_provider if not base_url else None,
+            api_key=eff_key,
+            api_provider=eff_provider if not base_url else None,
             base_url=base_url,
             temperature=0.5,
             max_tokens=1024,
@@ -447,7 +520,45 @@ def copilot_chat(
         )
     except Exception as e:
         logger.warning(f"Copilot chat failed: {e}")
+        if raise_on_error:
+            raise
         return "抱歉, AI服务暂时不可用。请稍后重试。"
+
+
+def copilot_chat_stream(
+    messages: list[dict],
+    page_context: dict,
+    knowledge_results: Optional[list[str]] = None,
+    screenshot_description: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_provider: Optional[str] = None,
+    base_url: Optional[str] = None,
+):
+    """Yield Copilot answer deltas from an OpenAI-compatible streaming response."""
+    eff_key = api_key or settings.DASHSCOPE_API_KEY or None
+    eff_provider = api_provider if (api_key and api_provider) else ("通义千问 DashScope" if eff_key else None)
+    response = chat(
+        _build_copilot_messages(messages, page_context, knowledge_results, screenshot_description),
+        model=model or QWEN_CONFIG["default_model"],
+        api_key=eff_key,
+        api_provider=eff_provider if not base_url else None,
+        base_url=base_url,
+        temperature=0.5,
+        max_tokens=1024,
+        stream=True,
+    )
+    if isinstance(response, str):
+        yield response
+        return
+    for chunk in response:
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        content = getattr(delta, "content", None) if delta else None
+        if content:
+            yield content
 
 
 def describe_screenshot(
@@ -533,6 +644,7 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
         faulty = data.get("faulty", 0)
         avg_hi = data.get("avgHi", "--")
         mtbf = data.get("mtbfHours")
+        mttr = data.get("mttrHours")
 
         conclusions = []
         if total > 0:
@@ -542,6 +654,10 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
             conclusions.append(f"{warning}台风机处于预警状态，健康指数偏低需关注")
         if faulty > 0:
             conclusions.append(f"{faulty}台风机处于故障状态，需立即处理")
+        if avg_hi not in (None, "--", 0, "0"):
+            conclusions.append(f"全场平均健康指数约{avg_hi}，可作为巡检优先级排序依据")
+        if mtbf and mtbf > 0:
+            conclusions.append(f"当前MTBF约{mtbf:.0f}h，反映全场平均故障间隔水平")
         if not conclusions:
             conclusions.append("风场运行数据正常，暂无异常")
 
@@ -552,8 +668,11 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
             suggestions.append(f"对{warning}台预警风机安排近期巡检，检查HI下降原因")
         if mtbf and mtbf > 0:
             suggestions.append(f"当前MTBF约{mtbf:.0f}h，合理安排预防性维护可进一步提高可靠性")
+        if mttr and mttr > 0:
+            suggestions.append(f"当前MTTR约{mttr:.1f}h，建议复盘长耗时维修环节")
         if not suggestions:
             suggestions.append("保持当前运维频率，持续监测HI变化趋势")
+        suggestions.append("结合地图分布和HI趋势筛选重点风机，形成下一轮巡检清单")
 
         return {"conclusions": conclusions, "suggestions": suggestions}
 

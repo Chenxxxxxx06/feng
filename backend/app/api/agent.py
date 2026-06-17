@@ -35,7 +35,8 @@ async def multi_agent_diagnose(
     if request.screenshot:
         try:
             from app.services.qwen_client import describe_screenshot
-            screenshot_description = describe_screenshot(
+            screenshot_description = await asyncio.to_thread(
+                describe_screenshot,
                 screenshot_base64=request.screenshot,
                 page_type=request.page_context.get("page_type", "unknown") if request.page_context else "unknown",
                 api_key=current_user.api_key,
@@ -46,15 +47,15 @@ async def multi_agent_diagnose(
         except Exception as e:
             logger.warning(f"Screenshot analysis failed in agent path: {e}")
 
-    # 1. Get turbine list for orchestrator context
+    # 1. Get turbine list for orchestrator context (include region)
     result = await db.execute(select(Turbine))
-    turbine_list = ", ".join(f"#{t.id} {t.name}" for t in result.scalars().all())
+    turbine_list = ", ".join(f"#{t.id} {t.name}({t.region or ''})" for t in result.scalars().all())
 
     # 2. Orchestrator: parse intent
     api_key = current_user.api_key
     api_provider = current_user.api_provider
     api_base_url = current_user.api_base_url
-    agent_model = current_user.model_preference or "qwen-max"
+    agent_model = "qwen-turbo"  # fast model for intent routing
     orchestrator = OrchestratorAgent(model=agent_model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
     orch_result = await orchestrator.run(user_message=user_msg, turbine_list=turbine_list)
 
@@ -147,16 +148,16 @@ async def execute_agent_command(
     from app.models import Turbine
     from sqlalchemy import select
 
-    # 1. Turbine list for entity resolution
+    # 1. Turbine list for entity resolution (include region for "区域A" matching)
     result = await db.execute(select(Turbine))
     turbines = result.scalars().all()
-    turbine_list = ", ".join(f"#{t.id} {t.name}" for t in turbines)
+    turbine_list = ", ".join(f"#{t.id} {t.name}({t.region or ''})" for t in turbines)
 
     # 2. IntentRouter: classify + plan
     api_key = current_user.api_key
     api_provider = current_user.api_provider
     api_base_url = current_user.api_base_url
-    agent_model = current_user.model_preference or "qwen-max"
+    agent_model = "qwen-turbo"  # fast model for intent routing
 
     router = IntentRouterAgent(
         model=agent_model, api_key=api_key,
@@ -183,12 +184,25 @@ async def execute_agent_command(
     confidence = intent_data.get("confidence", 0.5)
     entities = intent_data.get("entities", {})
 
-    # 3. Resolve scene skills → atomic steps (action only)
+    # 3. Build atomic steps — prefer LLM direct output, fallback to resolver
     atomic_steps: list[AgentAtomicStep] = []
-    scene_skills_data: list[dict] = intent_data.get("scene_skills", []) if intent_type in ("action", "mixed") else []
-
-    if intent_type in ("action", "mixed") and scene_skills_data:
-        atomic_steps = _resolve_atomic_steps(scene_skills_data, entities)
+    scene_skills_data: list[dict] = []
+    if intent_type in ("action", "mixed"):
+        llm_steps: list[dict] = intent_data.get("atomic_steps", [])
+        if llm_steps:
+            # LLM already decomposed into atomic operations → use directly
+            for i, s in enumerate(llm_steps):
+                atomic_steps.append(AgentAtomicStep(
+                    order=s.get("order", i + 1),
+                    skill=s["skill"],
+                    params=s.get("params", {}),
+                    reason=s.get("reason", ""),
+                ))
+        else:
+            # Fallback: resolve scene_skills via hardcoded mapping
+            scene_skills_data = intent_data.get("scene_skills", [])
+            if scene_skills_data:
+                atomic_steps = _resolve_atomic_steps(scene_skills_data, entities)
 
     # 4. Clarification check
     requires_clarification = router.needs_clarification(intent_data)
@@ -238,6 +252,11 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "wait", "params": {"ms": "800"}},
             {"skill": "screenshot", "params": {}},
         ],
+        "GoToWorkOrder": [
+            {"skill": "navigate", "params": {"path": "/workorder"}},
+            {"skill": "wait", "params": {"ms": "800"}},
+            {"skill": "screenshot", "params": {}},
+        ],
         "NavigateToKnowledge": [
             {"skill": "navigate", "params": {"path": "/knowledge"}},
             {"skill": "wait", "params": {"ms": "800"}},
@@ -259,6 +278,14 @@ def _resolve_atomic_steps(scene_skills: list[dict], entities: dict | None = None
             {"skill": "click",
              "params": {"selector": "[data-turbine-id='{turbine_id}']"}},
             {"skill": "wait", "params": {"ms": "500"}},
+        ],
+        "OpenTurbineDetailPanel": [
+            {"skill": "waitForElement",
+             "params": {"selector": "[data-turbine-id='{turbine_id}']", "timeout": "5000"}},
+            {"skill": "click",
+             "params": {"selector": "[data-turbine-id='{turbine_id}']"}},
+            {"skill": "wait", "params": {"ms": "800"}},
+            {"skill": "screenshot", "params": {}},
         ],
         "SelectTurbineInDiagnosis": [
             {"skill": "click", "params": {"selector": "[data-action='select-turbine']"}},
@@ -402,7 +429,8 @@ async def agent_task(
     # Try AI analysis
     try:
         from app.services.qwen_client import copilot_chat
-        ai_reply = copilot_chat(
+        ai_reply = await asyncio.to_thread(
+            copilot_chat,
             messages=[{"role": "user", "content": task_desc}],
             page_context=request.page_context or {},
             model=current_user.model_preference,

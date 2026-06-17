@@ -55,6 +55,7 @@ async def ensure_runtime_schema(conn):
         await _ensure_sqlite_column(conn, "users", "api_provider", "VARCHAR(64)")
         await _ensure_sqlite_column(conn, "users", "api_base_url", "VARCHAR(512)")
         await _ensure_sqlite_column(conn, "users", "preferences", "JSON")
+        await _ensure_sqlite_column(conn, "ai_provider_configs", "model_options", "JSON")
         work_order_columns = {
             "priority": "VARCHAR(16) DEFAULT 'medium'",
             "fault_type": "VARCHAR(64)",
@@ -88,6 +89,7 @@ async def ensure_runtime_schema(conn):
     else:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(512)"))
+        await conn.execute(text("ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS model_options JSON"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS priority VARCHAR(16) DEFAULT 'medium'"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS fault_type VARCHAR(64)"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS due_date TIMESTAMP WITH TIME ZONE"))

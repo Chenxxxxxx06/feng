@@ -1,11 +1,10 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import api from '../../services/api';
 import type {
   AutoFaultDetectionResult,
   BatchAutoFaultDetectionResult,
   BatchAutoFaultRecord,
-  BladeDiagnosisResult,
   DiagnosisSignalInsight,
   Fault,
   FaultDetail,
@@ -31,6 +30,7 @@ type BatchSortMode = 'region' | 'turbine' | 'confidence_desc' | 'confidence_asc'
 type BatchGroupMode = 'region' | 'status' | 'fault_type' | 'none';
 type FaultTimeField = 'discovered_at' | 'processing_started_at' | 'closed_at' | 'failed_at' | 'last_action_at';
 type MonitorMode = 'single' | 'group';
+type DetectionFilter = 'all' | 'suspected_fault' | 'no_fault_detected';
 type TurbineComponentKey = 'blade_root' | 'pitch' | 'main_shaft' | 'main_bearing' | 'gearbox' | 'brake' | 'generator' | 'cooling' | 'electrical' | 'sensor';
 
 interface TopologyCauseNode {
@@ -52,6 +52,18 @@ interface TopologyFaultNode {
   processingStatus?: string;
   workOrderTitle?: string | null;
   selected: boolean;
+  transient?: boolean;
+}
+
+interface TurbineOptionRow {
+  turbine: Turbine;
+  faultCount: number;
+  activeFaultCount: number;
+  pendingFaultCount: number;
+  highPriorityFaultCount: number;
+  suspectedCount: number;
+  avgConfidence: number | null;
+  latestDetection?: BatchAutoFaultRecord;
 }
 
 const PROCESSING_STATUS_LABELS: Record<string, string> = {
@@ -99,15 +111,28 @@ const COMPONENT_LABELS: Record<TurbineComponentKey, string> = {
 
 const COMPONENT_POINTS: Record<TurbineComponentKey, { x: number; y: number }> = {
   blade_root: { x: 360, y: 174 },
-  pitch: { x: 360, y: 174 },
+  pitch: { x: 360, y: 150 },
   main_bearing: { x: 396, y: 174 },
   main_shaft: { x: 426, y: 174 },
-  gearbox: { x: 478, y: 174 },
+  gearbox: { x: 477, y: 174 },
   brake: { x: 523, y: 174 },
-  generator: { x: 566, y: 174 },
-  cooling: { x: 566, y: 121 },
+  generator: { x: 567, y: 174 },
+  cooling: { x: 566, y: 119 },
   electrical: { x: 546, y: 230 },
   sensor: { x: 584, y: 86 },
+};
+
+const COMPONENT_LABEL_OFFSETS: Record<TurbineComponentKey, { x: number; y: number; anchor?: 'start' | 'middle' | 'end' }> = {
+  blade_root: { x: -38, y: 42, anchor: 'middle' },
+  pitch: { x: -42, y: -24, anchor: 'middle' },
+  main_bearing: { x: -10, y: 40, anchor: 'middle' },
+  main_shaft: { x: 0, y: -28, anchor: 'middle' },
+  gearbox: { x: 0, y: 48, anchor: 'middle' },
+  brake: { x: 0, y: -28, anchor: 'middle' },
+  generator: { x: 38, y: 42, anchor: 'middle' },
+  cooling: { x: 0, y: -28, anchor: 'middle' },
+  electrical: { x: 0, y: 42, anchor: 'middle' },
+  sensor: { x: 34, y: -6, anchor: 'start' },
 };
 
 const COMPONENT_ORDER: TurbineComponentKey[] = [
@@ -122,6 +147,8 @@ const COMPONENT_ORDER: TurbineComponentKey[] = [
   'electrical',
   'sensor',
 ];
+
+const EMPTY_DIAGNOSIS_SIGNALS: DiagnosisSignalInsight[] = [];
 
 function faultLabel(type: string) {
   return FAULT_LABELS[type] || type;
@@ -164,6 +191,10 @@ function componentTone(component: TurbineComponentKey, activeComponents: Set<Tur
 function shortenText(text: string | undefined | null, max = 18) {
   if (!text) return '--';
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function topologyPercent(value?: number | null) {
+  return value == null ? '--' : `${(value * 100).toFixed(0)}%`;
 }
 
 function priorityLabel(priority: string) {
@@ -214,6 +245,15 @@ function faultPriorityClass(priority?: string) {
   return 'bg-accent-yellow/20 text-accent-yellow';
 }
 
+function diagnosisTypeClass(faultType: string) {
+  const value = faultType.toLowerCase();
+  if (value.includes('healthy') || value.includes('normal') || value.includes('no_fault')) return 'text-accent-green';
+  if (value.includes('erosion') || value.includes('blade')) return 'text-accent-yellow';
+  if (value.includes('unbalance') || value.includes('imbalance') || value.includes('shaft')) return 'text-accent-cyan';
+  if (value.includes('bearing') || value.includes('gearbox') || value.includes('fault')) return 'text-accent-red';
+  return 'text-text-secondary';
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return '--';
   const date = new Date(value);
@@ -224,6 +264,10 @@ function formatDateTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function confidenceText(value?: number | null, digits = 0) {
+  return typeof value === 'number' ? `${(value * 100).toFixed(digits)}%` : '--';
 }
 
 function batchGroupLabel(record: BatchAutoFaultRecord, mode: BatchGroupMode) {
@@ -240,24 +284,138 @@ function toVibrationFaultType(faultType: string) {
   return undefined;
 }
 
-function bboxToStyle(bbox: { x: number; y: number; w: number; h: number }) {
-  const left = Math.min(90, Math.max(0, (bbox.x / 1920) * 100));
-  const top = Math.min(90, Math.max(0, (bbox.y / 1440) * 100));
-  const width = Math.min(45, Math.max(8, (bbox.w / 1920) * 100));
-  const height = Math.min(45, Math.max(8, (bbox.h / 1440) * 100));
-  return { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` };
+function turbineStatusClass(status: string) {
+  if (status === 'fault') return 'text-accent-red';
+  if (status === 'warning') return 'text-accent-yellow';
+  return 'text-accent-green';
 }
 
-function DiagnosisTopology({
+function TurbinePicker({
+  value,
+  rows,
+  onChange,
+  align = 'right',
+}: {
+  value: number | null;
+  rows: TurbineOptionRow[];
+  onChange: (id: number) => void;
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = rows.find((row) => row.turbine.id === value);
+
+  return (
+    <div className="relative min-w-[260px]">
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        className="w-full rounded border border-border-default bg-bg-secondary px-3 py-2 text-left text-xs text-text-primary hover:border-accent-blue focus:outline-none focus:border-accent-blue"
+      >
+        <span className="block truncate">{selected ? `${selected.turbine.name} · ${selected.turbine.region || '未分组'}` : '选择风机...'}</span>
+        {selected && (
+          <span className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-text-muted">
+            <span>故障 {selected.faultCount}</span>
+            <span>疑似 {selected.suspectedCount}</span>
+            <span>置信 {confidenceText(selected.avgConfidence)}</span>
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className={`absolute z-40 mt-1 w-[560px] max-w-[calc(100vw-56px)] overflow-hidden rounded-lg border border-border-default bg-bg-card shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}>
+          <div className="grid grid-cols-[1.5fr_0.7fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
+            <span>风机</span>
+            <span>状态</span>
+            <span>故障</span>
+            <span>疑似</span>
+            <span>置信度</span>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            {rows.map((row) => (
+              <button
+                key={row.turbine.id}
+                type="button"
+                onClick={() => {
+                  onChange(row.turbine.id);
+                  setOpen(false);
+                }}
+                className={`grid w-full grid-cols-[1.5fr_0.7fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default px-3 py-2 text-left text-xs hover:bg-bg-hover ${
+                  row.turbine.id === value ? 'bg-accent-blue/10' : ''
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-text-primary">{row.turbine.name}</span>
+                  <span className="block truncate text-[10px] text-text-muted">{row.turbine.region || '未分组'} · HI {row.turbine.hi_value?.toFixed?.(1) ?? '--'}</span>
+                </span>
+                <span className={turbineStatusClass(row.turbine.status)}>{turbineStatusLabel(row.turbine.status)}</span>
+                <span className="font-mono text-text-secondary">{row.faultCount}</span>
+                <span className="font-mono text-accent-yellow">{row.suspectedCount}</span>
+                <span className="font-mono text-accent-cyan">{confidenceText(row.avgConfidence)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignalEvidencePanel({ insights }: { insights: DiagnosisSignalInsight[] }) {
+  const rows = insights.slice(0, 4);
+  return (
+    <section className="bg-bg-card border border-border-default rounded-lg overflow-hidden">
+      <div className="border-b border-border-default px-4 py-3">
+        <h3 className="text-sm font-medium">诊断依据</h3>
+        <p className="mt-1 text-[10px] text-text-muted">信号特征、当前值和模型贡献度</p>
+      </div>
+      <div className="space-y-3 p-4">
+        {rows.map((signal) => {
+          const score = Math.max(0, Math.min(1, signal.contribution_score || 0));
+          const component = componentForSignal(signal.sensor_name);
+          const tone = signal.priority === 'high'
+            ? 'bg-accent-red'
+            : signal.priority === 'medium'
+              ? 'bg-accent-yellow'
+              : 'bg-accent-cyan';
+          return (
+            <div key={`${signal.sensor_name}-${signal.value}`} className="rounded border border-border-default bg-bg-secondary px-3 py-3">
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-text-primary">{signal.sensor_name}</p>
+                  <p className="mt-1 truncate text-[10px] text-text-muted">{COMPONENT_LABELS[component]} · {priorityLabel(signal.priority)}</p>
+                </div>
+                <span className="shrink-0 font-mono text-xs text-accent-cyan">{(score * 100).toFixed(0)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded bg-bg-hover">
+                <div className={`h-full rounded ${tone}`} style={{ width: `${Math.max(4, score * 100)}%` }} />
+              </div>
+              <div className="mt-2 grid grid-cols-[0.8fr_1.2fr] gap-2 text-[10px] text-text-muted">
+                <span className="truncate">当前值 <b className="font-normal text-text-secondary">{signal.value}</b></span>
+                <span className="truncate">参考 <b className="font-normal text-text-secondary">{signal.normal_range}</b></span>
+              </div>
+              <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-text-secondary">{signal.finding}</p>
+            </div>
+          );
+        })}
+        {rows.length === 0 && (
+          <div className="rounded border border-border-default bg-bg-secondary px-3 py-8 text-center text-xs text-text-muted">
+            暂无诊断依据
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const DiagnosisTopology = memo(function DiagnosisTopology({
   turbine,
-  turbines,
+  turbineRows,
   causes,
   faults,
   onFaultSelect,
   onTurbineChange,
 }: {
   turbine: Turbine | null;
-  turbines: Turbine[];
+  turbineRows: TurbineOptionRow[];
   causes: TopologyCauseNode[];
   faults: TopologyFaultNode[];
   onFaultSelect: (id: number) => void;
@@ -266,17 +424,38 @@ function DiagnosisTopology({
   const [hoveredFaultId, setHoveredFaultId] = useState<number | null>(null);
   const [hoveredCauseId, setHoveredCauseId] = useState<string | null>(null);
   const [hoveredComponent, setHoveredComponent] = useState<TurbineComponentKey | null>(null);
-  const activeComponents = new Set<TurbineComponentKey>([
-    ...causes.map((cause) => cause.component),
-    ...faults.map((fault) => fault.component),
-  ]);
-  const hoveredFault = faults.find((fault) => fault.id === hoveredFaultId);
-  const hoveredCause = causes.find((cause) => cause.id === hoveredCauseId);
-  const selectedFault = faults.find((fault) => fault.selected);
+  const activeComponents = useMemo(
+    () => new Set<TurbineComponentKey>([
+      ...causes.map((cause) => cause.component),
+      ...faults.map((fault) => fault.component),
+    ]),
+    [causes, faults],
+  );
+  const hoveredFault = useMemo(
+    () => faults.find((fault) => fault.id === hoveredFaultId),
+    [faults, hoveredFaultId],
+  );
+  const hoveredCause = useMemo(
+    () => causes.find((cause) => cause.id === hoveredCauseId),
+    [causes, hoveredCauseId],
+  );
+  const selectedFault = useMemo(
+    () => faults.find((fault) => fault.selected),
+    [faults],
+  );
   const focusedComponent = hoveredComponent || hoveredFault?.component || hoveredCause?.component || selectedFault?.component;
   const selectedComponent = focusedComponent || faults[0]?.component;
   const turbineStatus = turbine ? turbineStatusLabel(turbine.status) : '未选择';
   const modelTone = turbine?.status === 'fault' ? '#ff4d5e' : turbine?.status === 'warning' ? '#f6b94a' : '#39d2c0';
+  const updateHoveredComponent = useCallback((component: TurbineComponentKey | null) => {
+    setHoveredComponent((current) => (current === component ? current : component));
+  }, []);
+  const updateHoveredCause = useCallback((causeId: string | null) => {
+    setHoveredCauseId((current) => (current === causeId ? current : causeId));
+  }, []);
+  const updateHoveredFault = useCallback((faultId: number | null) => {
+    setHoveredFaultId((current) => (current === faultId ? current : faultId));
+  }, []);
   const componentOpacity = (component: TurbineComponentKey, base = 1) => {
     if (!focusedComponent || component === focusedComponent) return base;
     return Math.max(0.16, base * 0.28);
@@ -297,28 +476,16 @@ function DiagnosisTopology({
           <p className="mt-1 text-[10px] text-text-muted">{turbine?.name || '未选择风机'} · {turbine?.region || '未分组'} · {turbineStatus}</p>
         </div>
         <div className="flex items-center gap-3">
-          <select
-            value={turbine?.id || ''}
-            onChange={(e) => {
-              const tid = e.target.value ? Number(e.target.value) : null;
-              if (tid && onTurbineChange) onTurbineChange(tid);
-            }}
-            className="bg-bg-secondary border border-border-default rounded px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-accent-blue min-w-[160px]"
-          >
-            <option value="">选择风机...</option>
-            {turbines?.map((t: any) => (
-              <option key={t.id} value={t.id}>{t.name} · {t.region}</option>
-            )) || null}
-          </select>
+          <TurbinePicker value={turbine?.id || null} rows={turbineRows} onChange={onTurbineChange} />
           <div className="grid grid-cols-3 gap-2 text-right text-[10px]">
-          <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">原因 {causes.length}</span>
-          <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">故障 {faults.length}</span>
-          <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">部件 {activeComponents.size}</span>
-        </div>
+            <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">依据 {causes.length}</span>
+            <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">故障 {faults.length}</span>
+            <span className="rounded bg-bg-hover px-2 py-1 text-text-secondary">部件 {activeComponents.size}</span>
+          </div>
         </div>
       </div>
       <div className="overflow-x-auto">
-        <svg viewBox="0 0 900 360" className="h-[360px] min-w-[900px] w-full bg-bg-secondary/60" role="img" aria-label="风机故障拓扑">
+        <svg viewBox="0 0 1040 430" className="h-[430px] min-w-[1040px] w-full bg-bg-secondary/60" role="img" aria-label="风机故障拓扑">
           <defs>
             <linearGradient id="nacelleShell" x1="0" x2="1" y1="0" y2="0">
               <stop offset="0%" stopColor="#dcecff" stopOpacity="0.2" />
@@ -329,13 +496,6 @@ function DiagnosisTopology({
               <stop offset="0%" stopColor="#dcecff" stopOpacity="0.82" />
               <stop offset="100%" stopColor="#58a6ff" stopOpacity="0.48" />
             </linearGradient>
-            <filter id="topologyGlow" x="-40%" y="-40%" width="180%" height="180%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
           </defs>
 
           {leftRows.length === 0 && (
@@ -353,7 +513,7 @@ function DiagnosisTopology({
                   strokeOpacity={connectionOpacity(cause.component, hoveredCauseId === cause.id)}
                   strokeWidth={focusedComponent === cause.component ? '2.2' : '1.4'}
                 />
-                <circle cx={point.x} cy={point.y} r={focusedComponent === cause.component ? '6' : '4'} fill={componentTone(cause.component, activeComponents, selectedComponent)} filter="url(#topologyGlow)" />
+                <circle cx={point.x} cy={point.y} r={focusedComponent === cause.component ? '6' : '4'} fill={componentTone(cause.component, activeComponents, selectedComponent)} />
               </g>
             );
           })}
@@ -362,34 +522,34 @@ function DiagnosisTopology({
             <text x={480} y={200} fill="#8b949e" fontSize="12" textAnchor="middle">暂无故障记录</text>
           )}
           {rightRows.map((fault, index) => {
-            const y = 48 + index * 70;
+            const y = 58 + index * 80;
             const point = COMPONENT_POINTS[fault.component];
             return (
               <g key={fault.id}>
                 <path
-                  d={`M ${point.x} ${point.y} C ${point.x + 70} ${point.y}, 620 ${y + 24}, 648 ${y + 24}`}
+                  d={`M ${point.x} ${point.y} C ${point.x + 72} ${point.y}, 616 ${y + 26}, 648 ${y + 26}`}
                   fill="none"
                   stroke={componentTone(fault.component, activeComponents, selectedComponent)}
                   strokeOpacity={connectionOpacity(fault.component, fault.selected || hoveredFaultId === fault.id)}
                   strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2.4' : '1.4'}
                 />
-                <circle cx={point.x} cy={point.y} r={fault.selected || hoveredFaultId === fault.id ? '7' : '4'} fill={componentTone(fault.component, activeComponents, selectedComponent)} filter="url(#topologyGlow)" />
+                <circle cx={point.x} cy={point.y} r={fault.selected || hoveredFaultId === fault.id ? '7' : '4'} fill={componentTone(fault.component, activeComponents, selectedComponent)} />
               </g>
             );
           })}
 
           <g opacity="0.92">
             <path
-              d="M372 118 C418 98, 548 102, 616 124 C632 136, 632 214, 612 224 C544 244, 430 238, 376 214 C360 202, 358 134, 372 118 Z"
+              d="M372 136 C426 102, 558 102, 612 136 C626 145, 628 206, 614 216 C560 238, 438 238, 380 216 C366 206, 366 145, 372 136 Z"
               fill="url(#nacelleShell)"
               stroke="#c7d7e8"
               strokeOpacity="0.44"
               strokeWidth="1.4"
             />
-            <path d="M382 152 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
-            <path d="M382 199 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
+            <path d="M384 152 H604" stroke="#c7d7e8" strokeOpacity="0.12" />
+            <path d="M384 184 H604" stroke="#c7d7e8" strokeOpacity="0.12" />
 
-            <circle cx="360" cy="174" r="27" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} filter="url(#topologyGlow)" />
+            <circle cx="360" cy="174" r="27" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} />
             <circle cx="360" cy="174" r="15" fill="#111923" stroke={componentTone('pitch', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('pitch', 0.78)} strokeWidth={componentStrokeWidth('pitch')} />
             <path d="M360 148 V160 M337 186 L348 180 M383 186 L372 180" stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.58)} strokeWidth="5" strokeLinecap="round" />
 
@@ -421,15 +581,23 @@ function DiagnosisTopology({
               <g
                 key={component}
                 className="cursor-pointer"
-                onMouseEnter={() => setHoveredComponent(component)}
-                onMouseLeave={() => setHoveredComponent(null)}
-                onFocus={() => setHoveredComponent(component)}
-                onBlur={() => setHoveredComponent(null)}
+                onMouseEnter={() => updateHoveredComponent(component)}
+                onMouseLeave={() => updateHoveredComponent(null)}
+                onFocus={() => updateHoveredComponent(component)}
+                onBlur={() => updateHoveredComponent(null)}
                 role="button"
                 tabIndex={0}
               >
                 <circle cx={point.x} cy={point.y} r={active ? 8 : 5} fill={tone} fillOpacity={active ? '0.8' : '0.25'} stroke={tone} strokeWidth="1.5" />
-                <text x={point.x + 10} y={point.y - 8} fill={active ? tone : '#8d9aaa'} fontSize="10" fontWeight={active ? '600' : '500'} opacity={active ? '1' : '0.72'}>
+                <text
+                  x={point.x + COMPONENT_LABEL_OFFSETS[component].x}
+                  y={point.y + COMPONENT_LABEL_OFFSETS[component].y}
+                  fill={active ? tone : '#8d9aaa'}
+                  fontSize="11"
+                  fontWeight={active ? '600' : '500'}
+                  opacity={active ? '1' : '0.72'}
+                  textAnchor={COMPONENT_LABEL_OFFSETS[component].anchor || 'start'}
+                >
                   {COMPONENT_LABELS[component]}
                 </text>
               </g>
@@ -442,29 +610,30 @@ function DiagnosisTopology({
             return (
               <g
                 key={`cause-${cause.id}`}
-                onMouseEnter={() => setHoveredCauseId(cause.id)}
-                onMouseLeave={() => setHoveredCauseId(null)}
+                onMouseEnter={() => updateHoveredCause(cause.id)}
+                onMouseLeave={() => updateHoveredCause(null)}
               >
                 <rect x="28" y={y} width="224" height="54" rx="8" fill={hoveredCauseId === cause.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={hoveredCauseId === cause.id ? '0.84' : '0.34'} strokeWidth={hoveredCauseId === cause.id ? '2' : '1'} />
-                <text x="42" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(cause.label, 17)}</text>
-                <text x="42" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(cause.detail, 24)}</text>
-                <text x="200" y={y + 36} fill={tone} fontSize="10" textAnchor="end">{cause.score ? `${(cause.score * 100).toFixed(0)}%` : '--'}</text>
+                <text x="42" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(cause.label, 15)}</text>
+                <text x="42" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(cause.detail, 18)}</text>
+                <rect x="201" y={y + 25} width="39" height="16" rx="8" fill="#071A35" stroke={tone} strokeOpacity="0.38" />
+                <text x="220.5" y={y + 36} fill={tone} fontSize="10" fontWeight="700" textAnchor="middle">{topologyPercent(cause.score)}</text>
               </g>
             );
           })}
 
           {rightRows.map((fault, index) => {
-            const y = 48 + index * 70;
+            const y = 58 + index * 80;
             const tone = componentTone(fault.component, activeComponents, selectedComponent);
-            const disabled = fault.id < 0;
+            const disabled = Boolean(fault.transient);
             return (
               <g
                 key={`fault-${fault.id}`}
                 onClick={() => !disabled && onFaultSelect(fault.id)}
-                onMouseEnter={() => !disabled && setHoveredFaultId(fault.id)}
-                onMouseLeave={() => setHoveredFaultId(null)}
-                onFocus={() => !disabled && setHoveredFaultId(fault.id)}
-                onBlur={() => setHoveredFaultId(null)}
+                onMouseEnter={() => !disabled && updateHoveredFault(fault.id)}
+                onMouseLeave={() => updateHoveredFault(null)}
+                onFocus={() => !disabled && updateHoveredFault(fault.id)}
+                onBlur={() => updateHoveredFault(null)}
                 onKeyDown={(event) => {
                   if (!disabled && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
@@ -476,10 +645,11 @@ function DiagnosisTopology({
                 tabIndex={disabled ? undefined : 0}
               >
                 <rect x="648" y={y} width="224" height="54" rx="8" fill={fault.selected || hoveredFaultId === fault.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={fault.selected || hoveredFaultId === fault.id ? '0.9' : '0.38'} strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2' : '1'} />
-                <text x="662" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(fault.label, 16)}</text>
-                <text x="662" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(fault.turbineLabel, 12)} · {processingStatusLabel(fault.processingStatus)}</text>
-                <text x="858" y={y + 18} fill={tone} fontSize="10" textAnchor="end">{fault.confidence ? `${(fault.confidence * 100).toFixed(0)}%` : '--'}</text>
-                <text x="858" y={y + 36} fill="#8d9aaa" fontSize="10" textAnchor="end">{shortenText(fault.workOrderTitle || '未关联工单', 10)}</text>
+                <text x="662" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(fault.label, 14)}</text>
+                <text x="662" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(fault.turbineLabel, 9)} · {shortenText(processingStatusLabel(fault.processingStatus), 4)}</text>
+                <rect x="823" y={y + 8} width="38" height="16" rx="8" fill="#071A35" stroke={tone} strokeOpacity="0.38" />
+                <text x="842" y={y + 19} fill={tone} fontSize="10" fontWeight="700" textAnchor="middle">{topologyPercent(fault.confidence)}</text>
+                <text x="858" y={y + 36} fill="#8d9aaa" fontSize="10" textAnchor="end">{shortenText(fault.workOrderTitle || '未关联工单', 8)}</text>
               </g>
             );
           })}
@@ -487,7 +657,7 @@ function DiagnosisTopology({
       </div>
     </section>
   );
-}
+});
 
 export default function DiagnosisPage() {
   const [faults, setFaults] = useState<Fault[]>([]);
@@ -506,6 +676,10 @@ export default function DiagnosisPage() {
   const [batchGroup, setBatchGroup] = useState<BatchGroupMode>('region');
   const [batchRegion, setBatchRegion] = useState('all');
   const [batchStatus, setBatchStatus] = useState('all');
+  const [detectionFilter, setDetectionFilter] = useState<DetectionFilter>('all');
+  const [confidenceMin, setConfidenceMin] = useState(0);
+  const [topologyFaultTypeFilter, setTopologyFaultTypeFilter] = useState('all');
+  const [openStatCard, setOpenStatCard] = useState<string | null>(null);
   const [faultKeyword, setFaultKeyword] = useState('');
   const [faultRegionFilter, setFaultRegionFilter] = useState('all');
   const [faultStatusFilter, setFaultStatusFilter] = useState('all');
@@ -516,15 +690,26 @@ export default function DiagnosisPage() {
   const [faultDateFrom, setFaultDateFrom] = useState('');
   const [faultDateTo, setFaultDateTo] = useState('');
   const [vibration, setVibration] = useState<VibrationPreview | null>(null);
-  const [bladeResult, setBladeResult] = useState<BladeDiagnosisResult | null>(null);
-  const [bladePreview, setBladePreview] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [autoLoading, setAutoLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
-  const [bladeLoading, setBladeLoading] = useState(false);
   const [error, setError] = useState('');
   const waveformRef = useRef<HTMLDivElement>(null);
   const spectrumRef = useRef<HTMLDivElement>(null);
+
+  const viewDetail = useCallback(async (id: number) => {
+    const { data } = await api.get(`/diagnosis/faults/${id}`);
+    setSelected(data);
+    setSelectedTurbineId(data.turbine_id);
+    setAutoResult(null);
+  }, []);
+
+  const loadVibration = useCallback(async (turbineId: number, nextComponent: string, faultType: string | undefined) => {
+    const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
+    if (faultType) params.fault_type = faultType;
+    const { data } = await api.get('/diagnosis/vibration', { params });
+    setVibration(data);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -545,12 +730,18 @@ export default function DiagnosisPage() {
       .catch(() => setError('诊断数据加载失败'))
       .finally(() => setLoading(false));
     return () => { mounted = false; };
-  }, []);
+  }, [viewDetail]);
 
   useEffect(() => {
     if (!selectedTurbineId) return;
     loadVibration(selectedTurbineId, component, undefined);
-  }, [selectedTurbineId, component]);
+  }, [selectedTurbineId, component, loadVibration]);
+
+  useEffect(() => {
+    if (selected && selectedTurbineId && selected.turbine_id !== selectedTurbineId) {
+      setSelected(null);
+    }
+  }, [selected, selectedTurbineId]);
 
   useEffect(() => {
     if (monitorMode !== 'single' || !selectedTurbineId) return;
@@ -571,7 +762,7 @@ export default function DiagnosisPage() {
     setBatchPage(1);
     setGroupTurbinePage(1);
     setCausePage(1);
-  }, [monitorMode, batchRegion, batchStatus, component, windowHours, selectedTurbineId]);
+  }, [monitorMode, batchRegion, batchStatus, component, windowHours, selectedTurbineId, detectionFilter, confidenceMin, topologyFaultTypeFilter]);
 
   useEffect(() => {
     setCausePage(1);
@@ -620,6 +811,51 @@ export default function DiagnosisPage() {
     () => Array.from(new Set(turbines.map((t) => t.region).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-CN')),
     [turbines],
   );
+
+  const turbineRows = useMemo<TurbineOptionRow[]>(() => {
+    const detectionByTurbine = new Map<number, BatchAutoFaultRecord[]>();
+    for (const record of batchResult?.records || []) {
+      const list = detectionByTurbine.get(record.turbine_id) || [];
+      list.push(record);
+      detectionByTurbine.set(record.turbine_id, list);
+    }
+
+    return turbines.map((turbine) => {
+      const turbineFaults = faults.filter((fault) => fault.turbine_id === turbine.id);
+      const detections = detectionByTurbine.get(turbine.id) || [];
+      const confidenceValues = [
+        ...turbineFaults.map((fault) => fault.confidence),
+        ...detections.map((record) => record.confidence),
+      ].filter((value) => typeof value === 'number');
+      const latestDetection = detections
+        .slice()
+        .sort((a, b) => new Date(b.generated_at).getTime() - new Date(a.generated_at).getTime())[0];
+
+      return {
+        turbine,
+        faultCount: turbineFaults.length,
+        activeFaultCount: turbineFaults.filter((fault) => fault.status !== 'closed' && (fault.processing_status || 'pending') !== 'closed').length,
+        pendingFaultCount: turbineFaults.filter((fault) => (fault.processing_status || 'pending') === 'pending').length,
+        highPriorityFaultCount: turbineFaults.filter((fault) => ['urgent', 'high'].includes(fault.priority || 'medium')).length,
+        suspectedCount: detections.filter((record) => record.status === 'suspected_fault').length,
+        avgConfidence: confidenceValues.length
+          ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+          : null,
+        latestDetection,
+      };
+    }).sort((a, b) => {
+      const statusRank = (status: string) => (status === 'fault' ? 0 : status === 'warning' ? 1 : 2);
+      return statusRank(a.turbine.status) - statusRank(b.turbine.status)
+        || b.activeFaultCount - a.activeFaultCount
+        || a.turbine.name.localeCompare(b.turbine.name, 'zh-CN');
+      });
+  }, [batchResult?.records, faults, turbines]);
+
+  const turbineRowById = useMemo(() => {
+    const map = new Map<number, TurbineOptionRow>();
+    turbineRows.forEach((row) => map.set(row.turbine.id, row));
+    return map;
+  }, [turbineRows]);
 
   const faultHandlerOptions = useMemo(() => {
     const handlers = new Set(faults.map((f) => f.handler || '未指派'));
@@ -679,8 +915,24 @@ export default function DiagnosisPage() {
     closed: filteredFaults.filter((f) => f.processing_status === 'closed').length,
   }), [filteredFaults]);
 
+  const topologyFaultTypeOptions = useMemo(() => {
+    const types = new Set<string>();
+    faults.forEach((fault) => types.add(fault.fault_type));
+    batchResult?.records?.forEach((record) => types.add(record.fault_type));
+    return Array.from(types).sort((a, b) => faultLabel(a).localeCompare(faultLabel(b), 'zh-CN'));
+  }, [batchResult?.records, faults]);
+
+  const filteredBatchRecords = useMemo(() => {
+    return (batchResult?.records || []).filter((record) => {
+      if (detectionFilter !== 'all' && record.status !== detectionFilter) return false;
+      if (record.confidence < confidenceMin) return false;
+      if (topologyFaultTypeFilter !== 'all' && record.fault_type !== topologyFaultTypeFilter) return false;
+      return true;
+    });
+  }, [batchResult?.records, confidenceMin, detectionFilter, topologyFaultTypeFilter]);
+
   const sortedBatchRecords = useMemo(() => {
-    const records = [...(batchResult?.records || [])];
+    const records = [...filteredBatchRecords];
     records.sort((a, b) => {
       if (batchSort === 'confidence_desc') return b.confidence - a.confidence;
       if (batchSort === 'confidence_asc') return a.confidence - b.confidence;
@@ -697,7 +949,7 @@ export default function DiagnosisPage() {
       return a.region.localeCompare(b.region, 'zh-CN') || a.turbine_name.localeCompare(b.turbine_name, 'zh-CN');
     });
     return records;
-  }, [batchResult, batchSort]);
+  }, [batchSort, filteredBatchRecords]);
 
   const totalBatchPages = Math.max(1, Math.ceil(sortedBatchRecords.length / BATCH_PAGE_SIZE));
   const currentBatchPage = Math.min(batchPage, totalBatchPages);
@@ -724,28 +976,37 @@ export default function DiagnosisPage() {
     if (batchPage > totalBatchPages) setBatchPage(totalBatchPages);
   }, [batchPage, totalBatchPages]);
 
-  const openCount = faults.filter((f) => f.status === 'open').length;
+  const activeFaults = faults.filter((f) => f.status !== 'closed' && (f.processing_status || 'pending') !== 'closed');
+  const pendingCount = faults.filter((f) => (f.processing_status || 'pending') === 'pending').length;
+  const assignedOrProcessingCount = faults.filter((f) => ['assigned', 'processing'].includes(f.processing_status || '')).length;
+  const closedCount = faults.filter((f) => f.status === 'closed' || f.processing_status === 'closed').length;
+  const failedCount = faults.filter((f) => f.processing_status === 'failed').length;
+  const highPriorityCount = faults.filter((f) => ['urgent', 'high'].includes(f.priority || 'medium')).length;
+  const faultTurbineCount = turbines.filter((t) => t.status === 'fault').length;
+  const warningTurbineCount = turbines.filter((t) => t.status === 'warning').length;
   const weekAgo = new Date(Date.now() - 7 * 86400000);
-  const weekNew = faults.filter((f) => new Date(f.detected_at) > weekAgo).length;
+  const weekNew = faults.filter((f) => new Date(f.discovered_at || f.detected_at) > weekAgo).length;
   const avgConfidence = faults.length
     ? `${(faults.reduce((sum, f) => sum + f.confidence, 0) / faults.length * 100).toFixed(1)}%`
     : '--';
 
-  const insights: DiagnosisSignalInsight[] = autoResult?.signals
-    || selected?.signal_insights
-    || selected?.signals?.map((s) => ({
-      sensor_name: s.sensor_name,
-      value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
-      normal_range: `优先级${priorityLabelValue(s.priority)}`,
-      contribution_score: s.contribution_score,
-      priority: s.priority,
-      finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
-    }))
-    || [];
+  const insights = useMemo<DiagnosisSignalInsight[]>(() => (
+    autoResult?.signals
+      || selected?.signal_insights
+      || selected?.signals?.map((s) => ({
+        sensor_name: s.sensor_name,
+        value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
+        normal_range: `优先级${priorityLabelValue(s.priority)}`,
+        contribution_score: s.contribution_score,
+        priority: s.priority,
+        finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
+      }))
+      || EMPTY_DIAGNOSIS_SIGNALS
+  ), [autoResult?.signals, selected?.signal_insights, selected?.signals]);
 
   const troubleshootingSteps = autoResult?.troubleshooting_steps
     || selected?.troubleshooting_steps
-    || bladeResult?.troubleshooting_steps
+   
     || [];
 
   const groupCauseRecords = sortedBatchRecords;
@@ -753,7 +1014,7 @@ export default function DiagnosisPage() {
   const currentGroupTurbinePage = Math.min(groupTurbinePage, groupTotalTurbinePages);
   const currentGroupRecord = groupCauseRecords[currentGroupTurbinePage - 1] || null;
   const activeCauseInsights = monitorMode === 'group'
-    ? currentGroupRecord?.signals || []
+    ? currentGroupRecord?.signals || EMPTY_DIAGNOSIS_SIGNALS
     : insights;
   const activeTroubleshootingSteps = monitorMode === 'group'
     ? currentGroupRecord?.troubleshooting_steps || []
@@ -765,17 +1026,12 @@ export default function DiagnosisPage() {
     currentCausePage * CAUSE_PAGE_SIZE,
   );
   const highRiskSignals = activeCauseInsights.filter((s) => s.priority === 'high').length;
-  const groupSuspectedCount = sortedBatchRecords.filter((record) => record.status === 'suspected_fault').length;
-  const groupAverageConfidence = sortedBatchRecords.length
-    ? `${(sortedBatchRecords.reduce((sum, record) => sum + record.confidence, 0) / sortedBatchRecords.length * 100).toFixed(1)}%`
-    : '--';
-
   const topologyCauses = useMemo<TopologyCauseNode[]>(() => {
     const fallbackFaultType = autoResult?.fault_type || selected?.fault_type;
     return activeCauseInsights.slice(0, 4).map((signal, index) => ({
       id: `${signal.sensor_name}-${index}`,
       label: signal.sensor_name,
-      detail: signal.finding || `${signal.value} / ${signal.normal_range}`,
+      detail: `${signal.value} · ${signal.finding || signal.normal_range}`,
       priority: signal.priority,
       score: signal.contribution_score,
       component: componentForSignal(signal.sensor_name, fallbackFaultType),
@@ -786,12 +1042,44 @@ export default function DiagnosisPage() {
     const scoped = selectedTurbineId
       ? faults.filter((fault) => fault.turbine_id === selectedTurbineId)
       : faults;
-    const candidates = selected
-      ? [selected, ...scoped.filter((fault) => fault.id !== selected.id)]
-      : scoped;
+    const filtered = scoped.filter((fault) => {
+      if (fault.confidence < confidenceMin) return false;
+      if (topologyFaultTypeFilter !== 'all' && fault.fault_type !== topologyFaultTypeFilter) return false;
+      return true;
+    });
+    const selectedInScope = selected && (!selectedTurbineId || selected.turbine_id === selectedTurbineId)
+      && selected.confidence >= confidenceMin
+      && (topologyFaultTypeFilter === 'all' || selected.fault_type === topologyFaultTypeFilter)
+      ? selected
+      : null;
+    const provisionalDetection = autoResult
+      && monitorMode === 'single'
+      && selectedTurbineId === autoResult.turbine_id
+      && autoResult.status === 'suspected_fault'
+      && autoResult.confidence >= confidenceMin
+      && (topologyFaultTypeFilter === 'all' || autoResult.fault_type === topologyFaultTypeFilter)
+      && !filtered.some((fault) => fault.fault_type === autoResult.fault_type)
+      ? {
+        id: -900000 - autoResult.turbine_id,
+        turbine_id: autoResult.turbine_id,
+        turbine_name: selectedTurbine?.name,
+        fault_type: autoResult.fault_type,
+        confidence: autoResult.confidence,
+        priority: autoResult.confidence >= 0.85 ? 'high' : 'medium',
+        processing_status: 'pending',
+        work_order_title: '实时检测',
+      } as Fault
+      : null;
+    const candidates = selectedInScope
+      ? [selectedInScope, ...filtered.filter((fault) => fault.id !== selectedInScope.id)]
+      : filtered;
+    const combinedCandidates = provisionalDetection
+      ? [provisionalDetection, ...candidates]
+      : candidates;
 
-    return candidates.slice(0, 4).map((fault) => {
+    return combinedCandidates.slice(0, 4).map((fault) => {
       const turbine = turbines.find((item) => item.id === fault.turbine_id);
+      const transient = provisionalDetection?.id === fault.id;
       return {
         id: fault.id,
         label: faultLabel(fault.fault_type),
@@ -800,11 +1088,12 @@ export default function DiagnosisPage() {
         confidence: fault.confidence,
         priority: fault.priority,
         processingStatus: fault.processing_status,
-        workOrderTitle: fault.work_order_title,
-        selected: selected?.id === fault.id,
+        workOrderTitle: transient ? '实时检测' : fault.work_order_title,
+        selected: selectedInScope?.id === fault.id,
+        transient,
       };
     });
-  }, [faults, selected, selectedTurbineId, turbines]);
+  }, [autoResult, confidenceMin, faults, monitorMode, selected, selectedTurbine, selectedTurbineId, topologyFaultTypeFilter, turbines]);
 
   useEffect(() => {
     if (groupTurbinePage > groupTotalTurbinePages) setGroupTurbinePage(groupTotalTurbinePages);
@@ -814,26 +1103,28 @@ export default function DiagnosisPage() {
     if (causePage > causeTotalPages) setCausePage(causeTotalPages);
   }, [causePage, causeTotalPages]);
 
+  const activeFaultRows = turbineRows.filter((row) => row.activeFaultCount > 0);
+  const pendingFaultRows = turbineRows.filter((row) => row.pendingFaultCount > 0);
+  const problemTurbineRows = turbineRows.filter((row) => row.turbine.status === 'fault' || row.turbine.status === 'warning');
+  const highPriorityFaultRows = turbineRows.filter((row) => row.highPriorityFaultCount > 0);
   const cards = [
-    { label: '总故障数', value: String(faults.length), unit: '条', color: 'text-accent-blue' },
-    { label: '待处理', value: String(openCount), unit: '条', color: openCount ? 'text-accent-red' : 'text-accent-green' },
-    { label: '本周新增', value: String(weekNew), unit: '条', color: weekNew ? 'text-accent-yellow' : 'text-text-secondary' },
-    { label: '平均置信度', value: avgConfidence, unit: '', color: 'text-accent-cyan' },
-    { label: '高优先级信号', value: String(highRiskSignals), unit: '项', color: highRiskSignals ? 'text-accent-red' : 'text-accent-green' },
+    { key: 'total', label: '总故障数', value: String(faults.length), unit: '条', color: 'text-accent-blue' },
+    { key: 'active', label: '活跃故障', value: String(activeFaults.length), unit: '条', color: activeFaults.length ? 'text-accent-red' : 'text-accent-green', rows: activeFaultRows },
+    { key: 'pending', label: '待处理', value: String(pendingCount), unit: '条', color: pendingCount ? 'text-accent-yellow' : 'text-accent-green', rows: pendingFaultRows },
+    { key: 'processing', label: '处理中', value: String(assignedOrProcessingCount), unit: '条', color: assignedOrProcessingCount ? 'text-accent-cyan' : 'text-text-secondary' },
+    { key: 'closed', label: '已关闭', value: String(closedCount), unit: '条', color: 'text-accent-green' },
+    { key: 'failed', label: '处理失败', value: String(failedCount), unit: '条', color: failedCount ? 'text-accent-red' : 'text-text-secondary' },
+    { key: 'problem-turbines', label: '故障/预警风机', value: `${faultTurbineCount}/${warningTurbineCount}`, unit: '台', color: faultTurbineCount ? 'text-accent-red' : 'text-accent-yellow', rows: problemTurbineRows },
+    { key: 'avg-confidence', label: '平均置信度', value: avgConfidence, unit: '', color: 'text-accent-cyan' },
+    { key: 'week-new', label: '本周新增', value: String(weekNew), unit: '条', color: weekNew ? 'text-accent-yellow' : 'text-text-secondary' },
+    { key: 'high-priority', label: '高优先级', value: String(highPriorityCount), unit: '条', color: highPriorityCount ? 'text-accent-red' : 'text-accent-green', rows: highPriorityFaultRows },
+    { key: 'high-signal', label: '高优先级信号', value: String(highRiskSignals), unit: '项', color: highRiskSignals ? 'text-accent-red' : 'text-accent-green' },
   ];
 
-  async function viewDetail(id: number) {
-    const { data } = await api.get(`/diagnosis/faults/${id}`);
-    setSelected(data);
-    setSelectedTurbineId(data.turbine_id);
+  function handleTurbineChange(id: number) {
+    setSelectedTurbineId(id);
+    setSelected(null);
     setAutoResult(null);
-  }
-
-  async function loadVibration(turbineId: number, nextComponent: string, faultType: string | undefined) {
-    const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
-    if (faultType) params.fault_type = faultType;
-    const { data } = await api.get('/diagnosis/vibration', { params });
-    setVibration(data);
   }
 
   async function runAutoDetect() {
@@ -901,27 +1192,185 @@ export default function DiagnosisPage() {
     await loadVibration(record.turbine_id, record.component, toVibrationFaultType(record.fault_type));
   }
 
-  async function handleBladeFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !selectedTurbineId) return;
-    setBladeLoading(true);
-    setError('');
-    const previewUrl = URL.createObjectURL(file);
-    setBladePreview(previewUrl);
-    try {
-      const form = new FormData();
-      form.append('turbine_id', String(selectedTurbineId));
-      form.append('image', file);
-      const { data } = await api.post('/diagnosis/blade-diagnosis/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setBladeResult(data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || '叶片图像诊断失败');
-    } finally {
-      setBladeLoading(false);
-    }
-  }
+    const topologyMonitoringPanel = (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded border border-border-default bg-bg-secondary p-1 text-xs">
+          <button
+            onClick={() => setMonitorMode('single')}
+            className={`rounded px-3 py-1.5 ${monitorMode === 'single' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            单台风机
+          </button>
+          <button
+            onClick={() => setMonitorMode('group')}
+            className={`rounded px-3 py-1.5 ${monitorMode === 'group' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            分组风机
+          </button>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`rounded px-2 py-1 ${autoLoading || batchLoading ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-accent-green/20 text-accent-green'}`}>
+            {autoLoading || batchLoading ? '同步中' : '检测就绪'}
+          </span>
+          <button
+            onClick={() => (monitorMode === 'group' ? runBatchDetect() : runAutoDetect())}
+            className="rounded border border-border-default px-3 py-1.5 text-text-secondary hover:border-accent-blue hover:text-text-primary disabled:opacity-50"
+            disabled={autoLoading || batchLoading}
+          >
+            立即刷新
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
+        {monitorMode === 'single' ? (
+          <div className="text-xs text-text-muted lg:col-span-2">
+            <p className="mb-1">风机</p>
+            <TurbinePicker value={selectedTurbineId} rows={turbineRows} onChange={handleTurbineChange} align="left" />
+          </div>
+        ) : (
+          <>
+            <label className="text-xs text-text-muted">
+              风机分组
+              <select
+                className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                value={batchRegion}
+                onChange={(e) => setBatchRegion(e.target.value)}
+              >
+                <option value="all">全部分组</option>
+                {regionOptions.map((region) => <option key={region} value={region}>{region}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-text-muted">
+              风机状态
+              <select
+                className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+                value={batchStatus}
+                onChange={(e) => setBatchStatus(e.target.value)}
+              >
+                <option value="all">全部状态</option>
+                <option value="normal">正常</option>
+                <option value="warning">预警</option>
+                <option value="fault">故障</option>
+              </select>
+            </label>
+          </>
+        )}
+        <label className="text-xs text-text-muted">
+          部件
+          <select
+            className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+            value={component}
+            onChange={(e) => setComponent(e.target.value)}
+          >
+            {COMPONENT_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-text-muted">
+          时间窗
+          <select
+            className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+            value={windowHours}
+            onChange={(e) => setWindowHours(Number(e.target.value))}
+          >
+            <option value={6}>近6小时</option>
+            <option value={24}>近24小时</option>
+            <option value={72}>近72小时</option>
+            <option value={168}>近7天</option>
+          </select>
+        </label>
+        <label className="text-xs text-text-muted">
+          检测状态
+          <select
+            className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+            value={detectionFilter}
+            onChange={(e) => {
+              setDetectionFilter(e.target.value as DetectionFilter);
+              setBatchPage(1);
+            }}
+          >
+            <option value="all">全部检测</option>
+            <option value="suspected_fault">疑似故障</option>
+            <option value="no_fault_detected">未检出</option>
+          </select>
+        </label>
+        <label className="text-xs text-text-muted">
+          置信度
+          <select
+            className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+            value={confidenceMin}
+            onChange={(e) => {
+              setConfidenceMin(Number(e.target.value));
+              setBatchPage(1);
+            }}
+          >
+            <option value={0}>全部</option>
+            <option value={0.6}>≥60%</option>
+            <option value={0.75}>≥75%</option>
+            <option value={0.85}>≥85%</option>
+          </select>
+        </label>
+        <label className="text-xs text-text-muted">
+          故障类型
+          <select
+            className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
+            value={topologyFaultTypeFilter}
+            onChange={(e) => {
+              setTopologyFaultTypeFilter(e.target.value);
+              setBatchPage(1);
+            }}
+          >
+            <option value="all">全部类型</option>
+            {topologyFaultTypeOptions.map((type) => <option key={type} value={type}>{faultLabel(type)}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <div className="bg-bg-hover rounded p-3">
+          <p className="text-text-muted mb-1">{monitorMode === 'group' ? '筛选覆盖' : '检测状态'}</p>
+          <p className="font-medium text-text-primary">
+            {monitorMode === 'group'
+              ? `${filteredBatchRecords.length}/${batchResult?.total || 0} 台`
+              : autoResult ? detectionStatusLabel(autoResult.status) : '同步中'}
+          </p>
+        </div>
+        <div className="bg-bg-hover rounded p-3">
+          <p className="text-text-muted mb-1">{monitorMode === 'group' ? '疑似故障' : '故障类型'}</p>
+          <p className="font-medium text-accent-yellow truncate">
+            {monitorMode === 'group'
+              ? `${filteredBatchRecords.filter((record) => record.status === 'suspected_fault').length} 台`
+              : autoResult ? faultLabel(autoResult.fault_type) : '--'}
+          </p>
+        </div>
+        <div className="bg-bg-hover rounded p-3">
+          <p className="text-text-muted mb-1">{monitorMode === 'group' ? '平均置信度' : '置信度'}</p>
+          <p className="font-mono text-accent-cyan">
+            {monitorMode === 'group'
+              ? (filteredBatchRecords.length
+                ? confidenceText(filteredBatchRecords.reduce((sum, record) => sum + record.confidence, 0) / filteredBatchRecords.length, 1)
+                : '--')
+              : autoResult ? `${confidenceText(autoResult.confidence)} (${confidenceText(autoResult.confidence_interval[0])}-${confidenceText(autoResult.confidence_interval[1])})` : '--'}
+          </p>
+        </div>
+        <div className="bg-bg-hover rounded p-3">
+          <p className="text-text-muted mb-1">模型状态</p>
+          <p className="font-medium text-text-secondary truncate">
+            {monitorMode === 'group'
+              ? (batchResult?.success ? (batchResult.records[0]?.algorithm_status || '--') : '同步中')
+              : autoResult?.algorithm_status || '--'}
+          </p>
+        </div>
+      </div>
+
+      {(monitorMode === 'group' ? batchResult?.message : autoResult?.message) && (
+        <p className="text-xs text-text-secondary bg-accent-blue/5 border border-accent-blue/20 rounded px-3 py-2">
+          {monitorMode === 'group' ? batchResult?.message : autoResult?.message}
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -938,13 +1387,59 @@ export default function DiagnosisPage() {
             </div>
           )}
         </div>
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
           {cards.map((c) => (
-            <div key={c.label} className="bg-bg-card border border-border-default rounded-lg px-3 py-2.5">
-              <p className="text-[10px] text-text-muted">{c.label}</p>
-              <p className={`text-lg font-mono font-bold ${c.color}`}>
-                {c.value}<span className="text-[10px] font-normal text-text-muted ml-0.5">{c.unit}</span>
-              </p>
+            <div key={c.key} className="relative">
+              <button
+                type="button"
+                onClick={() => c.rows ? setOpenStatCard(openStatCard === c.key ? null : c.key) : undefined}
+                className={`w-full bg-bg-card border border-border-default rounded-lg px-3 py-2.5 text-left ${
+                  c.rows ? 'hover:border-accent-blue cursor-pointer' : 'cursor-default'
+                }`}
+              >
+                <p className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
+                  <span>{c.label}</span>
+                  {c.rows && <span className="text-[9px] text-accent-blue">查看</span>}
+                </p>
+                <p className={`text-lg font-mono font-bold ${c.color}`}>
+                  {c.value}<span className="text-[10px] font-normal text-text-muted ml-0.5">{c.unit}</span>
+                </p>
+              </button>
+              {c.rows && openStatCard === c.key && (
+                <div className="absolute left-0 z-50 mt-1 w-[430px] max-w-[calc(100vw-48px)] overflow-hidden rounded-lg border border-border-default bg-bg-card shadow-xl">
+                  <div className="grid grid-cols-[1.4fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
+                    <span>问题风机</span>
+                    <span>故障</span>
+                    <span>疑似</span>
+                    <span>置信度</span>
+                  </div>
+                  <div className="max-h-64 overflow-auto">
+                    {c.rows.length > 0 ? c.rows.map((row) => (
+                      <button
+                        key={`${c.key}-${row.turbine.id}`}
+                        type="button"
+                        onClick={() => {
+                          handleTurbineChange(row.turbine.id);
+                          setOpenStatCard(null);
+                        }}
+                        className="grid w-full grid-cols-[1.4fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default px-3 py-2 text-left text-xs hover:bg-bg-hover"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-text-primary">{row.turbine.name}</span>
+                          <span className={`block truncate text-[10px] ${turbineStatusClass(row.turbine.status)}`}>
+                            {row.turbine.region || '未分组'} · {turbineStatusLabel(row.turbine.status)} · HI {row.turbine.hi_value?.toFixed?.(1) ?? '--'}
+                          </span>
+                        </span>
+                        <span className="font-mono text-text-secondary">{row.faultCount}</span>
+                        <span className="font-mono text-accent-yellow">{row.suspectedCount}</span>
+                        <span className="font-mono text-accent-cyan">{confidenceText(row.avgConfidence)}</span>
+                      </button>
+                    )) : (
+                      <div className="px-3 py-3 text-xs text-text-muted">当前没有符合条件的风机</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -952,208 +1447,24 @@ export default function DiagnosisPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-5 space-y-4">
-        <DiagnosisTopology
-          turbine={selectedTurbine}
-          turbines={turbines}
-          causes={topologyCauses}
-          faults={topologyFaults}
-          onFaultSelect={viewDetail}
-          onTurbineChange={setSelectedTurbineId}
-        />
+        <section className="bg-bg-card border border-border-default rounded-lg p-4">
+          {topologyMonitoringPanel}
+        </section>
 
-        <div className="grid grid-cols-[1.35fr_1fr] gap-4">
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-medium">实时故障监测</h3>
-                <p className="text-[10px] text-text-muted mt-1">条件变化立即同步，每30秒自动刷新</p>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-accent-blue/10 text-accent-blue">
-                {autoLoading || batchLoading ? '同步中' : '实时监测中'}
-              </span>
-            </div>
+        {monitorMode === 'single' && (
+          <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-4">
+            <SignalEvidencePanel insights={activeCauseInsights} />
+            <DiagnosisTopology
+              turbine={selectedTurbine}
+              turbineRows={turbineRows}
+              causes={topologyCauses}
+              faults={topologyFaults}
+              onFaultSelect={viewDetail}
+              onTurbineChange={handleTurbineChange}
+            />
+          </div>
+        )}
 
-            <div className="mb-3 inline-flex rounded border border-border-default bg-bg-secondary p-1 text-xs">
-              <button
-                onClick={() => setMonitorMode('single')}
-                className={`rounded px-3 py-1.5 ${monitorMode === 'single' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary'}`}
-              >
-                单台风机
-              </button>
-              <button
-                onClick={() => setMonitorMode('group')}
-                className={`rounded px-3 py-1.5 ${monitorMode === 'group' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary'}`}
-              >
-                分组风机
-              </button>
-            </div>
-
-            {monitorMode === 'single' ? (
-              <div className="grid grid-cols-3 gap-3">
-                <label className="text-xs text-text-muted">
-                  风机
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={selectedTurbineId || ''}
-                    onChange={(e) => setSelectedTurbineId(Number(e.target.value))}
-                  >
-                    {turbines.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                </label>
-                <label className="text-xs text-text-muted">
-                  部件
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={component}
-                    onChange={(e) => setComponent(e.target.value)}
-                  >
-                    {COMPONENT_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                  </select>
-                </label>
-                <label className="text-xs text-text-muted">
-                  时间窗
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={windowHours}
-                    onChange={(e) => setWindowHours(Number(e.target.value))}
-                  >
-                    <option value={6}>近6小时</option>
-                    <option value={24}>近24小时</option>
-                    <option value={72}>近72小时</option>
-                    <option value={168}>近7天</option>
-                  </select>
-                </label>
-              </div>
-            ) : (
-              <div className="grid grid-cols-4 gap-3">
-                <label className="text-xs text-text-muted">
-                  风机分组
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={batchRegion}
-                    onChange={(e) => setBatchRegion(e.target.value)}
-                  >
-                    <option value="all">全部分组</option>
-                    {regionOptions.map((region) => <option key={region} value={region}>{region}</option>)}
-                  </select>
-                </label>
-                <label className="text-xs text-text-muted">
-                  风机状态
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={batchStatus}
-                    onChange={(e) => setBatchStatus(e.target.value)}
-                  >
-                    <option value="all">全部状态</option>
-                    <option value="normal">正常</option>
-                    <option value="warning">预警</option>
-                    <option value="fault">故障</option>
-                  </select>
-                </label>
-                <label className="text-xs text-text-muted">
-                  部件
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={component}
-                    onChange={(e) => setComponent(e.target.value)}
-                  >
-                    {COMPONENT_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                  </select>
-                </label>
-                <label className="text-xs text-text-muted">
-                  时间窗
-                  <select
-                    className="mt-1 w-full bg-bg-secondary border border-border-default rounded px-2 py-2 text-text-primary"
-                    value={windowHours}
-                    onChange={(e) => setWindowHours(Number(e.target.value))}
-                  >
-                    <option value={6}>近6小时</option>
-                    <option value={24}>近24小时</option>
-                    <option value={72}>近72小时</option>
-                    <option value={168}>近7天</option>
-                  </select>
-                </label>
-              </div>
-            )}
-
-            <div className="mt-4 grid grid-cols-4 gap-3 text-xs">
-              <div className="bg-bg-hover rounded p-3">
-                <p className="text-text-muted mb-1">{monitorMode === 'group' ? '覆盖风机' : '监测状态'}</p>
-                <p className="font-medium text-text-primary">
-                  {monitorMode === 'group'
-                    ? `${sortedBatchRecords.length} 台`
-                    : autoResult ? detectionStatusLabel(autoResult.status) : '同步中'}
-                </p>
-              </div>
-              <div className="bg-bg-hover rounded p-3">
-                <p className="text-text-muted mb-1">{monitorMode === 'group' ? '疑似故障' : '故障类型'}</p>
-                <p className="font-medium text-accent-yellow truncate">
-                  {monitorMode === 'group'
-                    ? `${groupSuspectedCount} 台`
-                    : autoResult ? faultLabel(autoResult.fault_type) : '--'}
-                </p>
-              </div>
-              <div className="bg-bg-hover rounded p-3">
-                <p className="text-text-muted mb-1">{monitorMode === 'group' ? '平均置信度' : '置信度区间'}</p>
-                <p className="font-mono text-accent-cyan">
-                  {monitorMode === 'group'
-                    ? groupAverageConfidence
-                    : autoResult ? `${(autoResult.confidence_interval[0] * 100).toFixed(0)}%-${(autoResult.confidence_interval[1] * 100).toFixed(0)}%` : '--'}
-                </p>
-              </div>
-              <div className="bg-bg-hover rounded p-3">
-                <p className="text-text-muted mb-1">模型状态</p>
-                <p className="font-medium text-text-secondary truncate">
-                  {monitorMode === 'group'
-                    ? (batchResult?.success ? (batchResult?.records?.[0]?.algorithm_status || '--') : '同步中')
-                    : autoResult?.algorithm_status || '--'}
-                </p>
-              </div>
-            </div>
-            {(monitorMode === 'group' ? batchResult?.message : autoResult?.message) && (
-              <p className="mt-3 text-xs text-text-secondary bg-accent-blue/5 border border-accent-blue/20 rounded px-3 py-2">
-                {monitorMode === 'group' ? batchResult?.message : autoResult?.message}
-              </p>
-            )}
-          </section>
-
-          <section className="bg-bg-card border border-border-default rounded-lg p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-medium">叶片图像诊断</h3>
-              <label className="px-3 py-1.5 rounded bg-bg-hover border border-border-default text-xs cursor-pointer hover:border-accent-blue">
-                选择图像
-                <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleBladeFile} />
-              </label>
-            </div>
-            <div className="grid grid-cols-[1fr_180px] gap-3">
-              <div className="relative h-40 rounded border border-border-default bg-bg-secondary overflow-hidden flex items-center justify-center">
-                {bladePreview ? (
-                  <img src={bladePreview} alt="叶片预览" className="w-full h-full object-cover opacity-80" />
-                ) : (
-                  <span className="text-xs text-text-muted">JPG/PNG 图像预览</span>
-                )}
-                {bladeResult?.damage_bbox && (
-                  <div className="absolute border-2 border-accent-red bg-accent-red/10" style={bboxToStyle(bladeResult.damage_bbox)} />
-                )}
-              </div>
-              <div className="bg-bg-hover rounded p-3 text-xs space-y-2">
-                <div>
-                  <p className="text-text-muted">诊断结果</p>
-                  <p className="font-medium text-accent-yellow">{bladeLoading ? '分析中...' : bladeResult ? faultLabel(bladeResult.damage_type) : '--'}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">置信度</p>
-                  <p className="font-mono text-accent-cyan">{bladeResult ? `${(bladeResult.confidence * 100).toFixed(1)}%` : '--'}</p>
-                </div>
-                <div>
-                  <p className="text-text-muted">模型状态</p>
-                  <p className="text-text-secondary leading-4">{bladeResult?.algorithm_status || '待接入'}</p>
-                </div>
-              </div>
-            </div>
-            {bladeResult?.message && <p className="mt-3 text-xs text-text-secondary">{bladeResult.message}</p>}
-          </section>
-        </div>
 
         {monitorMode === 'group' && batchResult?.success && (
           <section className="bg-bg-card border border-border-default rounded-lg p-4">
@@ -1161,7 +1472,7 @@ export default function DiagnosisPage() {
               <div>
                 <h3 className="text-sm font-medium">分组实时监测记录</h3>
                 <p className="text-xs text-text-muted mt-1">
-                  共 {batchResult.total} 条 · {Object.entries(batchResult.group_summary).map(([group, count]) => `${group} ${count}台`).join(' / ')}
+                  筛选 {sortedBatchRecords.length}/{batchResult.total} 条 · {Object.entries(batchResult.group_summary).map(([group, count]) => `${group} ${count}台`).join(' / ')}
                 </p>
               </div>
               <div className="flex items-end gap-3">
@@ -1205,13 +1516,14 @@ export default function DiagnosisPage() {
 
             <div className="overflow-x-auto">
               <div className="min-w-[920px] rounded-lg border border-border-default overflow-hidden">
-                <div className="grid grid-cols-[1.2fr_0.85fr_0.8fr_1.25fr_0.85fr_1fr_0.85fr] gap-3 bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
+                <div className="grid grid-cols-[1.25fr_0.72fr_1.2fr_0.75fr_0.55fr_0.55fr_0.65fr_0.75fr] gap-3 bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
                   <span>风机</span>
-                  <span>分组</span>
                   <span>风机状态</span>
                   <span>识别结果</span>
                   <span>置信度</span>
-                  <span>模型状态</span>
+                  <span>故障数</span>
+                  <span>疑似</span>
+                  <span>HI</span>
                   <span>识别时间</span>
                 </div>
                 {pagedBatchRows.map((row, index) => {
@@ -1223,17 +1535,17 @@ export default function DiagnosisPage() {
                     );
                   }
                   const record = row.record;
+                  const turbineStats = turbineRowById.get(record.turbine_id);
                   return (
                     <button
                       key={record.record_id}
                       onClick={() => selectBatchRecord(record)}
-                      className="w-full grid grid-cols-[1.2fr_0.85fr_0.8fr_1.25fr_0.85fr_1fr_0.85fr] gap-3 border-t border-border-default px-3 py-2.5 text-left text-xs hover:bg-bg-hover"
+                      className="w-full grid grid-cols-[1.25fr_0.72fr_1.2fr_0.75fr_0.55fr_0.55fr_0.65fr_0.75fr] gap-3 border-t border-border-default px-3 py-2.5 text-left text-xs hover:bg-bg-hover"
                     >
                       <span className="min-w-0">
                         <span className="block font-medium text-text-primary truncate">{record.turbine_name}</span>
-                        <span className="block text-[10px] text-text-muted">#{record.turbine_id}</span>
+                        <span className="block text-[10px] text-text-muted">#{record.turbine_id} · {record.region}</span>
                       </span>
-                      <span className="text-text-secondary truncate">{record.region}</span>
                       <span className={
                         record.turbine_status === 'fault'
                           ? 'text-accent-red'
@@ -1243,13 +1555,8 @@ export default function DiagnosisPage() {
                       }>
                         {turbineStatusLabel(record.turbine_status)}
                       </span>
-                      <span className="min-w-0">
-                        <span className={`inline-flex max-w-full rounded px-2 py-0.5 text-[10px] ${
-                          record.status === 'suspected_fault' ? 'bg-accent-red/20 text-accent-red' : 'bg-accent-green/20 text-accent-green'
-                        }`}>
-                          {detectionStatusLabel(record.status)}
-                        </span>
-                        <span className="mt-1 block text-text-secondary truncate">{faultLabel(record.fault_type)}</span>
+                      <span className={`min-w-0 truncate font-mono ${diagnosisTypeClass(record.fault_type)}`}>
+                        {shortenText(record.fault_type, 24)}
                       </span>
                       <span className="font-mono text-accent-cyan">
                         {(record.confidence * 100).toFixed(0)}%
@@ -1257,7 +1564,11 @@ export default function DiagnosisPage() {
                           {(record.confidence_interval[0] * 100).toFixed(0)}-{(record.confidence_interval[1] * 100).toFixed(0)}%
                         </span>
                       </span>
-                      <span className="text-text-secondary truncate">{record.algorithm_status}</span>
+                      <span className="font-mono text-text-secondary">{turbineStats?.faultCount ?? 0}</span>
+                      <span className="font-mono text-accent-yellow">{turbineStats?.suspectedCount ?? (record.status === 'suspected_fault' ? 1 : 0)}</span>
+                      <span className={`font-mono ${record.turbine_status === 'normal' ? 'text-accent-green' : record.turbine_status === 'warning' ? 'text-accent-yellow' : 'text-accent-red'}`}>
+                        {turbineStats?.turbine.hi_value?.toFixed?.(1) ?? '--'}
+                      </span>
                       <span className="text-text-muted">
                         {new Date(record.generated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                       </span>
@@ -1289,6 +1600,13 @@ export default function DiagnosisPage() {
           </section>
         )}
 
+        {monitorMode === 'group' && !batchResult?.success && (
+          <section className="bg-bg-card border border-border-default rounded-lg p-8 text-center">
+            <p className="text-sm text-text-secondary">{batchLoading ? '分组监测同步中...' : '当前筛选条件下暂无分组监测记录'}</p>
+            <p className="mt-2 text-xs text-text-muted">调整风机分组、状态、置信度或故障类型后可重新刷新。</p>
+          </section>
+        )}
+
         <div className="grid grid-cols-[1.2fr_1fr] gap-4">
           <section className="bg-bg-card border border-border-default rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
@@ -1314,7 +1632,7 @@ export default function DiagnosisPage() {
           <section className="bg-bg-card border border-border-default rounded-lg p-4">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
-                <h3 className="text-sm font-medium">故障原因排查</h3>
+                <h3 className="text-sm font-medium">信号贡献分析</h3>
                 <p className="text-[10px] text-text-muted mt-1">
                   {monitorMode === 'group'
                     ? currentGroupRecord
@@ -1366,11 +1684,11 @@ export default function DiagnosisPage() {
                   <p className="mt-1 text-[11px] text-text-secondary">{sig.finding}</p>
                 </div>
               ))}
-              {activeCauseInsights.length === 0 && <p className="text-xs text-text-muted">当前筛选范围暂无故障原因数据</p>}
+              {activeCauseInsights.length === 0 && <p className="text-xs text-text-muted">当前筛选范围暂无诊断依据数据</p>}
             </div>
             {activeCauseInsights.length > CAUSE_PAGE_SIZE && (
               <div className="mt-3 flex items-center justify-between text-xs">
-                <span className="text-text-muted">原因 {currentCausePage}/{causeTotalPages}</span>
+                <span className="text-text-muted">依据 {currentCausePage}/{causeTotalPages}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setCausePage((page) => Math.max(1, page - 1))}

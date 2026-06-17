@@ -16,6 +16,44 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 DEFAULT_REGION = "陕北"
 DEFAULT_SKILLS = ["风机维护", "电气检修"]
+PERSONNEL_PREF_KEY = "personnel_profile"
+
+
+def _clean_skills(skills: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    for skill in skills or []:
+        value = skill.strip()
+        if value and value not in cleaned:
+            cleaned.append(value)
+    return cleaned or DEFAULT_SKILLS
+
+
+def _personnel_profile(user: User) -> tuple[list[str], str]:
+    preferences = user.preferences if isinstance(user.preferences, dict) else {}
+    profile = preferences.get(PERSONNEL_PREF_KEY) if isinstance(preferences, dict) else None
+    if not isinstance(profile, dict):
+        return DEFAULT_SKILLS, DEFAULT_REGION
+
+    raw_skills = profile.get("skills")
+    skills = _clean_skills(raw_skills if isinstance(raw_skills, list) else None)
+    region = str(profile.get("region") or DEFAULT_REGION).strip() or DEFAULT_REGION
+    return skills, region
+
+
+def _set_personnel_profile(
+    user: User,
+    *,
+    skills: list[str] | None = None,
+    region: str | None = None,
+) -> None:
+    preferences = dict(user.preferences or {}) if isinstance(user.preferences, dict) else {}
+    profile = dict(preferences.get(PERSONNEL_PREF_KEY) or {})
+    if skills is not None:
+        profile["skills"] = _clean_skills(skills)
+    if region is not None:
+        profile["region"] = region.strip() or DEFAULT_REGION
+    preferences[PERSONNEL_PREF_KEY] = profile
+    user.preferences = preferences
 
 
 async def _active_workorder_count(db: AsyncSession, assignee: str) -> int:
@@ -23,6 +61,7 @@ async def _active_workorder_count(db: AsyncSession, assignee: str) -> int:
         select(func.count(WorkOrder.id)).where(
             WorkOrder.assignee == assignee,
             WorkOrder.status.notin_(["completed", "closed"]),
+            WorkOrder.deleted_at.is_(None),
         )
     )
     return int(result.scalar_one())
@@ -31,14 +70,13 @@ async def _active_workorder_count(db: AsyncSession, assignee: str) -> int:
 async def _to_personnel_response(
     user: User,
     db: AsyncSession,
-    skills: list[str] | None = None,
-    region: str | None = None,
 ) -> PersonnelResponse:
+    skills, region = _personnel_profile(user)
     return PersonnelResponse(
         id=user.id,
         name=user.username,
-        skills=skills or DEFAULT_SKILLS,
-        region=region or DEFAULT_REGION,
+        skills=skills,
+        region=region,
         load=await _active_workorder_count(db, user.username),
         email=user.email,
     )
@@ -50,9 +88,6 @@ async def list_personnel(
     db: AsyncSession = Depends(get_db),
 ):
     """List all personnel with optional region filter."""
-    if region and region != DEFAULT_REGION:
-        return []
-
     q = (
         select(User)
         .where(User.is_active == True, User.role == "technician")
@@ -64,7 +99,10 @@ async def list_personnel(
 
     personnel = []
     for user in users:
-        personnel.append(await _to_personnel_response(user, db))
+        item = await _to_personnel_response(user, db)
+        if region and item.region != region:
+            continue
+        personnel.append(item)
 
     return personnel
 
@@ -88,11 +126,12 @@ async def create_personnel(
         password_hash=hash_password("temp123"),  # Default password
         role="technician",
     )
+    _set_personnel_profile(user, skills=data.skills, region=data.region)
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    return await _to_personnel_response(user, db, skills=data.skills, region=data.region)
+    return await _to_personnel_response(user, db)
 
 
 @router.put("/{personnel_id}", response_model=PersonnelResponse)
@@ -121,15 +160,18 @@ async def update_personnel(
             raise HTTPException(status_code=400, detail="Email already exists")
         user.email = data.email
 
+    if data.skills is not None or data.region is not None:
+        current_skills, current_region = _personnel_profile(user)
+        _set_personnel_profile(
+            user,
+            skills=data.skills if data.skills is not None else current_skills,
+            region=data.region if data.region is not None else current_region,
+        )
+
     await db.commit()
     await db.refresh(user)
 
-    return await _to_personnel_response(
-        user,
-        db,
-        skills=data.skills,
-        region=data.region,
-    )
+    return await _to_personnel_response(user, db)
 
 
 @router.delete("/{personnel_id}")
