@@ -7,6 +7,7 @@ import type { RULPrediction, CostComparison, WorkOrder, Turbine } from '../../ty
 import type { PredictionSummary } from '../../services/predictionService';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 import MaintenanceCalendar from './MaintenanceCalendar';
+import { fetchUserPreferences, loadLocalPreferences, PREFERENCES_UPDATED_EVENT, type UserPreferences } from '../../services/preferences';
 
 // ── Types ──
 interface MaintenanceTask {
@@ -96,6 +97,7 @@ export default function PredictionPage() {
   const [costResult, setCostResult] = useState<CostComparison | null>(null); const [costLoading, setCostLoading] = useState(false);
 
   const [sortKey, setSortKey] = useState<SortKey>('rul_asc'); const [chartLimit, setChartLimit] = useState(20);
+  const [riskFirst, setRiskFirst] = useState(() => loadLocalPreferences().riskFirst);
   const rulChartRef = useRef<HTMLDivElement>(null); const regionChartRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
@@ -114,6 +116,17 @@ export default function PredictionPage() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    const applyPrefs = (prefs: UserPreferences) => setRiskFirst(prefs.riskFirst);
+    applyPrefs(loadLocalPreferences());
+    fetchUserPreferences().then(applyPrefs).catch(() => undefined);
+    const handlePreferences = (event: Event) => {
+      applyPrefs((event as CustomEvent<UserPreferences>).detail || loadLocalPreferences());
+    };
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+  }, []);
 
   const sortedPredictions = useMemo(() => sortPredictions(predictions, sortKey).slice(0, chartLimit), [predictions, sortKey, chartLimit]);
 
@@ -172,6 +185,16 @@ export default function PredictionPage() {
   const selectedTurbine = useMemo(() => turbines.find(t => t.id === costTurbineId), [turbines, costTurbineId]);
   const highRisk = useMemo(() => predictions.filter(p => p.remaining_life_days < 180).sort((a, b) => a.remaining_life_days - b.remaining_life_days), [predictions]);
   const turbineHiMap = useMemo(() => { const m = new Map<number, number>(); turbines.forEach(t => m.set(t.id, t.hi_value)); return m; }, [turbines]);
+  const prioritizedPlan = useMemo(() => {
+    const plan = maintPlan?.plan || [];
+    if (!riskFirst) return plan;
+    const priorityRank: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+    return [...plan].sort((a, b) => (
+      (priorityRank[a.priority] ?? 4) - (priorityRank[b.priority] ?? 4)
+      || a.rul_days - b.rul_days
+      || a.hi_value - b.hi_value
+    ));
+  }, [maintPlan?.plan, riskFirst]);
 
   const riskLabel = (r: CostComparison) => r.risk_level === 'high' ? '高' : r.risk_level === 'medium' ? '中' : '低';
   const riskClass = (r: CostComparison) => r.risk_level === 'high' ? 'text-accent-red bg-accent-red/10 border-accent-red/30' : r.risk_level === 'medium' ? 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/30' : 'text-accent-green bg-accent-green/10 border-accent-green/30';
@@ -229,7 +252,7 @@ export default function PredictionPage() {
                   <table className="w-full">
                     <thead><tr className="text-text-muted border-b border-border-default"><th className="text-left py-1">风机</th><th className="text-left py-1">部件</th><th className="text-right py-1">RUL</th><th className="text-right py-1">紧急度</th><th className="text-left py-1">措施</th></tr></thead>
                     <tbody>
-                      {maintPlan.plan.slice(0, 8).map((t, i) => (
+                      {prioritizedPlan.slice(0, 8).map((t, i) => (
                         <tr key={`${t.turbine_id}-${t.component}`} onClick={() => handleScheduleItem(t, new Date())}
                           className={`border-b border-border-default hover:bg-bg-hover cursor-pointer ${t.priority === 'urgent' ? 'bg-accent-red/5' : t.priority === 'high' ? 'bg-accent-yellow/5' : ''}`}
                           title="点击排入今天">
@@ -297,7 +320,20 @@ export default function PredictionPage() {
 
         </>)}
       </div>
-      <CopilotFAB />
+      <CopilotFAB pageContext={{
+        page_type: 'prediction',
+        total_predictions: predictions.length,
+        high_risk_count: highRisk.length,
+        maintenance_plan_total: maintPlan?.total || 0,
+        urgent_count: maintPlan?.urgent_count || 0,
+        selected_turbine: selectedTurbine ? {
+          id: selectedTurbine.id,
+          name: selectedTurbine.name,
+          hi_value: selectedTurbine.hi_value,
+          region: selectedTurbine.region,
+        } : undefined,
+        risk_first: riskFirst,
+      }} />
 
       {/* Schedule Preview Modal */}
       {schedulePreview !== null && (
@@ -324,7 +360,7 @@ export default function PredictionPage() {
             <div className="flex-1 overflow-auto">
               <table className="w-full text-xs">
                 <thead><tr className="text-text-muted border-b border-border-default sticky top-0 bg-bg-card z-10"><th className="text-left py-2 w-8 pl-4">#</th><th className="text-left py-2">风机</th><th className="text-left py-2">部件</th><th className="text-right py-2">RUL</th><th className="text-right py-2">HI</th><th className="text-right py-2">紧急度</th><th className="text-left py-2">建议措施</th><th className="text-right py-2">停机</th><th className="text-right py-2">费用</th><th className="text-left py-2 pr-4">备件</th></tr></thead>
-                <tbody>{maintPlan.plan.slice(0, 100).map((t, i) =>
+                <tbody>{prioritizedPlan.slice(0, 100).map((t, i) =>
                   <tr key={`modal-${t.turbine_id}-${t.component}`} className={`border-b border-border-default hover:bg-bg-hover ${t.priority === 'urgent' ? 'bg-accent-red/5' : t.priority === 'high' ? 'bg-accent-yellow/5' : ''}`}>
                     <td className="py-1.5 text-text-muted pl-4">{i + 1}</td>
                     <td className="py-1.5">{t.turbine_name}<span className="text-[9px] text-text-muted ml-1">{t.region}</span></td>

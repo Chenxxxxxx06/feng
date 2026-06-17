@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../services/authStore';
+import { fetchUserPreferences, loadLocalPreferences } from '../../services/preferences';
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -20,7 +21,8 @@ export default function LoginPage() {
       } else {
         await login(username, password);
       }
-      navigate('/dashboard');
+      const prefs = await fetchUserPreferences().catch(() => loadLocalPreferences());
+      navigate(`/${prefs.landingPage || 'dashboard'}`);
     } catch (err: any) {
       setError(err.response?.data?.detail || '操作失败');
     }

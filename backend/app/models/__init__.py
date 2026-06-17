@@ -207,6 +207,17 @@ class NotificationLog(Base):
     created_at = Column(DateTime(timezone=True), default=func.now())
 
 
+class OperationLog(Base):
+    __tablename__ = "operation_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    page = Column(String(64), nullable=False, index=True)
+    action = Column(String(128), nullable=False)
+    result = Column(Text, nullable=True)
+    level = Column(String(16), default="info")
+    created_at = Column(DateTime(timezone=True), default=func.now(), index=True)
+
+
 class MaintenancePersonnel(Base):
     __tablename__ = "maintenance_personnel"
     id = Column(Integer, primary_key=True, index=True)
@@ -228,7 +239,6 @@ class NotificationConfig(Base):
     hi_threshold = Column(Float, default=70.0)
     email_enabled = Column(Boolean, default=False)
     email_address = Column(String(128), nullable=True)
-    wechat_enabled = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=func.now())
 
     user = relationship("User", back_populates="notification_configs")

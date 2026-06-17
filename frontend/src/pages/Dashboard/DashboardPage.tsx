@@ -6,10 +6,18 @@ import TurbineMap from '../../components/Map/TurbineMap';
 import FilterPanel from '../../components/Common/FilterPanel';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 import AIPanel from '../../components/AIAssistant/AIPanel';
+import { fetchUserPreferences, loadLocalPreferences, PREFERENCES_UPDATED_EVENT, type UserPreferences } from '../../services/preferences';
 import type { TurbineSummary, TurbineDetail } from '../../types';
 
 const EMPTY_SUMMARY: TurbineSummary = { turbines: [], total: 0, healthy: 0, warning: 0, faulty: 0 };
 const STATUS_COLORS = { normal: '#10B981', warning: '#F59E0B', fault: '#EF4444' } as const;
+
+interface ThresholdAlertStatus {
+  threshold: number;
+  low_count: number;
+  turbines: Array<{ id: number; name: string; region: string | null; status: string; hi_value: number; model: string | null }>;
+  checked_at: string;
+}
 
 function hiColor(hiValue: number): string {
   if (hiValue >= 80) return '#10B981';
@@ -139,6 +147,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [mtbfHours, setMtbfHours] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlertStatus | null>(null);
+  const [riskFirst, setRiskFirst] = useState(() => loadLocalPreferences().riskFirst);
 
   const fetchData = async () => { setLoading(true); try { const params = new URLSearchParams(filters); const { data } = await api.get(`/turbines/?${params}`); setSummary(data); } catch { setSummary(EMPTY_SUMMARY); } finally { setLoading(false); } };
   useEffect(() => { fetchData(); }, [filters]);
@@ -152,11 +162,48 @@ export default function DashboardPage() {
 
   useEffect(() => { const t = setInterval(() => setCurrentTime(new Date()), 30_000); return () => clearInterval(t); }, []);
 
+  useEffect(() => {
+    const applyPrefs = (prefs: UserPreferences) => setRiskFirst(prefs.riskFirst);
+    applyPrefs(loadLocalPreferences());
+    fetchUserPreferences().then(applyPrefs).catch(() => undefined);
+    const handlePreferences = (event: Event) => {
+      applyPrefs((event as CustomEvent<UserPreferences>).detail || loadLocalPreferences());
+    };
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadThresholdAlerts = async () => {
+      try {
+        const { data } = await api.get<ThresholdAlertStatus>('/settings/threshold-alerts');
+        if (!cancelled) setThresholdAlerts(data);
+      } catch {
+        if (!cancelled) setThresholdAlerts(null);
+      }
+    };
+    loadThresholdAlerts();
+    window.addEventListener('threshold-alerts-updated', loadThresholdAlerts);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('threshold-alerts-updated', loadThresholdAlerts);
+    };
+  }, []);
+
   const healthy = summary.turbines.filter((t) => t.status === 'normal').length;
   const warning = summary.turbines.filter((t) => t.status === 'warning').length;
   const faulty = summary.turbines.filter((t) => t.status === 'fault').length;
   const avail = summary.total > 0 ? ((healthy + warning) / summary.total * 100).toFixed(1) : '--';
-  const scopedTurbines = summary.turbines;
+  const scopedTurbines = useMemo(() => {
+    if (!riskFirst) return summary.turbines;
+    const statusRank = (status: string) => (status === 'fault' ? 0 : status === 'warning' ? 1 : 2);
+    return [...summary.turbines].sort((a, b) => (
+      statusRank(a.status) - statusRank(b.status)
+      || a.hi_value - b.hi_value
+      || a.name.localeCompare(b.name, 'zh-CN')
+    ));
+  }, [riskFirst, summary.turbines]);
   const stats = useMemo(() => scopedStats(scopedTurbines), [scopedTurbines]);
 
   const fmtMtbf = (h: number | null) => { if (h == null) return '--'; if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`; if (h >= 720) return `${(h / 720).toFixed(0)} 月`; if (h >= 24) return `${(h / 24).toFixed(0)} 天`; return h.toFixed(0); };
@@ -165,13 +212,29 @@ export default function DashboardPage() {
   const powerData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 800 + Math.sin(i / 4) * 600 + Math.random() * 400 })), []);
   const tempData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 45 + Math.sin(i / 5) * 8 + Math.random() * 4 })), []);
 
-  const alarms = useMemo(() => [
+  const baseAlarms = useMemo(() => [
     { id: 1, title: '主轴承温度异常升高', turbine: '#03 风机 · 榆林靖边A区', severity: 'critical' as const, time: '14:32' },
     { id: 2, title: '齿轮箱振动幅值超阈值', turbine: '#07 风机 · 榆林定边B区', severity: 'warning' as const, time: '13:15' },
     { id: 3, title: '变桨系统响应延迟', turbine: '#12 风机 · 榆林横山C区', severity: 'warning' as const, time: '11:48' },
     { id: 4, title: '发电机绕组温度偏高', turbine: '#05 风机 · 榆林靖边A区', severity: 'info' as const, time: '10:22' },
     { id: 5, title: '维护周期即将到期提醒', turbine: '#09 风机 · 榆林定边B区', severity: 'info' as const, time: '08:56' },
   ], []);
+  const alarms = useMemo(() => {
+    const thresholdTime = thresholdAlerts?.checked_at
+      ? new Date(thresholdAlerts.checked_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      : '刚刚';
+    const hiAlarms = (thresholdAlerts?.turbines || []).map((turbine) => ({
+      id: `hi-${turbine.id}`,
+      title: `HI低于阈值 ${thresholdAlerts?.threshold ?? 70}`,
+      turbine: `${turbine.name} · ${turbine.region || '-'} · HI ${turbine.hi_value.toFixed(1)}`,
+      severity: 'critical' as const,
+      time: thresholdTime,
+    }));
+    const combined = [...hiAlarms, ...baseAlarms];
+    if (!riskFirst) return combined;
+    const severityRank = (severity: string) => (severity === 'critical' ? 0 : severity === 'warning' ? 1 : 2);
+    return combined.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  }, [baseAlarms, riskFirst, thresholdAlerts]);
 
   const workOrders = useMemo(() => [
     { id: 42, title: '更换齿轮箱高速轴轴承', status: 'in_progress', priority: 'urgent', assignee: '张工' },
@@ -190,6 +253,20 @@ export default function DashboardPage() {
   const avgHealth = scopedTurbines.length > 0 ? scopedTurbines.reduce((s, t) => s + t.hi_value, 0) / scopedTurbines.length : 0;
   const todayEnergy = useMemo(() => (scopedTurbines.length * 3.3 * 0.32 * 24).toFixed(0), [scopedTurbines.length]);
   const currentPower = useMemo(() => (scopedTurbines.length * 3.3 * 0.35).toFixed(0), [scopedTurbines.length]);
+  const aiSummaryData = useMemo(() => ({
+    total_turbines: summary.total,
+    healthy_turbines: healthy,
+    warning_turbines: warning,
+    faulty_turbines: faulty,
+    availability: avail,
+    mtbf_hours: mtbfHours,
+    avg_health: avgHealth,
+    current_power_mw: currentPower,
+    today_energy_mwh: todayEnergy,
+    alarms,
+    work_orders: workOrders,
+    component_temperatures: componentTemps,
+  }), [alarms, avail, avgHealth, componentTemps, currentPower, faulty, healthy, mtbfHours, summary.total, todayEnergy, warning, workOrders]);
 
   const closeDetail = useCallback(() => { setSelectedId(null); setDetail(null); }, []);
 
@@ -227,7 +304,7 @@ export default function DashboardPage() {
             <div className="flex flex-col items-center gap-3"><div className="w-10 h-10 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'rgba(59,130,246,0.3)', borderTopColor: '#3B82F6' }} /><span className="text-text-muted text-xs font-medium">加载风机数据...</span></div>
           </div>
         )}
-        <div className="absolute inset-0 z-0"><TurbineMap turbines={summary.turbines} selectedId={selectedId} onSelect={setSelectedId} /></div>
+        <div className="absolute inset-0 z-0"><TurbineMap turbines={scopedTurbines} selectedId={selectedId} onSelect={setSelectedId} /></div>
         <div className="relative z-[700]"><FilterPanel filters={filters} onChange={setFilters} /></div>
 
         {/* Slide-out Detail */}
@@ -274,7 +351,7 @@ export default function DashboardPage() {
 
       {/* ═══ Bottom Dashboard Grid ═══ */}
       <div className="flex-shrink-0 px-4 pb-5">
-        <div className="grid grid-cols-3 gap-4" style={{ height: '280px' }}>
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_300px] gap-4" style={{ height: '280px' }}>
           {/* Column 1: Health Monitoring */}
           <div className="premium-card rounded-2xl p-4 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between mb-3"><h3 className="text-[13px] font-semibold text-text-primary">风机健康监测</h3><span className="text-[10px] text-text-muted">{scopedTurbines.length} 台风机</span></div>
@@ -309,11 +386,15 @@ export default function DashboardPage() {
               <ScadaTrendChart title="齿轮箱温度" data={tempData} color="#F59E0B" unit="°C" height={76} />
             </div>
           </div>
+
+          {/* Column 4: AI Summary */}
+          <div className="premium-card rounded-2xl min-h-0 overflow-hidden">
+            <AIPanel pageType="dashboard" pageData={aiSummaryData} />
+          </div>
         </div>
       </div>
 
       <CopilotFAB />
-      <AIPanel pageType="dashboard" />
     </div>
   );
 }

@@ -250,6 +250,44 @@ body {
   box-shadow: 0 0 10px currentColor;
 }
 
+.compact-workspace .ops-page {
+  font-size: 0.94rem;
+}
+
+.compact-workspace .ops-page.p-5,
+.compact-workspace .ops-page .p-6 {
+  padding: 12px !important;
+}
+
+.compact-workspace .ops-header {
+  padding: 8px 0 10px;
+}
+
+.compact-workspace .ops-panel,
+.compact-workspace .premium-card {
+  border-radius: var(--radius-md);
+}
+
+.compact-workspace .ops-panel.p-4,
+.compact-workspace .premium-card.p-4,
+.compact-workspace .ops-page .p-5 {
+  padding: 12px !important;
+}
+
+.compact-workspace .ops-page table th,
+.compact-workspace .ops-page table td {
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+}
+
+.compact-workspace .ops-page .space-y-5 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 12px !important;
+}
+
+.compact-workspace .ops-page .gap-5 {
+  gap: 12px !important;
+}
+
 .ops-drawer {
   background: rgba(10, 31, 63, 0.94);
   border-left: 1px solid rgba(59,130,246,0.15);
