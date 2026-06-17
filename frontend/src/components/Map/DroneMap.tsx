@@ -242,13 +242,13 @@ export default function DroneMap({
         L.marker([drone.currentPosition.lat, drone.currentPosition.lng], {
           icon: L.divIcon({
             className: '',
-            html: `<div style="width:22px;height:22px;display:flex;align-items:center;justify-content:center;
-              filter:drop-shadow(0 0 14px ${color});transform:rotate(${angle - 90}deg);">
-              <img src="/drone.png" width="18" height="18" style="display:block;" />
-              <span style="position:absolute;top:-3px;right:-6px;color:#fff;background:${color};
+            html: `<div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+              filter:drop-shadow(0 0 12px ${color});transform:rotate(${angle - 90}deg);">
+              <img src="/drone.png" width="32" height="32" style="display:block;" />
+              <span style="position:absolute;top:-4px;right:-8px;color:#fff;background:${color};
                 font-size:7px;font-weight:700;border-radius:50%;width:13px;height:13px;
                 display:flex;align-items:center;justify-content:center;border:1px solid rgba(0,0,0,0.4);">${drone.id}</span></div>`,
-            iconSize: [22, 22], iconAnchor: [11, 11],
+            iconSize: [36, 36], iconAnchor: [18, 18],
           }), zIndexOffset: 1000,
         }).bindTooltip(
           `<div style="font-size:11px"><b>${drone.name}</b><br/>🔋 ${drone.battery.toFixed(0)}% | 📸 ${drone.completedTurbines.length}/${drone.assignedTurbines.length}</div>`,
