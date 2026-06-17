@@ -262,193 +262,185 @@ export default function DroneSchedulerPage() {
         </div>
       </div>
 
-      {/* ── MAIN: Split Layout (2D + 3D) + Slide Panel ── */}
-      <div className="flex-1 relative mx-6 mb-3 flex gap-2">
-        {/* 左侧: 2D Leaflet 地图 */}
+      {/* ── MAIN: 3-Panel Layout (2D | 3D | 控制台) ── */}
+      <div className="flex-1 mx-6 mb-3 flex gap-2 min-h-0">
+        {/* 左: 2D Leaflet 地图 */}
         <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle relative" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
-          <div className="absolute inset-0 z-0">
-            <DroneMap
-              turbines={turbines}
-              drones={drones}
-              activeFarm={activeFarm}
-              onFarmSelect={setActiveFarm}
-              onTurbineClick={handleTurbineClick}
-              showPaths={hasPlan}
-              manualMode={assignmentMode === 'manual'}
-              selectedDroneId={selectedDroneId}
-            />
-          </div>
+          <DroneMap
+            turbines={turbines}
+            drones={drones}
+            activeFarm={activeFarm}
+            onFarmSelect={setActiveFarm}
+            onTurbineClick={handleTurbineClick}
+            showPaths={hasPlan}
+            manualMode={assignmentMode === 'manual'}
+            selectedDroneId={selectedDroneId}
+          />
         </div>
 
-        {/* 右侧: 3D Three.js 视图 */}
+        {/* 中: 3D Three.js 视图 */}
         <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
           <WindFarm3DView />
         </div>
 
-        {/* Slide-out Control Panel */}
-        <div className={`absolute top-0 right-0 h-full w-[370px] glass-panel shadow-2xl transform transition-transform duration-300 z-[800] flex flex-col border-l border-border-subtle ${
-          activeFarm ? 'translate-x-0' : 'translate-x-full'
-        }`}>
-          <div className="slide-panel h-full flex flex-col">
-            {/* Panel Header */}
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
-              <div>
-                <h3 className="font-bold text-sm">无人机调度控制台</h3>
-                <p className="text-[10px] text-text-muted">{activeFarm?.replace('陕北', '')} · {farmTurbineCount}台风机</p>
+        {/* 右: 无人机调度控制台 (始终可见) */}
+        <div className="w-[340px] flex-shrink-0 flex flex-col rounded-xl border border-border-subtle bg-bg-secondary/95 backdrop-blur overflow-hidden">
+          {/* Panel Header */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle">
+            <div>
+              <h3 className="font-bold text-sm">无人机调度控制台</h3>
+              <p className="text-[10px] text-text-muted">{activeFarm?.replace('陕北', '') || '选择风场'} · {farmTurbineCount}台风机</p>
+            </div>
+          </div>
+
+          {/* Panel Body */}
+          <div className="flex-1 overflow-auto p-4 space-y-3">
+
+
+            {/* Mode */}
+            <div className="industrial-card rounded-lg p-3">
+              <h4 className="text-xs font-medium text-text-secondary mb-2">规划模式</h4>
+              <div className="flex gap-2">
+                {(['tsp', 'vrp'] as Mode[]).map((m) => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                      mode === m ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-secondary hover:border-accent-blue/40'
+                    }`}>
+                    {m === 'tsp' ? '单机 TSP' : '多机 VRP'}
+                  </button>
+                ))}
               </div>
-              <button onClick={() => setActiveFarm(null)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors">✕</button>
             </div>
 
-            {/* Panel Body */}
-            <div className="flex-1 overflow-auto p-5 space-y-4">
-              {/* Mode */}
-              <div className="industrial-card rounded-lg p-4">
-                <h4 className="text-xs font-medium text-text-secondary mb-3">规划模式</h4>
-                <div className="flex gap-2">
-                  {(['tsp', 'vrp'] as Mode[]).map((m) => (
-                    <button key={m} onClick={() => setMode(m)}
-                      className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
-                        mode === m ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-secondary hover:border-accent-blue/40'
+            {/* Fleet Config */}
+            <div className="industrial-card rounded-lg p-3">
+              <h4 className="text-xs font-medium text-text-secondary mb-2">机队配置</h4>
+              <div className="space-y-2">
+                <SliderRow label="无人机数量" value={config.count} min={1} max={8} step={1} unit="架"
+                  onChange={(v) => setConfig({ ...config, count: v })} />
+                <SliderRow label="单机续航" value={Math.round(config.range / 1000)} min={5} max={100} step={5} unit="km"
+                  onChange={(v) => setConfig({ ...config, range: v * 1000 })} />
+                <SliderRow label="飞行速度" value={config.speed} min={5} max={30} step={1} unit="m/s"
+                  onChange={(v) => setConfig({ ...config, speed: v })} />
+              </div>
+            </div>
+
+            {/* Assignment */}
+            <div className="industrial-card rounded-lg p-3">
+              <h4 className="text-xs font-medium text-text-secondary mb-2">分配方式</h4>
+              <div className="flex gap-2 mb-2">
+                {(['auto', 'manual'] as const).map((a) => (
+                  <button key={a} onClick={() => setAssignmentMode(a)}
+                    className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                      assignmentMode === a ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-secondary hover:border-accent-blue/40'
+                    }`}>
+                    {a === 'auto' ? '自动分区' : '手动分配'}
+                  </button>
+                ))}
+              </div>
+              {assignmentMode === 'manual' && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-text-muted">点选无人机后在地图上选风机：</p>
+                  <div className="flex flex-wrap gap-1">
+                    {drones.map((d) => (
+                      <button key={d.id} onClick={() => setSelectedDroneId(selectedDroneId === d.id ? null : d.id)}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+                          selectedDroneId === d.id
+                            ? 'border-accent-yellow/50 bg-accent-yellow/10 text-accent-yellow'
+                            : 'border-border-default text-text-secondary hover:border-accent-blue/40'
+                        }`}
+                        style={{ borderLeftColor: d.color, borderLeftWidth: 3 }}>
+                        {d.name} ({d.assignedTurbines.length}台)
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Plan Button */}
+            <button onClick={handleReplan}
+              className="w-full rounded-lg py-2 text-sm font-medium transition-all"
+              style={{ background: 'rgba(56,139,253,0.1)', border: '1px solid rgba(56,139,253,0.3)', color: '#388bfd' }}>
+              重新规划路径
+            </button>
+
+            {/* Drone Status */}
+            {drones.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-xs font-medium text-text-secondary">无人机状态</h4>
+                {drones.map((drone) => (
+                  <div key={drone.id} className="industrial-card rounded-lg p-2.5"
+                    style={{ borderLeftColor: drone.color, borderLeftWidth: 3, borderLeftStyle: 'solid' }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium" style={{ color: drone.color }}>{drone.name}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                        drone.status === 'flying' ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/20' :
+                        drone.status === 'returning' ? 'bg-accent-green/10 text-accent-green border border-accent-green/20' :
+                        'bg-bg-hover text-text-muted border border-border-subtle'
                       }`}>
-                      {m === 'tsp' ? '单机 TSP' : '多机 VRP'}
+                        {drone.status === 'flying' ? '任务中' : drone.status === 'returning' ? '返航' : '空闲'}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-3 text-[10px] text-text-muted">
+                      <span>📸 {drone.completedTurbines.length}/{drone.assignedTurbines.length}</span>
+                      <span>🔋 {drone.battery.toFixed(0)}%</span>
+                    </div>
+                    <div className="mt-1 h-1 rounded-full bg-bg-hover overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-300" style={{
+                        width: `${drone.assignedTurbines.length ? (drone.completedTurbines.length / drone.assignedTurbines.length) * 100 : 0}%`,
+                        backgroundColor: drone.color,
+                      }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Simulation Controls */}
+            {hasPlan && drones.length > 0 && (
+              <div className="industrial-card rounded-lg p-3">
+                <h4 className="text-xs font-medium text-text-secondary mb-2">模拟控制</h4>
+                <div className="flex gap-2 mb-2">
+                  {!isRunning ? (
+                    <button onClick={() => { setIsRunning(true); useDrone3DStore.getState().setIsRunning(true); }}
+                      className="flex-1 rounded-md py-1.5 text-xs font-medium transition-all"
+                      style={{ background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.3)', color: '#3fb950' }}>
+                      ▶ 执行
                     </button>
+                  ) : (
+                    <button onClick={() => { setIsRunning(false); useDrone3DStore.getState().setIsRunning(false); }}
+                      className="flex-1 rounded-md py-1.5 text-xs font-medium transition-all"
+                      style={{ background: 'rgba(210,153,34,0.1)', border: '1px solid rgba(210,153,34,0.3)', color: '#d29922' }}>
+                      ⏸ 暂停
+                    </button>
+                  )}
+                  <button onClick={handleReplan}
+                    className="rounded-md border border-border-default px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors">
+                    ↺ 重置
+                  </button>
+                </div>
+                <div className="flex gap-1">
+                  {[1, 2, 4, 8].map((spd) => (
+                    <button key={spd} onClick={() => { setSpeedMultiplier(spd); useDrone3DStore.getState().setSpeedMultiplier(spd); }}
+                      className={`flex-1 rounded border px-1.5 py-0.5 text-[10px] transition-colors ${
+                        speedMultiplier === spd ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-muted hover:border-accent-blue/30'
+                      }`}>{spd}×</button>
                   ))}
                 </div>
-              </div>
-
-              {/* Fleet Config */}
-              <div className="industrial-card rounded-lg p-4">
-                <h4 className="text-xs font-medium text-text-secondary mb-3">机队配置</h4>
-                <div className="space-y-3">
-                  <SliderRow label="无人机数量" value={config.count} min={1} max={8} step={1} unit="架"
-                    onChange={(v) => setConfig({ ...config, count: v })} />
-                  <SliderRow label="单机续航" value={Math.round(config.range / 1000)} min={5} max={100} step={5} unit="km"
-                    onChange={(v) => setConfig({ ...config, range: v * 1000 })} />
-                  <SliderRow label="飞行速度" value={config.speed} min={5} max={30} step={1} unit="m/s"
-                    onChange={(v) => setConfig({ ...config, speed: v })} />
-                </div>
-              </div>
-
-              {/* Assignment */}
-              <div className="industrial-card rounded-lg p-4">
-                <h4 className="text-xs font-medium text-text-secondary mb-3">分配方式</h4>
-                <div className="flex gap-2 mb-3">
-                  {(['auto', 'manual'] as const).map((a) => (
-                    <button key={a} onClick={() => setAssignmentMode(a)}
-                      className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
-                        assignmentMode === a ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-secondary hover:border-accent-blue/40'
-                      }`}>
-                      {a === 'auto' ? '自动分区' : '手动分配'}
-                    </button>
-                  ))}
-                </div>
-                {assignmentMode === 'manual' && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] text-text-muted">选择无人机后，在地图上点选风机进行分配：</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {drones.map((d) => (
-                        <button key={d.id} onClick={() => setSelectedDroneId(selectedDroneId === d.id ? null : d.id)}
-                          className={`rounded-full border px-2.5 py-1 text-[10px] transition-colors ${
-                            selectedDroneId === d.id
-                              ? 'border-accent-yellow/50 bg-accent-yellow/10 text-accent-yellow'
-                              : 'border-border-default text-text-secondary hover:border-accent-blue/40'
-                          }`}
-                          style={{ borderLeftColor: d.color, borderLeftWidth: 3 }}>
-                          {d.name} ({d.assignedTurbines.length}台)
-                        </button>
-                      ))}
+                {isRunning && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-[10px] text-text-muted mb-1">
+                      <span>拍摄进度</span><span>{completedCount}/{totalCount}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-bg-hover overflow-hidden">
+                      <div className="h-full bg-accent-blue transition-all duration-300"
+                        style={{ width: `${totalCount ? (completedCount / totalCount) * 100 : 0}%` }} />
                     </div>
                   </div>
                 )}
               </div>
-
-              {/* Plan Button */}
-              <button onClick={handleReplan}
-                className="w-full rounded-lg py-2.5 text-sm font-medium transition-all"
-                style={{ background: 'rgba(56,139,253,0.1)', border: '1px solid rgba(56,139,253,0.3)', color: '#388bfd' }}>
-                重新规划路径
-              </button>
-
-              {/* Drone Status Cards */}
-              {drones.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-medium text-text-secondary">无人机状态</h4>
-                  {drones.map((drone) => (
-                    <div key={drone.id} className="industrial-card rounded-lg p-3"
-                      style={{ borderLeftColor: drone.color, borderLeftWidth: 3, borderLeftStyle: 'solid' }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium" style={{ color: drone.color }}>{drone.name}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                          drone.status === 'flying' ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/20' :
-                          drone.status === 'returning' ? 'bg-accent-green/10 text-accent-green border border-accent-green/20' :
-                          'bg-bg-hover text-text-muted border border-border-subtle'
-                        }`}>
-                          {drone.status === 'flying' ? '任务中' : drone.status === 'returning' ? '返航' : '空闲'}
-                        </span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-3 text-[10px] text-text-muted">
-                        <span>📸 {drone.completedTurbines.length}/{drone.assignedTurbines.length}</span>
-                        <span>🔋 {drone.battery.toFixed(0)}%</span>
-                        <span>🛬 {((drone.range - (drone.progress > 0 ? drone.progress * 500 : 0)) / 1000).toFixed(0)}km</span>
-                      </div>
-                      <div className="mt-2 h-1.5 rounded-full bg-bg-hover overflow-hidden">
-                        <div className="h-full rounded-full transition-all duration-300" style={{
-                          width: `${drone.assignedTurbines.length ? (drone.completedTurbines.length / drone.assignedTurbines.length) * 100 : 0}%`,
-                          backgroundColor: drone.color,
-                        }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Simulation Controls */}
-              {hasPlan && drones.length > 0 && (
-                <div className="industrial-card rounded-lg p-4">
-                  <h4 className="text-xs font-medium text-text-secondary mb-3">模拟控制</h4>
-                  <div className="flex gap-2 mb-3">
-                    {!isRunning ? (
-                      <button onClick={() => { setIsRunning(true); useDrone3DStore.getState().setIsRunning(true); }}
-                        className="flex-1 rounded-md py-2 text-xs font-medium transition-all"
-                        style={{ background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.3)', color: '#3fb950' }}>
-                        ▶ 执行
-                      </button>
-                    ) : (
-                      <button onClick={() => { setIsRunning(false); useDrone3DStore.getState().setIsRunning(false); }}
-                        className="flex-1 rounded-md py-2 text-xs font-medium transition-all"
-                        style={{ background: 'rgba(210,153,34,0.1)', border: '1px solid rgba(210,153,34,0.3)', color: '#d29922' }}>
-                        ⏸ 暂停
-                      </button>
-                    )}
-                    <button onClick={handleReplan}
-                      className="rounded-md border border-border-default px-3 py-2 text-xs text-text-secondary hover:text-text-primary transition-colors">
-                      ↺ 重置
-                    </button>
-                  </div>
-                  <div className="flex gap-1">
-                    {[1, 2, 4, 8].map((spd) => (
-                      <button key={spd} onClick={() => { setSpeedMultiplier(spd); useDrone3DStore.getState().setSpeedMultiplier(spd); }}
-                        className={`flex-1 rounded border px-2 py-1 text-[10px] transition-colors ${
-                          speedMultiplier === spd ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-muted hover:border-accent-blue/30'
-                        }`}>{spd}×</button>
-                    ))}
-                  </div>
-                  {/* Progress */}
-                  {isRunning && (
-                    <div className="mt-3">
-                      <div className="flex justify-between text-[10px] text-text-muted mb-1">
-                        <span>拍摄进度</span><span>{completedCount}/{totalCount}</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-bg-hover overflow-hidden">
-                        <div className="h-full bg-accent-blue transition-all duration-300"
-                          style={{ width: `${totalCount ? (completedCount / totalCount) * 100 : 0}%` }} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
