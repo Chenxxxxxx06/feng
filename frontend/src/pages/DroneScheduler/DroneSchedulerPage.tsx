@@ -283,12 +283,6 @@ export default function DroneSchedulerPage() {
     [activeFarm, turbines],
   );
 
-  const allAssigned = useMemo(() => {
-    const s = new Set<number>();
-    drones.forEach((d) => d.assignedTurbines.forEach((id) => s.add(id)));
-    return s;
-  }, [drones]);
-
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = Math.floor(s % 60);
