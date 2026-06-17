@@ -151,8 +151,8 @@ export default function DroneMap({
       const shot = completedIds.has(t.id);
       const assigned = assignedIds.has(t.id);
       const borderColor = t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : shot ? '#3fb950' : assigned ? '#388bfd' : '#54657e';
-      const sizeW = 90;
-      const sizeH = 95;
+      const sizeW = 95;
+      const sizeH = 90;
 
       const icon = L.icon({
         iconUrl: '/turbine-marker.png',
