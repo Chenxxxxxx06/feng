@@ -6,10 +6,50 @@ import TurbineMap from '../../components/Map/TurbineMap';
 import FilterPanel from '../../components/Common/FilterPanel';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 import AIPanel from '../../components/AIAssistant/AIPanel';
-import type { TurbineSummary, TurbineDetail } from '../../types';
+import type { TurbineSummary, TurbineDetail, Fault, WorkOrder } from '../../types';
 
 const EMPTY_SUMMARY: TurbineSummary = { turbines: [], total: 0, healthy: 0, warning: 0, faulty: 0 };
 const STATUS_COLORS = { normal: '#10B981', warning: '#F59E0B', fault: '#EF4444' } as const;
+
+// ── Fault type English code → Chinese display ──
+const FAULT_TYPE_CN: Record<string, string> = {
+  bearing_inner_race_wear: '轴承内圈磨损',
+  gearbox_tooth_pitting: '齿轮箱点蚀',
+  generator_overheat: '发电机过热',
+  blade_leading_edge_erosion: '叶片前缘腐蚀',
+  pitch_system_fault: '变桨系统故障',
+  main_shaft_misalignment: '主轴不对中',
+  cooling_system_fault: '冷却系统故障',
+  electrical_connection: '电气连接松动',
+  care_scada_anomaly: 'SCADA数据异常',
+};
+
+function faultTitle(f: Fault): string {
+  const cn = FAULT_TYPE_CN[f.fault_type] || f.fault_type;
+  return cn;
+}
+
+function turbineLabel(turbine_name?: string, turbine_region?: string): string {
+  const name = turbine_name || '--';
+  const region = turbine_region || '';
+  return region ? `${name} · ${region}` : name;
+}
+
+function severityFromPriority(priority?: string): 'critical' | 'warning' | 'info' {
+  if (priority === 'urgent' || priority === 'high') return 'critical';
+  if (priority === 'medium') return 'warning';
+  return 'info';
+}
+
+function timeFromISO(iso?: string): string {
+  if (!iso) return '--:--';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '--:--';
+  }
+}
 
 function hiColor(hiValue: number): string {
   if (hiValue >= 80) return '#10B981';
@@ -140,13 +180,66 @@ export default function DashboardPage() {
   const [mtbfHours, setMtbfHours] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // ── Real data state — no hardcoded values ──
+  const [alarms, setAlarms] = useState<Fault[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [aggregate, setAggregate] = useState<{
+    component_temps: { label: string; temperature: number; maxTemp: number; status: string }[];
+    scada_trends: { wind_speed_ms: { time: string; value: number }[]; power_kw: { time: string; value: number }[]; gearbox_temp_c: { time: string; value: number }[] };
+    total_power_kw: number;
+    today_energy_kwh: number;
+    data_available: boolean;
+  } | null>(null);
+
   const fetchData = async () => { setLoading(true); try { const params = new URLSearchParams(filters); const { data } = await api.get(`/turbines/?${params}`); setSummary(data); } catch { setSummary(EMPTY_SUMMARY); } finally { setLoading(false); } };
   useEffect(() => { fetchData(); }, [filters]);
   useEffect(() => { if (!selectedId) { setDetail(null); return; } api.get(`/turbines/${selectedId}`).then(({ data }) => setDetail(data)).catch(() => setDetail(null)); }, [selectedId]);
 
+  // ── Fetch MTBF from real dataset ──
   useEffect(() => {
     let c = false;
     (async () => { try { const { data } = await api.get('/turbines/monitoring-metrics'); if (!c && data?.mtbf_hours != null) setMtbfHours(data.mtbf_hours); } catch {}; })();
+    return () => { c = true; };
+  }, []);
+
+  // ── Fetch alarms (real faults from DB) ──
+  useEffect(() => {
+    let c = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/diagnosis/faults?status=open');
+        if (!c) setAlarms(Array.isArray(data) ? data : []);
+      } catch { if (!c) setAlarms([]); }
+    })();
+    return () => { c = true; };
+  }, []);
+
+  // ── Fetch work orders (real from DB) ──
+  useEffect(() => {
+    let c = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/workorders/?include_deleted=false');
+        if (!c && Array.isArray(data)) {
+          // Show active orders first, limit to 4 for dashboard preview
+          const active = data.filter((wo: WorkOrder) => !['completed', 'closed', 'cancelled'].includes(wo.status));
+          const rest = data.filter((wo: WorkOrder) => ['completed', 'closed', 'cancelled'].includes(wo.status));
+          setWorkOrders([...active, ...rest].slice(0, 4));
+        }
+      } catch { if (!c) setWorkOrders([]); }
+    })();
+    return () => { c = true; };
+  }, []);
+
+  // ── Fetch dashboard aggregate (SCADA trends, component temps, power) ──
+  useEffect(() => {
+    let c = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/turbines/dashboard-aggregate');
+        if (!c && data) setAggregate(data);
+      } catch { if (!c) setAggregate(null); }
+    })();
     return () => { c = true; };
   }, []);
 
@@ -161,35 +254,34 @@ export default function DashboardPage() {
 
   const fmtMtbf = (h: number | null) => { if (h == null) return '--'; if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`; if (h >= 720) return `${(h / 720).toFixed(0)} 月`; if (h >= 24) return `${(h / 24).toFixed(0)} 天`; return h.toFixed(0); };
 
-  const windSpeedData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 4 + Math.sin(i / 4) * 3 + Math.random() * 4 })), []);
-  const powerData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 800 + Math.sin(i / 4) * 600 + Math.random() * 400 })), []);
-  const tempData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 45 + Math.sin(i / 5) * 8 + Math.random() * 4 })), []);
+  // ── SCADA trends from real aggregate API ──
+  const windSpeedData = aggregate?.scada_trends?.wind_speed_ms || [];
+  const powerData = aggregate?.scada_trends?.power_kw || [];
+  const tempData = aggregate?.scada_trends?.gearbox_temp_c || [];
 
-  const alarms = useMemo(() => [
-    { id: 1, title: '主轴承温度异常升高', turbine: '#03 风机 · 榆林靖边A区', severity: 'critical' as const, time: '14:32' },
-    { id: 2, title: '齿轮箱振动幅值超阈值', turbine: '#07 风机 · 榆林定边B区', severity: 'warning' as const, time: '13:15' },
-    { id: 3, title: '变桨系统响应延迟', turbine: '#12 风机 · 榆林横山C区', severity: 'warning' as const, time: '11:48' },
-    { id: 4, title: '发电机绕组温度偏高', turbine: '#05 风机 · 榆林靖边A区', severity: 'info' as const, time: '10:22' },
-    { id: 5, title: '维护周期即将到期提醒', turbine: '#09 风机 · 榆林定边B区', severity: 'info' as const, time: '08:56' },
-  ], []);
-
-  const workOrders = useMemo(() => [
-    { id: 42, title: '更换齿轮箱高速轴轴承', status: 'in_progress', priority: 'urgent', assignee: '张工' },
-    { id: 41, title: '叶片前缘腐蚀修复', status: 'assigned', priority: 'high', assignee: '李工' },
-    { id: 40, title: '发电机冷却系统清洗', status: 'pending', priority: 'medium', assignee: null },
-    { id: 39, title: '变桨电机定期保养', status: 'completed', priority: 'low', assignee: '王工' },
-  ], []);
-
-  const componentTemps = useMemo(() => [
-    { label: '主轴承', temperature: 62.3, maxTemp: 85, status: 'normal' as const },
-    { label: '齿轮箱', temperature: 78.5, maxTemp: 90, status: 'warning' as const },
-    { label: '发电机', temperature: 55.1, maxTemp: 80, status: 'normal' as const },
-    { label: '变桨系统', temperature: 41.8, maxTemp: 65, status: 'normal' as const },
-  ], []);
+  // ── Component temps from real aggregate API ──
+  const componentTemps = useMemo(() => {
+    if (aggregate?.component_temps?.length) {
+      return aggregate.component_temps.map((c) => ({
+        label: c.label,
+        temperature: c.temperature,
+        maxTemp: c.maxTemp,
+        status: c.status as 'normal' | 'warning' | 'fault',
+      }));
+    }
+    return [];
+  }, [aggregate]);
 
   const avgHealth = scopedTurbines.length > 0 ? scopedTurbines.reduce((s, t) => s + t.hi_value, 0) / scopedTurbines.length : 0;
-  const todayEnergy = useMemo(() => (scopedTurbines.length * 3.3 * 0.32 * 24).toFixed(0), [scopedTurbines.length]);
-  const currentPower = useMemo(() => (scopedTurbines.length * 3.3 * 0.35).toFixed(0), [scopedTurbines.length]);
+
+  // ── Power / Energy from real aggregate API ──
+  const currentPower = aggregate?.total_power_kw != null
+    ? (aggregate.total_power_kw / 1000).toFixed(1)  // kW → MW
+    : '--';
+  const todayEnergy = aggregate?.today_energy_kwh != null
+    ? (aggregate.today_energy_kwh / 1000).toFixed(0)  // kWh → MWh
+    : '--';
+
   const aiSummaryData = useMemo(() => ({
     total_turbines: summary.total,
     healthy_turbines: healthy,
@@ -200,8 +292,20 @@ export default function DashboardPage() {
     avg_health: avgHealth,
     current_power_mw: currentPower,
     today_energy_mwh: todayEnergy,
-    alarms,
-    work_orders: workOrders,
+    alarms: alarms.map((a) => ({
+      id: a.id,
+      title: faultTitle(a),
+      turbine: turbineLabel(a.turbine_name, a.turbine_region),
+      severity: severityFromPriority(a.priority),
+      time: timeFromISO(a.detected_at),
+    })),
+    work_orders: workOrders.map((wo) => ({
+      id: wo.id,
+      title: wo.title,
+      status: wo.status,
+      priority: wo.priority || 'medium',
+      assignee: wo.assignee,
+    })),
     component_temperatures: componentTemps,
   }), [alarms, avail, avgHealth, componentTemps, currentPower, faulty, healthy, mtbfHours, summary.total, todayEnergy, warning, workOrders]);
 
@@ -230,7 +334,7 @@ export default function DashboardPage() {
           <KPICard label="正常运行" value={String(healthy)} unit="台" color="#10B981" />
           <KPICard label="预警风机" value={String(warning)} unit="台" color="#F59E0B" />
           <KPICard label="故障风机" value={String(faulty)} unit="台" color="#EF4444" trend={faulty > 0 ? 'up' : undefined} />
-          <KPICard label="MTBF" value={mtbfHours != null ? fmtMtbf(mtbfHours) : '--'} unit="" color="#22D3EE" />
+          <KPICard label="平均故障间隔" value={mtbfHours != null ? fmtMtbf(mtbfHours) : '--'} unit="" color="#22D3EE" />
         </div>
       </div>
 
@@ -297,30 +401,79 @@ export default function DashboardPage() {
               <HealthRing value={scopedTurbines.length > 0 ? (stats.healthy / scopedTurbines.length) * 100 : 0} label="正常率" />
               <HealthRing value={100 - (stats.faulty / Math.max(1, scopedTurbines.length)) * 100} label="无故障率" />
             </div>
-            <div className="mt-auto"><p className="text-[10px] text-text-muted mb-2 uppercase tracking-wide">关键部件温度</p>
-              <div className="grid grid-cols-2 gap-2">{componentTemps.map((comp) => (<ComponentHealthCard key={comp.label} {...comp} />))}</div>
+            <div className="mt-auto">
+              <p className="text-[10px] text-text-muted mb-2 uppercase tracking-wide">关键部件温度</p>
+              {componentTemps.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {componentTemps.map((comp) => (<ComponentHealthCard key={comp.label} {...comp} />))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-text-muted italic">{aggregate === null ? '正在从 SCADA 计算部件温度...' : '无 SCADA 温度数据'}</p>
+              )}
             </div>
           </div>
 
           {/* Column 2: Alarms + Work Orders */}
           <div className="flex flex-col gap-3 overflow-hidden">
             <div className="premium-card rounded-2xl p-4 flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between mb-3"><h3 className="text-[13px] font-semibold text-text-primary">实时告警中心</h3><span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: '#EF4444' }}>{alarms.filter((a) => a.severity === 'critical').length} 严重</span></div>
-              <div className="flex-1 space-y-1.5 overflow-auto">{alarms.map((a) => (<AlarmItem key={a.id} {...a} />))}</div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[13px] font-semibold text-text-primary">实时告警中心</h3>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: '#EF4444' }}>
+                  {alarms.filter((a) => severityFromPriority(a.priority) === 'critical').length} 严重
+                </span>
+              </div>
+              <div className="flex-1 space-y-1.5 overflow-auto">
+                {alarms.length > 0 ? (
+                  alarms.slice(0, 5).map((a) => (
+                    <AlarmItem
+                      key={a.id}
+                      title={faultTitle(a)}
+                      turbine={turbineLabel(a.turbine_name, a.turbine_region)}
+                      severity={severityFromPriority(a.priority)}
+                      time={timeFromISO(a.detected_at)}
+                    />
+                  ))
+                ) : (
+                  <p className="text-[11px] text-text-muted italic px-3">当前无活跃告警</p>
+                )}
+              </div>
             </div>
             <div className="premium-card rounded-2xl p-4 flex-1 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between mb-3"><h3 className="text-[13px] font-semibold text-text-primary">维修工单</h3><Link to="/workorder" className="text-[10px] text-accent-blue hover:underline">查看全部 →</Link></div>
-              <div className="flex-1 space-y-0.5 overflow-auto">{workOrders.map((wo) => (<WorkOrderPreview key={wo.id} {...wo} />))}</div>
+              <div className="flex-1 space-y-0.5 overflow-auto">
+                {workOrders.length > 0 ? (
+                  workOrders.map((wo) => (
+                    <WorkOrderPreview
+                      key={wo.id}
+                      id={wo.id}
+                      title={wo.title}
+                      status={wo.status}
+                      priority={wo.priority || 'medium'}
+                      assignee={wo.assignee}
+                    />
+                  ))
+                ) : (
+                  <p className="text-[11px] text-text-muted italic px-3">暂无工单</p>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Column 3: SCADA Charts */}
           <div className="premium-card rounded-2xl p-4 flex flex-col overflow-visible">
-            <div className="flex items-center justify-between mb-3"><h3 className="text-[13px] font-semibold text-text-primary">SCADA 数据趋势</h3><span className="text-[10px] text-text-muted">近24小时</span></div>
+            <div className="flex items-center justify-between mb-3"><h3 className="text-[13px] font-semibold text-text-primary">SCADA 数据趋势</h3><span className="text-[10px] text-text-muted">{aggregate ? (aggregate.data_available ? '数据集最新24小时' : '无可用数据') : '加载中...'}</span></div>
             <div className="flex-1 grid grid-rows-3 gap-3" style={{ minHeight: 0 }}>
-              <ScadaTrendChart title="风速趋势" data={windSpeedData} color="#22D3EE" unit="m/s" height={76} />
-              <ScadaTrendChart title="发电功率" data={powerData} color="#3B82F6" unit="kW" height={76} />
-              <ScadaTrendChart title="齿轮箱温度" data={tempData} color="#F59E0B" unit="°C" height={76} />
+              {windSpeedData.length > 0 ? (
+                <>
+                  <ScadaTrendChart title="风速趋势" data={windSpeedData} color="#22D3EE" unit="m/s" height={76} />
+                  <ScadaTrendChart title="发电功率" data={powerData} color="#3B82F6" unit="kW" height={76} />
+                  <ScadaTrendChart title="齿轮箱温度" data={tempData} color="#F59E0B" unit="°C" height={76} />
+                </>
+              ) : (
+                <div className="flex items-center justify-center text-[11px] text-text-muted italic" style={{ gridRow: 'span 3' }}>
+                  {aggregate === null ? '正在从 SCADA 数据库加载趋势数据...' : 'SCADA 数据暂无，请检查数据导入状态'}
+                </div>
+              )}
             </div>
           </div>
 

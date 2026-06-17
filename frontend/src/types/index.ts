@@ -267,7 +267,7 @@ export interface Drone {
   currentPosition: { lat: number; lng: number } | null;
   path: { lat: number; lng: number }[];
   progress: number;
-  /** 3D 飞行高度 (m) */
+  /** 3D 飞行高度 (m)，由巡航高度设定 */
   _altitude?: number;
 }
 

@@ -224,11 +224,15 @@ function kMeans(points: Point[], k: number, seed?: number): Cluster[] {
 
 // ── VRP: K-Means + TSP ──
 
-const DRONE_COLORS = ['#f0883e', '#388bfd', '#a371f7', '#39d2c0', '#f85149', '#d29922', '#3fb950', '#ff69b4'];
+const DRONE_COLORS = [
+  '#f0883e', '#388bfd', '#a371f7', '#39d2c0', '#f85149', '#d29922', '#3fb950',
+  '#ff69b4', '#00d4aa', '#ff6b6b', '#48dbfb', '#feca57',
+];
 
 /**
  * Solve VRP: partition turbines into k clusters, then solve TSP for each.
  * Includes load-balancing step to keep clusters similar in size.
+ * When droneCount is close to turbineCount, uses simple 1-per-drone assignment.
  */
 export function solveVrp(
   turbines: Point[],
@@ -239,47 +243,111 @@ export function solveVrp(
   if (droneCount <= 0) droneCount = 1;
   if (droneCount > turbines.length) droneCount = turbines.length;
 
-  const maxImbalance = options?.maxImbalance ?? 0.25; // 25% tolerance
+  // ── High drone count: simple 1-per-drone (k-means unreliable when k ≈ n) ──
+  if (droneCount >= turbines.length || droneCount > turbines.length * 0.7) {
+    const assignments: DroneAssignment[] = [];
+    // Each drone gets at least one turbine; remainder go to first drones
+    let turbineIdx = 0;
+    for (let i = 0; i < droneCount; i += 1) {
+      const droneTurbines: Point[] = [];
+      // Assign at least one turbine if available
+      if (turbineIdx < turbines.length) {
+        droneTurbines.push(turbines[turbineIdx]);
+        turbineIdx += 1;
+      }
+      assignments.push({
+        droneIndex: i,
+        turbines: droneTurbines,
+        path: droneTurbines.length > 0 ? solveTsp(droneTurbines, startPoint) : { path: [], totalDistance: 0, iterations: 0 },
+        color: DRONE_COLORS[i % DRONE_COLORS.length],
+      });
+    }
+    // Distribute remaining turbines to first drones (round-robin)
+    let assignTo = 0;
+    while (turbineIdx < turbines.length) {
+      assignments[assignTo % assignments.length].turbines.push(turbines[turbineIdx]);
+      turbineIdx += 1;
+      assignTo += 1;
+    }
+    // Recalculate TSP for drones that got extra turbines
+    for (const a of assignments) {
+      if (a.turbines.length > 1) {
+        a.path = solveTsp(a.turbines, startPoint);
+      }
+    }
+    const totalDist = assignments.reduce((s, a) => s + a.path.totalDistance, 0);
+    return { assignments, totalDistance: Math.round(totalDist), balanced: true };
+  }
+
+  const maxImbalance = options?.maxImbalance ?? 0.5;
   const clusters = kMeans(turbines, droneCount);
 
-  // Build assignments
-  const assignments: DroneAssignment[] = clusters.map((cluster, i) => {
-    const color = DRONE_COLORS[i % DRONE_COLORS.length];
-    const tsp = solveTsp(cluster.members, startPoint);
-    return {
-      droneIndex: i,
-      turbines: cluster.members,
-      path: tsp,
-      color,
-    };
-  });
+  // Build assignments, skipping empty clusters
+  let assignments: DroneAssignment[] = clusters
+    .filter((c) => c.members.length > 0)
+    .map((cluster, i) => {
+      const color = DRONE_COLORS[i % DRONE_COLORS.length];
+      const tsp = solveTsp(cluster.members, startPoint);
+      return { droneIndex: i, turbines: cluster.members, path: tsp, color };
+    });
 
-  // Load balancing: if any cluster has > 25% more than average, redistribute
-  const avgSize = turbines.length / droneCount;
+  // ── Redistribute empty-cluster drones: take 1 turbine from largest cluster ──
+  let missing = droneCount - assignments.length;
+  while (missing > 0) {
+    // Find cluster with most turbines
+    let maxIdx = 0;
+    for (let i = 1; i < assignments.length; i += 1) {
+      if (assignments[i].turbines.length > assignments[maxIdx].turbines.length) maxIdx = i;
+    }
+    if (assignments[maxIdx].turbines.length <= 1) break; // can't split further
+
+    const donor = assignments[maxIdx].turbines;
+    // Move turbine farthest from donor's centroid to new drone
+    const donorCenter = {
+      lat: donor.reduce((s, t) => s + t.lat, 0) / donor.length,
+      lng: donor.reduce((s, t) => s + t.lng, 0) / donor.length,
+    };
+    let farthestIdx = 0;
+    let farthestDist = -1;
+    for (let ti = 0; ti < donor.length; ti += 1) {
+      const d = haversine(donor[ti], donorCenter);
+      if (d > farthestDist) { farthestDist = d; farthestIdx = ti; }
+    }
+    const [moved] = donor.splice(farthestIdx, 1);
+    assignments.push({
+      droneIndex: assignments.length,
+      turbines: [moved],
+      path: solveTsp([moved], startPoint),
+      color: DRONE_COLORS[assignments.length % DRONE_COLORS.length],
+    });
+    // Recalculate donor's TSP
+    assignments[maxIdx].path = solveTsp(assignments[maxIdx].turbines, startPoint);
+    missing -= 1;
+  }
+
+  // Load balancing: if any cluster has > 50% more than average, redistribute
+  const avgSize = turbines.length / assignments.length;
   let rebalanced = false;
 
   for (let i = 0; i < assignments.length; i += 1) {
-    const overSize = assignments[i].turbines.length > avgSize * (1 + maxImbalance);
-    if (!overSize) continue;
+    if (assignments[i].turbines.length <= avgSize * (1 + maxImbalance)) continue;
 
     for (let j = 0; j < assignments.length; j += 1) {
       if (i === j) continue;
-      const underSize = assignments[j].turbines.length < avgSize * (1 - maxImbalance);
-      if (!underSize) continue;
+      if (assignments[j].turbines.length >= avgSize * (1 - maxImbalance)) continue;
 
-      // Move the closest turbine from overloaded to underloaded cluster
       const overloaded = assignments[i].turbines;
-      const centroid = assignments[j].turbines.length > 0
+      const underCentroid = assignments[j].turbines.length > 0
         ? {
             lat: assignments[j].turbines.reduce((s, t) => s + t.lat, 0) / assignments[j].turbines.length,
             lng: assignments[j].turbines.reduce((s, t) => s + t.lng, 0) / assignments[j].turbines.length,
           }
-        : assignments[j].path.path[0] || assignments[i].turbines[0];
+        : overloaded[0];
 
       let minDist = Infinity;
       let moveIdx = -1;
       for (let ti = 0; ti < overloaded.length; ti += 1) {
-        const d = haversine(overloaded[ti], centroid);
+        const d = haversine(overloaded[ti], underCentroid);
         if (d < minDist) { minDist = d; moveIdx = ti; }
       }
 
@@ -300,6 +368,8 @@ export function solveVrp(
     }
   }
 
+  // Re-index drones after redistribution
+  assignments.forEach((a, i) => { a.droneIndex = i; });
   const totalDist = assignments.reduce((s, a) => s + a.path.totalDistance, 0);
   return { assignments, totalDistance: Math.round(totalDist), balanced: !rebalanced };
 }
