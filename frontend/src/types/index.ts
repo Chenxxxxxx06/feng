@@ -208,7 +208,6 @@ export interface WorkOrder {
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   fault_type?: string | null;
   due_date?: string | null;
-  assignee_id?: number | null;
   assignee: string | null;
   assignee_email?: string | null;
   cost_estimate: number;

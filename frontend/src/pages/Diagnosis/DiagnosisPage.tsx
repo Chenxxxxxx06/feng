@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import api from '../../services/api';
 import type {
@@ -149,6 +149,8 @@ const COMPONENT_ORDER: TurbineComponentKey[] = [
   'sensor',
 ];
 
+const EMPTY_DIAGNOSIS_SIGNALS: DiagnosisSignalInsight[] = [];
+
 function faultLabel(type: string) {
   return FAULT_LABELS[type] || type;
 }
@@ -190,6 +192,10 @@ function componentTone(component: TurbineComponentKey, activeComponents: Set<Tur
 function shortenText(text: string | undefined | null, max = 18) {
   if (!text) return '--';
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function topologyPercent(value?: number | null) {
+  return value == null ? '--' : `${(value * 100).toFixed(0)}%`;
 }
 
 function priorityLabel(priority: string) {
@@ -287,129 +293,7 @@ function bboxToStyle(bbox: { x: number; y: number; w: number; h: number }) {
   return { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` };
 }
 
-function turbineStatusClass(status: string) {
-  if (status === 'fault') return 'text-accent-red';
-  if (status === 'warning') return 'text-accent-yellow';
-  return 'text-accent-green';
-}
-
-function TurbinePicker({
-  value,
-  rows,
-  onChange,
-  align = 'right',
-}: {
-  value: number | null;
-  rows: TurbineOptionRow[];
-  onChange: (id: number) => void;
-  align?: 'left' | 'right';
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = rows.find((row) => row.turbine.id === value);
-
-  return (
-    <div className="relative min-w-[260px]">
-      <button
-        type="button"
-        onClick={() => setOpen((next) => !next)}
-        className="w-full rounded border border-border-default bg-bg-secondary px-3 py-2 text-left text-xs text-text-primary hover:border-accent-blue focus:outline-none focus:border-accent-blue"
-      >
-        <span className="block truncate">{selected ? `${selected.turbine.name} · ${selected.turbine.region || '未分组'}` : '选择风机...'}</span>
-        {selected && (
-          <span className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-text-muted">
-            <span>故障 {selected.faultCount}</span>
-            <span>疑似 {selected.suspectedCount}</span>
-            <span>置信 {confidenceText(selected.avgConfidence)}</span>
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className={`absolute z-40 mt-1 w-[560px] max-w-[calc(100vw-56px)] overflow-hidden rounded-lg border border-border-default bg-bg-card shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}>
-          <div className="grid grid-cols-[1.5fr_0.7fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
-            <span>风机</span>
-            <span>状态</span>
-            <span>故障</span>
-            <span>疑似</span>
-            <span>置信度</span>
-          </div>
-          <div className="max-h-72 overflow-auto">
-            {rows.map((row) => (
-              <button
-                key={row.turbine.id}
-                type="button"
-                onClick={() => {
-                  onChange(row.turbine.id);
-                  setOpen(false);
-                }}
-                className={`grid w-full grid-cols-[1.5fr_0.7fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default px-3 py-2 text-left text-xs hover:bg-bg-hover ${
-                  row.turbine.id === value ? 'bg-accent-blue/10' : ''
-                }`}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-text-primary">{row.turbine.name}</span>
-                  <span className="block truncate text-[10px] text-text-muted">{row.turbine.region || '未分组'} · HI {row.turbine.hi_value?.toFixed?.(1) ?? '--'}</span>
-                </span>
-                <span className={turbineStatusClass(row.turbine.status)}>{turbineStatusLabel(row.turbine.status)}</span>
-                <span className="font-mono text-text-secondary">{row.faultCount}</span>
-                <span className="font-mono text-accent-yellow">{row.suspectedCount}</span>
-                <span className="font-mono text-accent-cyan">{confidenceText(row.avgConfidence)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SignalEvidencePanel({ insights }: { insights: DiagnosisSignalInsight[] }) {
-  const rows = insights.slice(0, 4);
-  return (
-    <section className="bg-bg-card border border-border-default rounded-lg overflow-hidden">
-      <div className="border-b border-border-default px-4 py-3">
-        <h3 className="text-sm font-medium">诊断依据</h3>
-        <p className="mt-1 text-[10px] text-text-muted">信号特征、当前值和模型贡献度</p>
-      </div>
-      <div className="space-y-3 p-4">
-        {rows.map((signal) => {
-          const score = Math.max(0, Math.min(1, signal.contribution_score || 0));
-          const component = componentForSignal(signal.sensor_name);
-          const tone = signal.priority === 'high'
-            ? 'bg-accent-red'
-            : signal.priority === 'medium'
-              ? 'bg-accent-yellow'
-              : 'bg-accent-cyan';
-          return (
-            <div key={`${signal.sensor_name}-${signal.value}`} className="rounded border border-border-default bg-bg-secondary px-3 py-3">
-              <div className="mb-2 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-text-primary">{signal.sensor_name}</p>
-                  <p className="mt-1 truncate text-[10px] text-text-muted">{COMPONENT_LABELS[component]} · {priorityLabel(signal.priority)}</p>
-                </div>
-                <span className="shrink-0 font-mono text-xs text-accent-cyan">{(score * 100).toFixed(0)}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded bg-bg-hover">
-                <div className={`h-full rounded ${tone}`} style={{ width: `${Math.max(4, score * 100)}%` }} />
-              </div>
-              <div className="mt-2 grid grid-cols-[0.8fr_1.2fr] gap-2 text-[10px] text-text-muted">
-                <span className="truncate">当前值 <b className="font-normal text-text-secondary">{signal.value}</b></span>
-                <span className="truncate">参考 <b className="font-normal text-text-secondary">{signal.normal_range}</b></span>
-              </div>
-              <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-text-secondary">{signal.finding}</p>
-            </div>
-          );
-        })}
-        {rows.length === 0 && (
-          <div className="rounded border border-border-default bg-bg-secondary px-3 py-8 text-center text-xs text-text-muted">
-            暂无诊断依据
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function DiagnosisTopology({
+const DiagnosisTopology = memo(function DiagnosisTopology({
   turbine,
   turbineRows,
   causes,
@@ -426,16 +310,38 @@ function DiagnosisTopology({
 }) {
   const [hoveredFaultId, setHoveredFaultId] = useState<number | null>(null);
   const [hoveredComponent, setHoveredComponent] = useState<TurbineComponentKey | null>(null);
-  const activeComponents = new Set<TurbineComponentKey>([
-    ...causes.map((cause) => cause.component),
-    ...faults.map((fault) => fault.component),
-  ]);
-  const hoveredFault = faults.find((fault) => fault.id === hoveredFaultId);
-  const selectedFault = faults.find((fault) => fault.selected);
-  const focusedComponent = hoveredComponent || hoveredFault?.component || selectedFault?.component;
+  const activeComponents = useMemo(
+    () => new Set<TurbineComponentKey>([
+      ...causes.map((cause) => cause.component),
+      ...faults.map((fault) => fault.component),
+    ]),
+    [causes, faults],
+  );
+  const hoveredFault = useMemo(
+    () => faults.find((fault) => fault.id === hoveredFaultId),
+    [faults, hoveredFaultId],
+  );
+  const hoveredCause = useMemo(
+    () => causes.find((cause) => cause.id === hoveredCauseId),
+    [causes, hoveredCauseId],
+  );
+  const selectedFault = useMemo(
+    () => faults.find((fault) => fault.selected),
+    [faults],
+  );
+  const focusedComponent = hoveredComponent || hoveredFault?.component || hoveredCause?.component || selectedFault?.component;
   const selectedComponent = focusedComponent || faults[0]?.component;
   const turbineStatus = turbine ? turbineStatusLabel(turbine.status) : '未选择';
   const modelTone = turbine?.status === 'fault' ? '#ff4d5e' : turbine?.status === 'warning' ? '#f6b94a' : '#39d2c0';
+  const updateHoveredComponent = useCallback((component: TurbineComponentKey | null) => {
+    setHoveredComponent((current) => (current === component ? current : component));
+  }, []);
+  const updateHoveredCause = useCallback((causeId: string | null) => {
+    setHoveredCauseId((current) => (current === causeId ? current : causeId));
+  }, []);
+  const updateHoveredFault = useCallback((faultId: number | null) => {
+    setHoveredFaultId((current) => (current === faultId ? current : faultId));
+  }, []);
   const componentOpacity = (component: TurbineComponentKey, base = 1) => {
     if (!focusedComponent || component === focusedComponent) return base;
     return Math.max(0.16, base * 0.28);
@@ -475,15 +381,31 @@ function DiagnosisTopology({
               <stop offset="0%" stopColor="#dcecff" stopOpacity="0.82" />
               <stop offset="100%" stopColor="#58a6ff" stopOpacity="0.48" />
             </linearGradient>
-            <filter id="topologyGlow" x="-40%" y="-40%" width="180%" height="180%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
           </defs>
 
+          {leftRows.length === 0 && (
+            <text x={310} y={200} fill="#8b949e" fontSize="12" textAnchor="middle">暂无故障原因 · 运行自动检测获取信号</text>
+          )}
+          {leftRows.map((cause, index) => {
+            const y = 48 + index * 70;
+            const point = COMPONENT_POINTS[cause.component];
+            return (
+              <g key={cause.id}>
+                <path
+                  d={`M 252 ${y + 24} C 320 ${y + 24}, ${point.x - 65} ${point.y}, ${point.x} ${point.y}`}
+                  fill="none"
+                  stroke={componentTone(cause.component, activeComponents, selectedComponent)}
+                  strokeOpacity={connectionOpacity(cause.component, hoveredCauseId === cause.id)}
+                  strokeWidth={focusedComponent === cause.component ? '2.2' : '1.4'}
+                />
+                <circle cx={point.x} cy={point.y} r={focusedComponent === cause.component ? '6' : '4'} fill={componentTone(cause.component, activeComponents, selectedComponent)} />
+              </g>
+            );
+          })}
+
+          {rightRows.length === 0 && (
+            <text x={480} y={200} fill="#8b949e" fontSize="12" textAnchor="middle">暂无故障记录</text>
+          )}
           {rightRows.map((fault, index) => {
             const y = 58 + index * 80;
             const point = COMPONENT_POINTS[fault.component];
@@ -496,7 +418,7 @@ function DiagnosisTopology({
                   strokeOpacity={connectionOpacity(fault.component, fault.selected || hoveredFaultId === fault.id)}
                   strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2.4' : '1.4'}
                 />
-                <circle cx={point.x} cy={point.y} r={fault.selected || hoveredFaultId === fault.id ? '7' : '4'} fill={componentTone(fault.component, activeComponents, selectedComponent)} filter="url(#topologyGlow)" />
+                <circle cx={point.x} cy={point.y} r={fault.selected || hoveredFaultId === fault.id ? '7' : '4'} fill={componentTone(fault.component, activeComponents, selectedComponent)} />
               </g>
             );
           })}
@@ -509,31 +431,31 @@ function DiagnosisTopology({
               strokeOpacity="0.44"
               strokeWidth="1.4"
             />
-            <path d="M386 172 H728" stroke="#c7d7e8" strokeOpacity="0.12" />
-            <path d="M386 252 H728" stroke="#c7d7e8" strokeOpacity="0.12" />
+            <path d="M382 152 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
+            <path d="M382 199 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
 
-            <circle cx="340" cy="210" r="36" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} filter="url(#topologyGlow)" />
-            <circle cx="340" cy="168" r="18" fill="#111923" stroke={componentTone('pitch', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('pitch', 0.78)} strokeWidth={componentStrokeWidth('pitch')} />
-            <path d="M340 174 V194 M310 222 L326 214 M370 222 L354 214" stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.58)} strokeWidth="6" strokeLinecap="round" />
+            <circle cx="360" cy="174" r="27" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} />
+            <circle cx="360" cy="174" r="15" fill="#111923" stroke={componentTone('pitch', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('pitch', 0.78)} strokeWidth={componentStrokeWidth('pitch')} />
+            <path d="M360 148 V160 M337 186 L348 180 M383 186 L372 180" stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.58)} strokeWidth="5" strokeLinecap="round" />
 
-            <rect x="402" y="184" width="16" height="52" rx="6" fill="#101923" stroke={componentTone('main_bearing', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('main_bearing', 0.82)} strokeWidth={componentStrokeWidth('main_bearing')} />
-            <circle cx="410" cy="210" r="15" fill="#58a6ff" fillOpacity={componentOpacity('main_bearing', 0.14)} stroke={componentTone('main_bearing', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('main_bearing', 0.78)} />
-            <rect x="430" y="203" width="90" height="14" rx="7" fill="url(#drivetrainSteel)" opacity={componentOpacity('main_shaft', 1)} stroke={componentTone('main_shaft', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('main_shaft', 0.76)} strokeWidth={componentStrokeWidth('main_shaft')} />
-            <path d="M520 166 H590 L604 210 L590 254 H520 L504 210 Z" fill="#172233" fillOpacity={componentOpacity('gearbox', 1)} stroke={componentTone('gearbox', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('gearbox', 0.88)} strokeWidth={componentStrokeWidth('gearbox')} />
-            <circle cx="540" cy="202" r="12" fill="#f6b94a" fillOpacity="0.16" stroke="#f6b94a" strokeOpacity="0.55" />
-            <circle cx="570" cy="218" r="15" fill="#f6b94a" fillOpacity="0.12" stroke="#f6b94a" strokeOpacity="0.48" />
-            <rect x="610" y="188" width="22" height="44" rx="6" fill="#101923" stroke={componentTone('brake', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('brake', 0.86)} strokeWidth={componentStrokeWidth('brake')} />
-            <line x1="621" y1="188" x2="621" y2="232" stroke={componentTone('brake', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('brake', 0.5)} />
-            <rect x="650" y="174" width="82" height="72" rx="22" fill="#122437" fillOpacity={componentOpacity('generator', 1)} stroke={componentTone('generator', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('generator', 0.9)} strokeWidth={componentStrokeWidth('generator')} />
-            <circle cx="690" cy="210" r="24" fill="#39d2c0" fillOpacity="0.12" stroke="#39d2c0" strokeOpacity="0.48" />
-            <path d="M668 200 C682 188, 700 188, 714 200 M668 220 C682 232, 700 232, 714 220" stroke="#39d2c0" strokeOpacity="0.45" fill="none" />
+            <rect x="390" y="153" width="12" height="42" rx="5" fill="#101923" stroke={componentTone('main_bearing', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('main_bearing', 0.82)} strokeWidth={componentStrokeWidth('main_bearing')} />
+            <circle cx="396" cy="174" r="12" fill="#58a6ff" fillOpacity={componentOpacity('main_bearing', 0.14)} stroke={componentTone('main_bearing', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('main_bearing', 0.78)} />
+            <rect x="402" y="169" width="48" height="10" rx="5" fill="url(#drivetrainSteel)" opacity={componentOpacity('main_shaft', 1)} stroke={componentTone('main_shaft', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('main_shaft', 0.76)} strokeWidth={componentStrokeWidth('main_shaft')} />
+            <path d="M450 143 H506 L514 174 L506 205 H450 L440 174 Z" fill="#172233" fillOpacity={componentOpacity('gearbox', 1)} stroke={componentTone('gearbox', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('gearbox', 0.88)} strokeWidth={componentStrokeWidth('gearbox')} />
+            <circle cx="466" cy="169" r="9" fill="#f6b94a" fillOpacity="0.16" stroke="#f6b94a" strokeOpacity="0.55" />
+            <circle cx="488" cy="180" r="12" fill="#f6b94a" fillOpacity="0.12" stroke="#f6b94a" strokeOpacity="0.48" />
+            <rect x="514" y="158" width="18" height="32" rx="5" fill="#101923" stroke={componentTone('brake', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('brake', 0.86)} strokeWidth={componentStrokeWidth('brake')} />
+            <line x1="523" y1="158" x2="523" y2="190" stroke={componentTone('brake', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('brake', 0.5)} />
+            <rect x="536" y="146" width="62" height="56" rx="18" fill="#122437" fillOpacity={componentOpacity('generator', 1)} stroke={componentTone('generator', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('generator', 0.9)} strokeWidth={componentStrokeWidth('generator')} />
+            <circle cx="566" cy="174" r="19" fill="#39d2c0" fillOpacity="0.12" stroke="#39d2c0" strokeOpacity="0.48" />
+            <path d="M548 166 C558 156, 576 156, 586 166 M548 182 C558 192, 576 192, 586 182" stroke="#39d2c0" strokeOpacity="0.45" fill="none" />
 
-            <rect x="656" y="112" width="68" height="30" rx="7" fill="#101923" stroke={componentTone('cooling', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('cooling', 0.78)} strokeWidth={componentStrokeWidth('cooling')} />
-            <path d="M666 121 H714 M666 132 H714" stroke={componentTone('cooling', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('cooling', 0.5)} />
-            <rect x="578" y="282" width="64" height="34" rx="8" fill="#101923" stroke={componentTone('electrical', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('electrical', 0.78)} strokeWidth={componentStrokeWidth('electrical')} />
-            <path d="M592 299 H628 M610 288 V310" stroke={componentTone('electrical', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('electrical', 0.54)} />
-            <path d="M724 114 V82 M710 82 H758 M744 82 L766 70" stroke={componentTone('sensor', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('sensor', 0.8)} strokeWidth={componentStrokeWidth('sensor')} />
-            <circle cx="744" cy="82" r="6" fill={componentTone('sensor', activeComponents, selectedComponent)} fillOpacity={componentOpacity('sensor', 0.42)} stroke={componentTone('sensor', activeComponents, selectedComponent)} />
+            <rect x="540" y="108" width="52" height="22" rx="6" fill="#101923" stroke={componentTone('cooling', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('cooling', 0.78)} strokeWidth={componentStrokeWidth('cooling')} />
+            <path d="M548 114 H584 M548 121 H584" stroke={componentTone('cooling', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('cooling', 0.5)} />
+            <rect x="522" y="216" width="48" height="28" rx="7" fill="#101923" stroke={componentTone('electrical', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('electrical', 0.78)} strokeWidth={componentStrokeWidth('electrical')} />
+            <path d="M534 230 H558 M546 220 V240" stroke={componentTone('electrical', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('electrical', 0.54)} />
+            <path d="M584 108 V86 M572 86 H596 M584 86 L599 78" stroke={componentTone('sensor', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('sensor', 0.8)} strokeWidth={componentStrokeWidth('sensor')} />
+            <circle cx="584" cy="86" r="5" fill={componentTone('sensor', activeComponents, selectedComponent)} fillOpacity={componentOpacity('sensor', 0.42)} stroke={componentTone('sensor', activeComponents, selectedComponent)} />
           </g>
 
           {COMPONENT_ORDER.map((component) => {
@@ -544,10 +466,10 @@ function DiagnosisTopology({
               <g
                 key={component}
                 className="cursor-pointer"
-                onMouseEnter={() => setHoveredComponent(component)}
-                onMouseLeave={() => setHoveredComponent(null)}
-                onFocus={() => setHoveredComponent(component)}
-                onBlur={() => setHoveredComponent(null)}
+                onMouseEnter={() => updateHoveredComponent(component)}
+                onMouseLeave={() => updateHoveredComponent(null)}
+                onFocus={() => updateHoveredComponent(component)}
+                onBlur={() => updateHoveredComponent(null)}
                 role="button"
                 tabIndex={0}
               >
@@ -567,6 +489,24 @@ function DiagnosisTopology({
             );
           })}
 
+          {leftRows.map((cause, index) => {
+            const y = 48 + index * 70;
+            const tone = componentTone(cause.component, activeComponents, selectedComponent);
+            return (
+              <g
+                key={`cause-${cause.id}`}
+                onMouseEnter={() => updateHoveredCause(cause.id)}
+                onMouseLeave={() => updateHoveredCause(null)}
+              >
+                <rect x="28" y={y} width="224" height="54" rx="8" fill={hoveredCauseId === cause.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={hoveredCauseId === cause.id ? '0.84' : '0.34'} strokeWidth={hoveredCauseId === cause.id ? '2' : '1'} />
+                <text x="42" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(cause.label, 15)}</text>
+                <text x="42" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(cause.detail, 18)}</text>
+                <rect x="201" y={y + 25} width="39" height="16" rx="8" fill="#071A35" stroke={tone} strokeOpacity="0.38" />
+                <text x="220.5" y={y + 36} fill={tone} fontSize="10" fontWeight="700" textAnchor="middle">{topologyPercent(cause.score)}</text>
+              </g>
+            );
+          })}
+
           {rightRows.map((fault, index) => {
             const y = 58 + index * 80;
             const tone = componentTone(fault.component, activeComponents, selectedComponent);
@@ -575,10 +515,10 @@ function DiagnosisTopology({
               <g
                 key={`fault-${fault.id}`}
                 onClick={() => !disabled && onFaultSelect(fault.id)}
-                onMouseEnter={() => setHoveredFaultId(fault.id)}
-                onMouseLeave={() => setHoveredFaultId(null)}
-                onFocus={() => setHoveredFaultId(fault.id)}
-                onBlur={() => setHoveredFaultId(null)}
+                onMouseEnter={() => !disabled && updateHoveredFault(fault.id)}
+                onMouseLeave={() => updateHoveredFault(null)}
+                onFocus={() => !disabled && updateHoveredFault(fault.id)}
+                onBlur={() => updateHoveredFault(null)}
                 onKeyDown={(event) => {
                   if (!disabled && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
@@ -589,12 +529,12 @@ function DiagnosisTopology({
                 role={disabled ? undefined : 'button'}
                 tabIndex={disabled ? undefined : 0}
               >
-                <rect x="740" y={y} width="270" height="58" rx="8" fill={fault.selected || hoveredFaultId === fault.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={fault.selected || hoveredFaultId === fault.id ? '0.9' : '0.38'} strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2' : '1'} />
-                <text x="756" y={y + 19} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(fault.label, 18)}</text>
-                <text x="756" y={y + 40} fill="#8d9aaa" fontSize="10">{shortenText(`${fault.turbineLabel} · ${fault.transient ? '实时检测' : processingStatusLabel(fault.processingStatus)}`, 22)}</text>
-                <rect x="950" y={y + 9} width="46" height="19" rx="9" fill={tone} fillOpacity="0.14" stroke={tone} strokeOpacity="0.38" />
-                <text x="973" y={y + 23} fill={tone} fontSize="10" textAnchor="middle">{fault.confidence ? `${(fault.confidence * 100).toFixed(0)}%` : '--'}</text>
-                <text x="996" y={y + 42} fill="#8d9aaa" fontSize="10" textAnchor="end">{shortenText(fault.workOrderTitle || '未关联工单', 9)}</text>
+                <rect x="648" y={y} width="224" height="54" rx="8" fill={fault.selected || hoveredFaultId === fault.id ? '#182536' : '#111923'} stroke={tone} strokeOpacity={fault.selected || hoveredFaultId === fault.id ? '0.9' : '0.38'} strokeWidth={fault.selected || hoveredFaultId === fault.id ? '2' : '1'} />
+                <text x="662" y={y + 18} fill="#dcecff" fontSize="12" fontWeight="600">{shortenText(fault.label, 14)}</text>
+                <text x="662" y={y + 36} fill="#8d9aaa" fontSize="10">{shortenText(fault.turbineLabel, 9)} · {shortenText(processingStatusLabel(fault.processingStatus), 4)}</text>
+                <rect x="823" y={y + 8} width="38" height="16" rx="8" fill="#071A35" stroke={tone} strokeOpacity="0.38" />
+                <text x="842" y={y + 19} fill={tone} fontSize="10" fontWeight="700" textAnchor="middle">{topologyPercent(fault.confidence)}</text>
+                <text x="858" y={y + 36} fill="#8d9aaa" fontSize="10" textAnchor="end">{shortenText(fault.workOrderTitle || '未关联工单', 8)}</text>
               </g>
             );
           })}
@@ -602,7 +542,7 @@ function DiagnosisTopology({
       </div>
     </section>
   );
-}
+});
 
 export default function DiagnosisPage() {
   const [faults, setFaults] = useState<Fault[]>([]);
@@ -645,6 +585,20 @@ export default function DiagnosisPage() {
   const waveformRef = useRef<HTMLDivElement>(null);
   const spectrumRef = useRef<HTMLDivElement>(null);
 
+  const viewDetail = useCallback(async (id: number) => {
+    const { data } = await api.get(`/diagnosis/faults/${id}`);
+    setSelected(data);
+    setSelectedTurbineId(data.turbine_id);
+    setAutoResult(null);
+  }, []);
+
+  const loadVibration = useCallback(async (turbineId: number, nextComponent: string, faultType: string | undefined) => {
+    const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
+    if (faultType) params.fault_type = faultType;
+    const { data } = await api.get('/diagnosis/vibration', { params });
+    setVibration(data);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     Promise.all([
@@ -664,12 +618,12 @@ export default function DiagnosisPage() {
       .catch(() => setError('诊断数据加载失败'))
       .finally(() => setLoading(false));
     return () => { mounted = false; };
-  }, []);
+  }, [viewDetail]);
 
   useEffect(() => {
     if (!selectedTurbineId) return;
     loadVibration(selectedTurbineId, component, undefined);
-  }, [selectedTurbineId, component]);
+  }, [selectedTurbineId, component, loadVibration]);
 
   useEffect(() => {
     if (selected && selectedTurbineId && selected.turbine_id !== selectedTurbineId) {
@@ -924,17 +878,19 @@ export default function DiagnosisPage() {
     ? `${(faults.reduce((sum, f) => sum + f.confidence, 0) / faults.length * 100).toFixed(1)}%`
     : '--';
 
-  const insights: DiagnosisSignalInsight[] = autoResult?.signals
-    || selected?.signal_insights
-    || selected?.signals?.map((s) => ({
-      sensor_name: s.sensor_name,
-      value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
-      normal_range: `优先级${priorityLabelValue(s.priority)}`,
-      contribution_score: s.contribution_score,
-      priority: s.priority,
-      finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
-    }))
-    || [];
+  const insights = useMemo<DiagnosisSignalInsight[]>(() => (
+    autoResult?.signals
+      || selected?.signal_insights
+      || selected?.signals?.map((s) => ({
+        sensor_name: s.sensor_name,
+        value: `贡献度${(s.contribution_score * 100).toFixed(0)}%`,
+        normal_range: `优先级${priorityLabelValue(s.priority)}`,
+        contribution_score: s.contribution_score,
+        priority: s.priority,
+        finding: `${s.sensor_name}信号贡献度${(s.contribution_score * 100).toFixed(0)}%，来自故障诊断模型`,
+      }))
+      || EMPTY_DIAGNOSIS_SIGNALS
+  ), [autoResult?.signals, selected?.signal_insights, selected?.signals]);
 
   const troubleshootingSteps = autoResult?.troubleshooting_steps
     || selected?.troubleshooting_steps
@@ -946,7 +902,7 @@ export default function DiagnosisPage() {
   const currentGroupTurbinePage = Math.min(groupTurbinePage, groupTotalTurbinePages);
   const currentGroupRecord = groupCauseRecords[currentGroupTurbinePage - 1] || null;
   const activeCauseInsights = monitorMode === 'group'
-    ? currentGroupRecord?.signals || []
+    ? currentGroupRecord?.signals || EMPTY_DIAGNOSIS_SIGNALS
     : insights;
   const activeTroubleshootingSteps = monitorMode === 'group'
     ? currentGroupRecord?.troubleshooting_steps || []
@@ -1052,27 +1008,6 @@ export default function DiagnosisPage() {
     { key: 'high-priority', label: '高优先级', value: String(highPriorityCount), unit: '条', color: highPriorityCount ? 'text-accent-red' : 'text-accent-green', rows: highPriorityFaultRows },
     { key: 'high-signal', label: '高优先级信号', value: String(highRiskSignals), unit: '项', color: highRiskSignals ? 'text-accent-red' : 'text-accent-green' },
   ];
-
-  function handleTurbineChange(id: number) {
-    setSelectedTurbineId(id);
-    setSelected(null);
-    setAutoResult(null);
-    setBladeResult(null);
-  }
-
-  async function viewDetail(id: number) {
-    const { data } = await api.get(`/diagnosis/faults/${id}`);
-    setSelected(data);
-    setSelectedTurbineId(data.turbine_id);
-    setAutoResult(null);
-  }
-
-  async function loadVibration(turbineId: number, nextComponent: string, faultType: string | undefined) {
-    const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
-    if (faultType) params.fault_type = faultType;
-    const { data } = await api.get('/diagnosis/vibration', { params });
-    setVibration(data);
-  }
 
   async function runAutoDetect() {
     if (!selectedTurbineId) return;

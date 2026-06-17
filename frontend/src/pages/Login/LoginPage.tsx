@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../services/authStore';
+import coverImage from '../../../../../fengmian.png';
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -27,11 +28,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="h-screen flex items-center justify-center bg-bg-primary">
-      <div className="w-96 p-8 rounded-lg border border-border-default bg-bg-card glow-card">
+    <div
+      className="h-screen flex items-center justify-center bg-bg-primary"
+      style={{
+        backgroundImage: `linear-gradient(120deg, rgba(7, 26, 53, 0.82), rgba(7, 26, 53, 0.52)), url(${coverImage})`,
+        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+      }}
+    >
+      <div className="w-96 p-8 ops-panel shadow-2xl">
         <div className="text-center mb-8">
-          <span className="text-4xl text-accent-cyan">⟳</span>
-          <h1 className="text-xl font-bold mt-2 tracking-wider">风调预顺</h1>
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent-blue/20 text-sm font-bold text-accent-cyan shadow-glow-blue">PHM</div>
+          <h1 className="text-xl font-bold mt-3 tracking-wider gradient-text">风调预顺</h1>
           <p className="text-text-muted text-xs mt-1">PHM预测性运维系统</p>
         </div>
 
@@ -42,7 +50,7 @@ export default function LoginPage() {
               placeholder="用户名"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2.5 bg-bg-secondary border border-border-default rounded text-sm text-text-primary focus:outline-none focus:border-accent-blue transition-colors"
+              className="w-full px-3 py-2.5 text-sm text-text-primary"
               required
             />
           </div>
@@ -53,7 +61,7 @@ export default function LoginPage() {
                 placeholder="邮箱"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2.5 bg-bg-secondary border border-border-default rounded text-sm text-text-primary focus:outline-none focus:border-accent-blue transition-colors"
+                className="w-full px-3 py-2.5 text-sm text-text-primary"
                 required
               />
             </div>
@@ -64,7 +72,7 @@ export default function LoginPage() {
               placeholder="密码"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 bg-bg-secondary border border-border-default rounded text-sm text-text-primary focus:outline-none focus:border-accent-blue transition-colors"
+              className="w-full px-3 py-2.5 text-sm text-text-primary"
               required
             />
           </div>
@@ -74,7 +82,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-accent-blue text-white rounded font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="ops-btn ops-btn-primary w-full py-2.5 text-sm disabled:opacity-50"
           >
             {loading ? '处理中...' : isRegister ? '注册' : '登录'}
           </button>
