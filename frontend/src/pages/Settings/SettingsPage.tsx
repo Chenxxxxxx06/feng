@@ -640,14 +640,14 @@ export default function SettingsPage() {
   }, [personnel, personnelFilter]);
 
   return (
-    <div className="h-full overflow-hidden bg-bg-primary p-5">
+    <div className="h-full overflow-hidden ops-page p-5">
       <div className="h-full flex flex-col gap-4">
-        <header className="shrink-0 border-b border-border-default pb-4">
+        <header className="ops-header">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs text-text-muted">配置中心</p>
-              <h2 className="mt-1 text-xl font-semibold text-text-primary">系统设置</h2>
-              <p className="mt-1 text-xs text-text-secondary">
+              <p className="ops-eyebrow">配置中心</p>
+              <h2 className="ops-title gradient-text">系统设置</h2>
+              <p className="ops-subtitle">
                 管理告警策略、数据接入、AI服务和维护人员，所有配置会同步到后端接口。
               </p>
             </div>
@@ -661,7 +661,7 @@ export default function SettingsPage() {
         </header>
 
         <div className="min-h-0 flex-1 grid grid-cols-1 gap-4 lg:grid-cols-[230px_minmax(0,1fr)]">
-          <aside className="rounded-lg border border-border-default bg-bg-card/70 p-2 lg:overflow-auto">
+          <aside className="ops-panel p-2 lg:overflow-auto">
             <nav className="grid gap-1">
               {sections.map((section) => (
                 <button
@@ -680,7 +680,7 @@ export default function SettingsPage() {
             </nav>
           </aside>
 
-          <main className="min-h-0 overflow-auto rounded-lg border border-border-default bg-bg-card/60">
+          <main className="min-h-0 overflow-auto ops-panel">
             {activeSection === 'overview' && (
               <OverviewSection
                 pipeline={pipeline}

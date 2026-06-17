@@ -271,7 +271,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         if (/^\d+\.\s/.test(line) || line.startsWith('- ')) {
           return <div key={i} className="flex gap-1"><span className="text-accent-blue">•</span><span dangerouslySetInnerHTML={{ __html: html.replace(/^\d+\.\s|-\s/, '') }} /></div>;
         }
-        if (line.includes('📊') || line.includes('📚') || line.includes('🎯') || line.includes('🧠') || line.includes('📝')) {
+        if (line.includes('数据') || line.includes('知识') || line.includes('意图') || line.includes('汇总')) {
           return <div key={i} className="font-medium text-accent-cyan text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />;
         }
         return <p key={i} className="text-xs" dangerouslySetInnerHTML={{ __html: html }} />;
@@ -549,7 +549,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         allowTaint: true,
         scale: 0.5,
         ignoreElements: (el) => el.closest('[data-copilot-ignore]') !== null,
-        backgroundColor: '#080c12',
+        backgroundColor: '#071A35',
       });
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
@@ -608,7 +608,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       if (mode === 'agent') {
         // Step 1: intent classify + plan
         const progressId = Date.now().toString();
-        addMessage({ role: 'assistant', content: `🔍 分析意图中...`, _progress: true, _progressId: progressId });
+        addMessage({ role: 'assistant', content: `分析意图中...`, _progress: true, _progressId: progressId });
 
         const execPayload: Record<string, unknown> = {
           command: text,
@@ -617,64 +617,23 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         const { data: plan } = await api.post('/agent/execute', execPayload, { timeout: 30000 });
         useCopilotStore.getState().removeMessage(progressId);
 
-        const intentType = plan.intent_type || 'qa';
-        const planSteps: string[] = [];
-        planSteps.push(`🧠 意图分析: ${intentType} (${((plan.confidence || 0) * 100).toFixed(0)}%)`);
-        if (plan.explanation) planSteps.push(`💡 ${plan.explanation}`);
+        const parts: string[] = [];
+        const trace = data.trace || {};
+        // Step trace
+        const steps: string[] = [];
+        if (trace.orchestrator_ms != null) steps.push(`意图分析 (${trace.orchestrator_ms}ms)`);
+        if (trace.data_agent_ms != null) steps.push(`数据查询 (${trace.data_agent_ms}ms)`);
+        if (trace.knowledge_agent_ms != null) steps.push(`知识检索 (${trace.knowledge_agent_ms}ms)`);
+        if (trace.synthesizer_ms != null) steps.push(`汇总报告 (${trace.synthesizer_ms}ms)`);
+        if (steps.length > 0) parts.push(`> ${steps.join(' → ')}`);
 
-        // Step 2: execute scene skills if action/mixed
-        if ((intentType === 'action' || intentType === 'mixed') && plan.atomic_steps?.length > 0) {
-          planSteps.push(`🔧 执行 ${plan.atomic_steps.length} 个操作步骤...`);
-          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
-
-          const execResult = await executor.executeSteps(plan.atomic_steps);
-          useCopilotStore.getState().removeMessage(progressId);
-
-          if (!execResult.success) {
-            reply = `> ${planSteps.join('\n> ')}\n\n❌ ${execResult.message}`;
-          } else {
-            // Step 3: for mixed intent, analyze the result page
-            if (intentType === 'mixed' && plan.follow_up_analysis) {
-              addMessage({ role: 'assistant', content: `📝 分析执行结果...`, _progress: true, _progressId: progressId });
-              const diagPayload: Record<string, unknown> = {
-                messages: [...allMsgs, { role: 'system', content: plan.follow_up_analysis }],
-                page_context: baseContext,
-              };
-              try {
-                const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 60000 });
-                useCopilotStore.getState().removeMessage(progressId);
-                const diagParts = planSteps.slice();
-                if (diag.report) diagParts.push(diag.report);
-                else if (diag.message) diagParts.push(diag.message);
-                reply = diagParts.join('\n\n');
-              } catch {
-                useCopilotStore.getState().removeMessage(progressId);
-                reply = planSteps.join('\n') + '\n\n✅ 操作已完成';
-              }
-            } else {
-              reply = planSteps.join('\n') + '\n\n✅ 操作已完成';
-            }
-          }
-        } else {
-          // qa/diagnosis: route to multi-agent pipeline
-          planSteps.push(`📊 查询知识库与分析...`);
-          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
-
-          const diagPayload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
-          if (screenshot) diagPayload.screenshot = screenshot;
-          try {
-            const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 120000 });
-            useCopilotStore.getState().removeMessage(progressId);
-            const parts = planSteps.slice();
-            if (diag.report) parts.push(diag.report);
-            else if (diag.message) parts.push(diag.message);
-            else parts.push(JSON.stringify(diag));
-            reply = parts.join('\n\n');
-          } catch {
-            useCopilotStore.getState().removeMessage(progressId);
-            reply = planSteps.join('\n') + '\n\n抱歉，AI分析服务暂不可用。';
-          }
+        if (data.intent && data.intent.intent_type) {
+          parts.push(`**意图**: ${data.intent.intent_type} (置信度${(data.intent.confidence*100).toFixed(0)}%)`);
         }
+        if (data.data_summary) parts.push(`**数据摘要**:\n${data.data_summary}`);
+        if (data.knowledge_matches) parts.push(`**知识匹配**:\n${data.knowledge_matches}`);
+        if (data.report) parts.push(data.report);
+        reply = parts.join('\n\n') || JSON.stringify(data);
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
         const payload: Record<string, unknown> = {
@@ -754,9 +713,9 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           onMouseDown={onFabMouseDown}
           onClick={() => { if (!fabHasMoved.current) setOpen(true); }}
           className="fixed z-50 w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
-          style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(88,166,255,0.4)' }}
+          style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(59,130,246,0.4)' }}
         >
-          <span className="text-2xl">💬</span>
+          <span className="text-lg font-bold">AI</span>
           <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-accent-green border-2 border-bg-primary animate-pulse" />
         </button>
       )}
@@ -766,16 +725,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         <div
           ref={panelRef}
           data-copilot-ignore
-          className="fixed z-50 shadow-2xl flex flex-col overflow-hidden rounded-xl border border-border-default bg-bg-card"
+          className="fixed z-50 shadow-2xl flex flex-col overflow-hidden ops-panel rounded-2xl"
           style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W, height: PANEL_H }}
         >
           {/* Header — drag handle */}
           <div
-            className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-secondary cursor-move select-none"
+            className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-panel/95 cursor-move select-none"
             onMouseDown={onDragStart}
           >
             <div className="flex items-center gap-2">
-              <span className="text-lg">🤖</span>
+              <span className="ops-icon rounded-full bg-accent-blue/20 text-[10px] font-bold text-accent-blue">AI</span>
               <div>
                 <h3 className="text-sm font-medium">风调AI助手</h3>
                 <p className="text-[10px] text-accent-green">
@@ -789,16 +748,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           </div>
 
           {/* Mode Toggle — AI对话 / Agent诊断 */}
-          <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-secondary">
+          <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-panel/90">
             <button
               onClick={() => setMode('chat')}
-              className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
-                mode === 'chat'
-                  ? 'bg-accent-blue text-white'
-                  : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
-              }`}
+                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
+                  mode === 'chat'
+                    ? 'bg-accent-blue text-white'
+                    : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+                }`}
             >
-              💬 AI对话
+              AI 对话
             </button>
             <button
               onClick={() => setMode('agent')}
@@ -808,7 +767,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                   : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
               }`}
             >
-              🔧 Agent任务
+              Agent 任务
             </button>
           </div>
 
@@ -952,7 +911,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 </div>
               </div>
             ))}
-            {loading && <p className="text-text-muted animate-pulse">AI思考中...</p>}
+            {loading && <p className="text-text-muted animate-pulse">AI 思考中...</p>}
           </div>
 
           {/* Input */}
@@ -967,7 +926,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                     ? '输入任务指令，如：查看故障诊断页面'
                     : '输入问题, 如: 当前风场运行状态如何?'
                 }
-                className="flex-1 bg-bg-secondary border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+                className="flex-1 bg-bg-panel border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
               />
               {mode === 'chat' && (
                 <button
@@ -993,7 +952,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
               </button>
             </div>
             <div className="flex gap-2 mt-2">
-              {(mode === 'agent'
+                {(mode === 'agent'
                 ? ['查看故障诊断页面', '查看维护人员工作量', '查看所有工单']
                 : ['总结当前状态', '最近故障', '健康趋势分析']
               ).map((q) => (
