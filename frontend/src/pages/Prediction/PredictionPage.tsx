@@ -85,9 +85,9 @@ export default function PredictionPage() {
       const [rulData, woRes, turbData, sumData, planRes, ftData, setRes] = await Promise.all([
         predictionService.getRUL(), api.get('/workorders/'), predictionService.getTurbines(),
         predictionService.getSummary(), api.get('/prediction/maintenance-plan', { params: { top_n: 50 } }),
-        predictionService.getFaultTypes(), predictionService.getSettings().catch(() => ({ data: {} })),
+        predictionService.getFaultTypes(), predictionService.getSettings().catch(() => null),
       ]);
-      if (setRes.data && Object.keys(setRes.data).length > 0) setPredSettings(setRes.data);
+      if (setRes && typeof setRes === 'object' && Object.keys(setRes).length > 0) setPredSettings(setRes as typeof predSettings);
       setPredictions(rulData); const d = woRes.data; setWorkOrders(Array.isArray(d) ? d : d.workorders || []);
       setTurbines(turbData); setSummary(sumData); setMaintPlan(planRes.data);
       const loadedFt = ftData.length > 0 ? ftData.map((ft: {value:string;label:string}) => ({value: ft.value, label: ft.label})) : [];
