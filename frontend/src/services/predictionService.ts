@@ -66,6 +66,19 @@ export const predictionService = {
     return data;
   },
 
+  /** Get prediction page settings (thresholds, coordinates, etc.) */
+  async getSettings(): Promise<{
+    hi_warning_threshold: number;
+    hi_failure_threshold: number;
+    rul_warning_threshold: number;
+    shift_start_time: string;
+    farm_lat: number;
+    farm_lng: number;
+  }> {
+    const { data } = await api.get('/prediction/settings');
+    return data;
+  },
+
   /** Get all turbines (for dropdowns) */
   async getTurbines(): Promise<Turbine[]> {
     const { data } = await api.get('/turbines/');
