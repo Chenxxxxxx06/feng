@@ -454,26 +454,23 @@ def diagnose_fault(
         raise ValueError(f"{config['provider']} API key is not ready for selected model")
 
     system_prompt = _build_system_prompt(
-        "根据风机数据给出故障诊断建议。\n"
-        "要求:\n"
-        "1. 分析可能的根因\n"
-        "2. 评估风险等级\n"
-        "3. 给出具体维修建议\n"
-        "4. 回复简洁专业, 200字以内"
+        "风电机组故障诊断专家。基于风机数据给出诊断。"
+        "输出格式（纯文本）：\n"
+        "【根因】1-2句\n【风险】低/中/高/紧急\n【建议】2-3条\n"
+        "总字数100字内。"
     )
 
-    user_prompt = f"""风机信息: {json.dumps(turbine_data, ensure_ascii=False)}
-故障数据: {json.dumps(fault_data, ensure_ascii=False)}
-
-请给出诊断建议。"""
+    user_prompt = f"""风机:{turbine_data.get('name','?')} HI:{turbine_data.get('hi_value','?')} 状态:{turbine_data.get('status','?')}
+最近故障:{fault_data[0].get('type','无') if fault_data else '无'}
+诊断建议:"""
 
     try:
         return chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model, api_key=effective_key,
+        ], model="qwen-turbo", api_key=effective_key,
            api_provider=effective_provider if not base_url else None,
-           base_url=base_url, temperature=0.5, max_tokens=512)
+           base_url=base_url, temperature=0.3, max_tokens=200)
     except Exception as e:
         logger.warning(f"AI diagnosis failed: {e}")
         raise
