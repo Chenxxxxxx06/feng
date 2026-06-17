@@ -1,21 +1,32 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import NotificationConfig, DataSource, User, AIProviderConfig
+from app.models import (
+    AIProviderConfig,
+    DataSource,
+    NotificationConfig,
+    NotificationLog,
+    OperationLog,
+    Turbine,
+    User,
+)
 from app.schemas import (
     ThresholdConfigRequest, ThresholdConfigResponse,
     DataSourceResponse, DataSourceTestRequest,
     ProfileUpdateRequest, UserResponse,
     AIProviderConfigCreate, AIProviderConfigResponse, AIProviderTestRequest,
+    OperationLogCreate, OperationLogResponse,
+    ThresholdAlertStatus, ThresholdAlertTurbine,
 )
 from app.services.data_pipeline import get_pipeline_state, set_source_status, SourceStatus
 from app.services.data_pipeline.era5_loader import era5_loader
 from app.services.data_pipeline.scada_loader import scada_loader
 from app.services.qwen_client import get_client
+from app.services.email_service import EmailConfigError, send_email
 from app.api.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -292,19 +303,7 @@ async def get_thresholds(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
-    config = result.scalar_one_or_none()
-    if not config:
-        config = NotificationConfig(
-            user_id=user.id,
-            hi_threshold=70.0,
-            email_enabled=True,
-            email_address=user.email,
-            wechat_enabled=False,
-        )
-        db.add(config)
-        await db.commit()
-        await db.refresh(config)
+    config = await _get_or_create_notification_config(db, user)
     return [ThresholdConfigResponse.model_validate(config)]
 
 
@@ -314,17 +313,183 @@ async def save_threshold(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
-    config = result.scalar_one_or_none()
-    if config:
-        for k, v in data.model_dump().items():
-            setattr(config, k, v)
-    else:
-        config = NotificationConfig(user_id=user.id, **data.model_dump())
-        db.add(config)
+    config = await _get_or_create_notification_config(db, user)
+    update_data = data.model_dump()
+    for k, v in update_data.items():
+        setattr(config, k, v)
     await db.commit()
     await db.refresh(config)
     return ThresholdConfigResponse.model_validate(config)
+
+
+async def _get_or_create_notification_config(db: AsyncSession, user: User) -> NotificationConfig:
+    result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
+    config = result.scalar_one_or_none()
+    if config:
+        return config
+    config = NotificationConfig(
+        user_id=user.id,
+        hi_threshold=70.0,
+        email_enabled=True,
+        email_address=user.email,
+    )
+    db.add(config)
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+async def _threshold_alert_turbines(db: AsyncSession, threshold: float) -> list[Turbine]:
+    result = await db.execute(
+        select(Turbine)
+        .where(Turbine.hi_value < threshold)
+        .order_by(Turbine.hi_value.asc(), Turbine.name.asc())
+    )
+    return list(result.scalars().all())
+
+
+def _serialize_threshold_alerts(
+    config: NotificationConfig,
+    turbines: list[Turbine],
+) -> ThresholdAlertStatus:
+    return ThresholdAlertStatus(
+        threshold=config.hi_threshold,
+        low_count=len(turbines),
+        turbines=[
+            ThresholdAlertTurbine(
+                id=t.id,
+                name=t.name,
+                region=t.region,
+                status=t.status,
+                hi_value=t.hi_value,
+                model=t.model,
+            )
+            for t in turbines
+        ],
+        email_enabled=bool(config.email_enabled),
+        email_address=config.email_address,
+        checked_at=datetime.now(timezone.utc),
+    )
+
+
+@router.get("/threshold-alerts", response_model=ThresholdAlertStatus)
+async def get_threshold_alerts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    config = await _get_or_create_notification_config(db, user)
+    turbines = await _threshold_alert_turbines(db, config.hi_threshold)
+    return _serialize_threshold_alerts(config, turbines)
+
+
+def _threshold_email_body(config: NotificationConfig, turbines: list[Turbine]) -> str:
+    lines = [
+        "风调预顺 PHM - HI阈值告警",
+        "",
+        f"当前阈值: HI < {config.hi_threshold:.0f}",
+        f"低于阈值风机: {len(turbines)} 台",
+        "",
+    ]
+    for turbine in turbines:
+        lines.append(
+            f"- {turbine.name} | 区域: {turbine.region or '-'} | HI: {turbine.hi_value:.1f} | 状态: {turbine.status}"
+        )
+    lines.extend(["", "请及时在风场监控和故障诊断页面核查，并安排巡检或工单闭环。"])
+    return "\n".join(lines)
+
+
+@router.post("/threshold-alerts/send-email")
+async def send_threshold_alert_email(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    config = await _get_or_create_notification_config(db, user)
+    if not config.email_enabled:
+        raise HTTPException(status_code=400, detail="Email notification is disabled in settings")
+    recipient = config.email_address or user.email
+    if not recipient:
+        raise HTTPException(status_code=400, detail="No alert recipient email configured")
+
+    turbines = await _threshold_alert_turbines(db, config.hi_threshold)
+    if not turbines:
+        raise HTTPException(status_code=400, detail="No turbines are below the current HI threshold")
+
+    subject = f"[Fengdiao PHM] HI阈值告警: {len(turbines)}台风机低于{config.hi_threshold:.0f}"
+    body = _threshold_email_body(config, turbines)
+    try:
+        await send_email(recipient, subject, body)
+        db.add(
+            NotificationLog(
+                work_order_id=None,
+                recipient_email=recipient,
+                subject=subject,
+                status="sent",
+                sent_at=datetime.now(timezone.utc),
+            )
+        )
+        await db.commit()
+        return {"sent": 1, "recipient_email": recipient, "low_count": len(turbines)}
+    except EmailConfigError as exc:
+        db.add(
+            NotificationLog(
+                work_order_id=None,
+                recipient_email=recipient,
+                subject=subject,
+                status="failed",
+                error_message=str(exc),
+            )
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.add(
+            NotificationLog(
+                work_order_id=None,
+                recipient_email=recipient,
+                subject=subject,
+                status="failed",
+                error_message=str(exc),
+            )
+        )
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/operation-logs", response_model=list[OperationLogResponse])
+async def list_operation_logs(
+    page: str | None = Query(None, max_length=64),
+    limit: int | None = Query(None, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    query = select(OperationLog).where(OperationLog.user_id == user.id)
+    if page:
+        query = query.where(OperationLog.page == page)
+    query = query.order_by(OperationLog.created_at.desc(), OperationLog.id.desc())
+    if limit is not None:
+        query = query.limit(limit)
+    result = await db.execute(query)
+    return [OperationLogResponse.model_validate(log) for log in result.scalars().all()]
+
+
+@router.post("/operation-logs", response_model=OperationLogResponse)
+async def create_operation_log(
+    data: OperationLogCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    level = data.level if data.level in {"success", "info", "error"} else "info"
+    log = OperationLog(
+        user_id=user.id,
+        page=data.page,
+        action=data.action,
+        result=data.result,
+        level=level,
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+    return OperationLogResponse.model_validate(log)
 
 
 @router.get("/data-sources", response_model=list[DataSourceResponse])

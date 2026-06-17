@@ -2,13 +2,37 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { useAuthStore } from '../../services/authStore';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import {
+  applyPreferences,
+  fetchUserPreferences,
+  loadLocalPreferences,
+  saveUserPreferences,
+  type UserPreferences,
+} from '../../services/preferences';
 
 interface ThresholdConfig {
   id: number;
   hi_threshold: number;
   email_enabled: boolean;
   email_address: string | null;
-  wechat_enabled: boolean;
+}
+
+interface ThresholdAlertTurbine {
+  id: number;
+  name: string;
+  region: string | null;
+  status: string;
+  hi_value: number;
+  model: string | null;
+}
+
+interface ThresholdAlertStatus {
+  threshold: number;
+  low_count: number;
+  turbines: ThresholdAlertTurbine[];
+  email_enabled: boolean;
+  email_address: string | null;
+  checked_at: string;
 }
 
 interface PipelineSource {
@@ -42,6 +66,15 @@ interface ActivityLog {
   action: string;
   result: string;
   level: 'success' | 'info' | 'error';
+}
+
+interface OperationLogRecord {
+  id: number;
+  page: string;
+  action: string;
+  result: string | null;
+  level: ActivityLog['level'];
+  created_at: string;
 }
 
 type SectionKey = 'overview' | 'personal' | 'ai' | 'alerts' | 'pipeline' | 'personnel' | 'logs';
@@ -166,6 +199,7 @@ const normalizeProviderKey = (provider: string) => {
 
 const providerTemplateByKey = (provider: string) => aiProviderTemplates.find((item) => item.provider === normalizeProviderKey(provider));
 const AI_PROVIDER_MEMORY_KEY = 'settings.aiProvider.lastProvider';
+const SYSTEM_SETTINGS_PAGE = 'system-settings';
 
 const getRememberedAIProvider = () => {
   if (typeof window === 'undefined') return null;
@@ -225,7 +259,7 @@ const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'alerts', label: '告警规则', desc: 'HI阈值和通知方式' },
   { key: 'pipeline', label: '数据源管理', desc: 'SCADA/振动/图像/气象' },
   { key: 'personnel', label: '人员管理', desc: '维护人员和负载' },
-  { key: 'logs', label: '操作日志', desc: '设置变更和接口结果' },
+  { key: 'logs', label: '操作记录', desc: '最近操作与保存反馈' },
 ];
 
 const sourceIcons: Record<string, string> = {
@@ -276,13 +310,25 @@ const loadTone = (load: number) => {
   return 'text-accent-green';
 };
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (email: string) => emailPattern.test(email.trim());
+const parseSkills = (skills: string) => (
+  skills
+    .split(/[,，]/)
+    .map((skill) => skill.trim())
+    .filter(Boolean)
+);
+
 export default function SettingsPage() {
   const { user, fetchMe } = useAuthStore();
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [hiThreshold, setHiThreshold] = useState('70');
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
-  const [wechatEnabled, setWechatEnabled] = useState(false);
+  const [thresholdError, setThresholdError] = useState('');
+  const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlertStatus | null>(null);
+  const [sendingAlertEmail, setSendingAlertEmail] = useState(false);
+  const [alertEmailMessage, setAlertEmailMessage] = useState('');
   const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
   const [aiProviderLoading, setAiProviderLoading] = useState(false);
   const [providerActionId, setProviderActionId] = useState<number | null>(null);
@@ -317,17 +363,42 @@ export default function SettingsPage() {
   const [personForm, setPersonForm] = useState({ name: '', skills: '', region: '陕北', email: '' });
   const [logs, setLogs] = useState<ActivityLog[]>([]);
 
+  const toActivityLog = (record: OperationLogRecord): ActivityLog => ({
+    id: record.id,
+    time: new Date(record.created_at).toLocaleString('zh-CN'),
+    action: record.action,
+    result: record.result || '',
+    level: record.level,
+  });
+
   const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
+    const tempId = -Date.now();
     setLogs((prev) => [
-      { id: Date.now(), time: new Date().toLocaleString('zh-CN'), action, result, level },
+      { id: tempId, time: new Date().toLocaleString('zh-CN'), action, result, level },
       ...prev,
-    ].slice(0, 20));
+    ]);
+    void api.post<OperationLogRecord>('/settings/operation-logs', {
+      page: SYSTEM_SETTINGS_PAGE,
+      action,
+      result,
+      level,
+    }).then(({ data }) => {
+      const saved = toActivityLog(data);
+      setLogs((prev) => [saved, ...prev.filter((item) => item.id !== tempId && item.id !== saved.id)]);
+    }).catch(() => {
+      setLogs((prev) => prev.map((item) => (
+        item.id === tempId ? { ...item, level: 'error', result: `${item.result}（日志保存失败）` } : item
+      )));
+    });
   };
 
   useEffect(() => {
     if (!user) fetchMe();
+    applyPreferences(loadLocalPreferences());
+    loadOperationLogs();
     addLog('打开系统设置', '开始加载配置...', 'info');
     loadThresholds();
+    loadThresholdAlerts();
     refreshPipeline();
     refreshPersonnel();
     loadPreferences();
@@ -359,7 +430,26 @@ export default function SettingsPage() {
       setHiThreshold(String(config.hi_threshold));
       setEmailEnabled(config.email_enabled);
       setEmailAddress(config.email_address || '');
-      setWechatEnabled(config.wechat_enabled);
+    }
+  };
+
+  const loadThresholdAlerts = async () => {
+    try {
+      const { data } = await api.get<ThresholdAlertStatus>('/settings/threshold-alerts');
+      setThresholdAlerts(data);
+    } catch {
+      setThresholdAlerts(null);
+    }
+  };
+
+  const loadOperationLogs = async () => {
+    try {
+      const { data } = await api.get<OperationLogRecord[]>('/settings/operation-logs', {
+        params: { page: SYSTEM_SETTINGS_PAGE },
+      });
+      setLogs(data.map(toActivityLog));
+    } catch {
+      setLogs([]);
     }
   };
 
@@ -385,43 +475,89 @@ export default function SettingsPage() {
     }
   };
 
-  const saveThreshold = async () => {
+  const persistThresholdSettings = async () => {
+    if (emailEnabled && !isValidEmail(emailAddress)) {
+      setThresholdError('请输入正确邮箱地址，格式需包含 @ 和域名');
+      return false;
+    }
+    setThresholdError('');
     await api.put('/settings/thresholds', {
       hi_threshold: Number(hiThreshold),
       email_enabled: emailEnabled,
-      email_address: emailEnabled ? emailAddress || null : null,
+      email_address: emailEnabled ? emailAddress.trim() || null : null,
     });
+    await loadThresholdAlerts();
+    window.dispatchEvent(new Event('threshold-alerts-updated'));
+    return true;
+  };
+
+  const saveThreshold = async () => {
+    const saved = await persistThresholdSettings();
+    if (!saved) return;
     setThresholdSaved(true);
     addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
     setTimeout(() => setThresholdSaved(false), 2200);
   };
 
-  const loadPreferences = async () => {
+  const sendThresholdAlertEmail = async () => {
+    setSendingAlertEmail(true);
+    setAlertEmailMessage('');
     try {
-      const { data } = await api.get('/settings/preferences');
-      if (data && typeof data === 'object') {
-        if (data.displayName) setPersonalForm(prev => ({ ...prev, displayName: data.displayName }));
-        if (data.landingPage) setPersonalForm(prev => ({ ...prev, landingPage: data.landingPage }));
-        if (data.digestFrequency) setPersonalForm(prev => ({ ...prev, digestFrequency: data.digestFrequency }));
-        if (typeof data.desktopDigest === 'boolean') setPersonalPrefs(prev => ({ ...prev, desktopDigest: data.desktopDigest }));
-        if (typeof data.compactWorkspace === 'boolean') setPersonalPrefs(prev => ({ ...prev, compactWorkspace: data.compactWorkspace }));
-        if (typeof data.riskFirst === 'boolean') setPersonalPrefs(prev => ({ ...prev, riskFirst: data.riskFirst }));
-        if (typeof data.autoOpenCopilot === 'boolean') setPersonalPrefs(prev => ({ ...prev, autoOpenCopilot: data.autoOpenCopilot }));
-      }
+      const saved = await persistThresholdSettings();
+      if (!saved) return;
+      const { data } = await api.post('/settings/threshold-alerts/send-email');
+      setAlertEmailMessage(`告警邮件已发送至 ${data.recipient_email}`);
+      addLog('发送HI告警邮件', `已发送 ${data.low_count} 台低HI风机告警`);
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      const message = detail || '告警邮件发送失败，请检查SMTP配置和收件邮箱';
+      setAlertEmailMessage(message);
+      addLog('发送HI告警邮件', message, 'error');
+    } finally {
+      setSendingAlertEmail(false);
+    }
+  };
+
+  const applyLoadedPreferences = (prefs: UserPreferences) => {
+    setPersonalForm((prev) => ({
+      ...prev,
+      displayName: prefs.displayName || prev.displayName,
+      email: prefs.email || prev.email,
+      phone: prefs.phone || prev.phone,
+      region: prefs.region || prev.region,
+      landingPage: prefs.landingPage,
+      digestFrequency: prefs.digestFrequency,
+    }));
+    setPersonalPrefs({
+      desktopDigest: prefs.desktopDigest,
+      compactWorkspace: prefs.compactWorkspace,
+      riskFirst: prefs.riskFirst,
+      autoOpenCopilot: prefs.autoOpenCopilot,
+    });
+  };
+
+  const loadPreferences = async () => {
+    applyLoadedPreferences(loadLocalPreferences());
+    try {
+      const prefs = await fetchUserPreferences();
+      applyLoadedPreferences(prefs);
     } catch { /* preferences not yet saved */ }
   };
 
   const savePersonalSettings = async () => {
+    const payload: UserPreferences = {
+      ...loadLocalPreferences(),
+      ...personalForm,
+      ...personalPrefs,
+      digestFrequency: personalForm.digestFrequency as UserPreferences['digestFrequency'],
+    };
     try {
-      const payload = { ...personalForm, ...personalPrefs };
-      await api.put('/settings/preferences', payload);
+      await saveUserPreferences(payload);
       setPersonalSaved(true);
-      // Sync landing page preference to localStorage for App.tsx routing
-      if (personalForm.landingPage) localStorage.setItem('landingPage', personalForm.landingPage);
-      if (typeof personalPrefs.autoOpenCopilot === 'boolean') localStorage.setItem('autoOpenCopilot', String(personalPrefs.autoOpenCopilot));
       addLog('保存个人设置', `${personalForm.displayName || user?.username || '当前账号'} 的工作偏好已同步到服务器`);
       setTimeout(() => setPersonalSaved(false), 2200);
     } catch {
+      applyPreferences(payload);
       setPersonalSaved(true);
       addLog('保存个人设置(本地)', `服务器不可用，已保存到本地`);
       setTimeout(() => setPersonalSaved(false), 2200);
@@ -589,15 +725,21 @@ export default function SettingsPage() {
   };
 
   const submitPerson = async () => {
-    if (!personForm.name || !personForm.email) {
+    const name = personForm.name.trim();
+    const email = personForm.email.trim();
+    if (!name || !email) {
       setPersonnelError('请填写姓名和邮箱');
       return;
     }
+    if (!isValidEmail(email)) {
+      setPersonnelError('请输入正确邮箱地址，格式需包含 @ 和域名');
+      return;
+    }
     const payload = {
-      name: personForm.name,
-      email: personForm.email,
+      name,
+      email,
       region: personForm.region,
-      skills: personForm.skills.split(',').map((s) => s.trim()).filter(Boolean),
+      skills: parseSkills(personForm.skills),
     };
     try {
       if (editingId) {
@@ -610,8 +752,9 @@ export default function SettingsPage() {
       resetPersonForm();
       setPersonnelError('');
       refreshPersonnel();
-    } catch {
-      setPersonnelError('人员保存失败，请检查姓名或邮箱是否重复');
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setPersonnelError(detail || '人员保存失败，请检查姓名或邮箱是否重复');
     }
   };
 
@@ -723,13 +866,19 @@ export default function SettingsPage() {
                 hiThreshold={hiThreshold}
                 emailEnabled={emailEnabled}
                 emailAddress={emailAddress}
-                wechatEnabled={wechatEnabled}
+                thresholdAlerts={thresholdAlerts}
+                sendingAlertEmail={sendingAlertEmail}
+                alertEmailMessage={alertEmailMessage}
                 thresholdSaved={thresholdSaved}
+                thresholdError={thresholdError}
                 onHiChange={setHiThreshold}
                 onEmailEnabledChange={setEmailEnabled}
-                onEmailAddressChange={setEmailAddress}
-                onWechatEnabledChange={setWechatEnabled}
+                onEmailAddressChange={(value) => {
+                  setEmailAddress(value);
+                  if (!value || isValidEmail(value)) setThresholdError('');
+                }}
                 onSave={saveThreshold}
+                onSendAlertEmail={sendThresholdAlertEmail}
               />
             )}
             {activeSection === 'pipeline' && (
@@ -763,7 +912,7 @@ export default function SettingsPage() {
               />
             )}
             {activeSection === 'logs' && (
-              <LogsSection logs={logs} />
+              <LogsSection logs={logs} onBack={() => setActiveSection('overview')} />
             )}
           </main>
         </div>
@@ -857,9 +1006,13 @@ function OverviewSection({
             <button onClick={() => onNavigate('logs')} className="text-xs text-accent-blue hover:underline">查看全部</button>
           </div>
           <div className="mt-3 space-y-3">
-            {logs.slice(0, 4).map((log) => (
-              <LogRow key={log.id} log={log} compact />
-            ))}
+            {logs.length === 0 ? (
+              <p className="text-xs text-text-muted">暂无系统设置操作记录</p>
+            ) : (
+              logs.slice(0, 4).map((log) => (
+                <LogRow key={log.id} log={log} compact />
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -886,14 +1039,18 @@ function OverviewTile({ label, value, hint, tone }: { label: string; value: stri
   );
 }
 
-function LogsSection({ logs }: { logs: ActivityLog[] }) {
+function LogsSection({ logs, onBack }: { logs: ActivityLog[]; onBack: () => void }) {
   return (
-    <SectionShell title="操作日志" description="查看当前会话内的配置加载、保存、测试和人员维护操作。">
+    <SectionShell
+      title="操作记录"
+      description="仅展示系统设置页面产生的加载、保存、测试和人员维护记录。"
+      actions={<button onClick={onBack} className="industrial-btn">返回总览</button>}
+    >
       <div className="rounded-lg border border-border-default bg-navy-900/60">
-        {logs.length > 0 ? (
-          logs.map((log) => <LogRow key={log.id} log={log} />)
+        {logs.length === 0 ? (
+          <div className="px-4 py-8 text-sm text-text-muted">暂无操作记录</div>
         ) : (
-          <div className="px-4 py-8 text-center text-xs text-text-muted">暂无操作记录</div>
+          logs.map((log) => <LogRow key={log.id} log={log} />)
         )}
       </div>
     </SectionShell>
@@ -1448,26 +1605,33 @@ function AlertSection({
   hiThreshold,
   emailEnabled,
   emailAddress,
-  wechatEnabled,
+  thresholdAlerts,
+  sendingAlertEmail,
+  alertEmailMessage,
   thresholdSaved,
+  thresholdError,
   onHiChange,
   onEmailEnabledChange,
   onEmailAddressChange,
-  onWechatEnabledChange,
   onSave,
+  onSendAlertEmail,
 }: {
   hiThreshold: string;
   emailEnabled: boolean;
   emailAddress: string;
-  wechatEnabled: boolean;
+  thresholdAlerts: ThresholdAlertStatus | null;
+  sendingAlertEmail: boolean;
+  alertEmailMessage: string;
   thresholdSaved: boolean;
+  thresholdError: string;
   onHiChange: (value: string) => void;
   onEmailEnabledChange: (value: boolean) => void;
   onEmailAddressChange: (value: string) => void;
-  onWechatEnabledChange: (value: boolean) => void;
   onSave: () => void;
+  onSendAlertEmail: () => void;
 }) {
   const threshold = Number(hiThreshold);
+  const lowCount = thresholdAlerts?.low_count || 0;
   return (
     <SectionShell
       title="告警规则"
@@ -1518,6 +1682,37 @@ function AlertSection({
           <p className={`mt-3 text-xs ${threshold < 60 ? 'text-accent-red' : threshold < 80 ? 'text-accent-yellow' : 'text-accent-green'}`}>
             当前配置：HI低于 {threshold || 0} 时触发告警。
           </p>
+          <div className="mt-4 rounded-md border border-border-default bg-bg-card p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs text-text-muted">当前低于阈值</p>
+                <p className={`mt-1 font-mono text-2xl font-bold ${lowCount > 0 ? 'text-accent-red' : 'text-accent-green'}`}>
+                  {lowCount}<span className="ml-1 text-xs font-normal text-text-muted">台</span>
+                </p>
+              </div>
+              <span className={`rounded-full border px-2 py-1 text-[10px] ${
+                lowCount > 0
+                  ? 'border-accent-red/40 bg-accent-red/10 text-accent-red'
+                  : 'border-accent-green/40 bg-accent-green/10 text-accent-green'
+              }`}>
+                {lowCount > 0 ? '需要处置' : '全部达标'}
+              </span>
+            </div>
+            <div className="mt-3 max-h-40 space-y-2 overflow-auto">
+              {thresholdAlerts?.turbines.slice(0, 8).map((turbine) => (
+                <div key={turbine.id} className="flex items-center justify-between gap-3 rounded border border-border-default bg-navy-900/70 px-3 py-2 text-xs">
+                  <span className="min-w-0 truncate text-text-primary">{turbine.name} · {turbine.region || '-'}</span>
+                  <span className="font-mono text-accent-red">HI {turbine.hi_value.toFixed(1)}</span>
+                </div>
+              ))}
+              {thresholdAlerts && thresholdAlerts.turbines.length > 8 && (
+                <p className="text-[10px] text-text-muted">还有 {thresholdAlerts.turbines.length - 8} 台低于阈值，请在风场监控页面继续查看。</p>
+              )}
+              {thresholdAlerts && thresholdAlerts.turbines.length === 0 && (
+                <p className="text-xs text-text-muted">当前没有风机低于该阈值。</p>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
@@ -1529,13 +1724,34 @@ function AlertSection({
               <input type="checkbox" checked={emailEnabled} onChange={(e) => onEmailEnabledChange(e.target.checked)} />
             </label>
             {emailEnabled && (
-              <input
-                value={emailAddress}
-                onChange={(e) => onEmailAddressChange(e.target.value)}
-                placeholder="ops@example.com"
-                className="industrial-input w-full"
-              />
+              <>
+                <input
+                  type="email"
+                  inputMode="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                  value={emailAddress}
+                  onChange={(e) => onEmailAddressChange(e.target.value)}
+                  placeholder="ops@example.com"
+                  aria-invalid={Boolean(thresholdError)}
+                  className={`industrial-input w-full ${thresholdError ? 'border-accent-red focus:border-accent-red' : ''}`}
+                />
+                {thresholdError && <p className="text-xs text-accent-red">{thresholdError}</p>}
+              </>
             )}
+            <button
+              type="button"
+              onClick={onSendAlertEmail}
+              disabled={!emailEnabled || !emailAddress || lowCount === 0 || sendingAlertEmail}
+              className="industrial-btn industrial-btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sendingAlertEmail ? '发送中...' : '发送告警邮件'}
+            </button>
+            {alertEmailMessage && (
+              <p className={`text-xs ${alertEmailMessage.includes('已发送') ? 'text-accent-green' : 'text-accent-yellow'}`}>
+                {alertEmailMessage}
+              </p>
+            )}
+            {!emailEnabled && <p className="text-[10px] text-text-muted">开启邮件通知并保存规则后，可发送低HI告警邮件。</p>}
           </div>
         </div>
       </div>
@@ -1587,6 +1803,20 @@ function PipelineSection({
             <p className={`mt-3 text-xs ${source.real_data_available ? 'text-accent-green' : 'text-accent-yellow'}`}>
               {source.note}
             </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <button type="button" onClick={() => onTest(source.type)} className="industrial-btn text-xs">
+                测试连接
+              </button>
+              {testResults[source.type] && (
+                <span className={`rounded-full border px-2 py-1 text-[10px] ${
+                  testResults[source.type] === 'success'
+                    ? 'border-accent-green/40 bg-accent-green/10 text-accent-green'
+                    : 'border-accent-red/40 bg-accent-red/10 text-accent-red'
+                }`}>
+                  {testResults[source.type] === 'success' ? '测试通过' : '测试失败'}
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -1634,6 +1864,9 @@ function PersonnelSection({
   onEdit: (person: Personnel) => void;
   onRemove: (person: Personnel) => void;
 }) {
+  const emailInvalid = Boolean(personForm.email) && !isValidEmail(personForm.email);
+  const submitDisabled = !personForm.name.trim() || !personForm.email.trim() || emailInvalid;
+
   return (
     <SectionShell
       title="人员管理"
@@ -1670,7 +1903,19 @@ function PersonnelSection({
             <h4 className="text-sm font-medium">{editingId ? '编辑人员' : '新增人员'}</h4>
             <div className="mt-4 space-y-3">
               <input placeholder="姓名" value={personForm.name} onChange={(e) => onFormChange({ ...personForm, name: e.target.value })} className="industrial-input w-full" />
-              <input placeholder="邮箱" value={personForm.email} onChange={(e) => onFormChange({ ...personForm, email: e.target.value })} className="industrial-input w-full" />
+              <div>
+                <input
+                  type="email"
+                  inputMode="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                  placeholder="邮箱"
+                  value={personForm.email}
+                  onChange={(e) => onFormChange({ ...personForm, email: e.target.value })}
+                  aria-invalid={emailInvalid}
+                  className={`industrial-input w-full ${emailInvalid ? 'border-accent-red focus:border-accent-red' : ''}`}
+                />
+                {emailInvalid && <p className="mt-1 text-[11px] text-accent-red">请输入正确邮箱地址，格式需包含 @ 和域名</p>}
+              </div>
               <input placeholder="技能，逗号分隔" value={personForm.skills} onChange={(e) => onFormChange({ ...personForm, skills: e.target.value })} className="industrial-input w-full" />
               <select value={personForm.region} onChange={(e) => onFormChange({ ...personForm, region: e.target.value })} className="industrial-input w-full">
                 <option>陕北</option>
@@ -1679,16 +1924,23 @@ function PersonnelSection({
               </select>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={onSubmit} className="industrial-btn industrial-btn-primary flex-1">{editingId ? '保存修改' : '添加人员'}</button>
+              <button
+                onClick={onSubmit}
+                disabled={submitDisabled}
+                className="industrial-btn industrial-btn-primary flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {editingId ? '保存修改' : '添加人员'}
+              </button>
               {editingId && <button onClick={onCancelEdit} className="industrial-btn">取消</button>}
             </div>
             {personnelError && <p className="mt-3 text-xs text-accent-red">{personnelError}</p>}
           </div>
 
           <div className="min-w-0 rounded-lg border border-border-default bg-navy-900/60">
-            <div className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
+            <div className="grid min-w-[820px] grid-cols-[90px_minmax(140px,1fr)_200px_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs text-text-muted">
               <span>姓名</span>
               <span>技能</span>
+              <span>邮箱</span>
               <span>区域</span>
               <span>负载</span>
               <span className="text-right">操作</span>
@@ -1700,12 +1952,20 @@ function PersonnelSection({
                 <p className="p-4 text-sm text-text-muted">暂无人员</p>
               ) : (
                 personnel.map((person) => (
-                  <div key={person.id} className="grid grid-cols-[90px_1fr_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs last:border-0">
+                  <div key={person.id} className="grid min-w-[820px] grid-cols-[90px_minmax(140px,1fr)_200px_70px_90px_120px] gap-3 border-b border-border-default px-4 py-3 text-xs last:border-0">
                     <span className="font-medium text-text-primary">{person.name}</span>
                     <span className="flex flex-wrap gap-1">
                       {person.skills.map((skill) => (
                         <span key={skill} className="rounded bg-accent-blue/10 px-1.5 py-0.5 text-[10px] text-accent-blue">{skill}</span>
                       ))}
+                    </span>
+                    <span className="min-w-0" title={person.email}>
+                      <span className={`block truncate font-mono text-[11px] ${isValidEmail(person.email) ? 'text-text-secondary' : 'text-accent-red'}`}>
+                        {person.email || '-'}
+                      </span>
+                      {person.email && !isValidEmail(person.email) && (
+                        <span className="mt-0.5 block text-[10px] text-accent-red">格式异常</span>
+                      )}
                     </span>
                     <span className="text-text-secondary">{person.region}</span>
                     <span className={loadTone(person.load)}>负载 {person.load}/5</span>

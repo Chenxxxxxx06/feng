@@ -1,5 +1,16 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAuthStore } from '../../services/authStore';
+import api from '../../services/api';
+import {
+  applyPreferences,
+  canShowDesktopDigest,
+  fetchUserPreferences,
+  loadLocalPreferences,
+  markDesktopDigestShown,
+  PREFERENCES_UPDATED_EVENT,
+  type UserPreferences,
+} from '../../services/preferences';
 
 const navItems = [
   {
@@ -65,15 +76,100 @@ const navItems = [
   },
 ];
 
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 340;
+const SIDEBAR_DEFAULT = 200;
+const SIDEBAR_WIDTH_KEY = 'app.sidebar.width';
+
+const clampSidebarWidth = (value: number) => Math.max(SIDEBAR_MIN, Math.min(value, SIDEBAR_MAX));
+
+interface DesktopDigestSummary {
+  lowHiCount: number;
+  todoCount: number;
+  threshold: number;
+}
+
 export default function AppLayout() {
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const [desktopDigest, setDesktopDigest] = useState<DesktopDigestSummary | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : SIDEBAR_DEFAULT;
+  });
+  const resizing = useRef(false);
+
+  useEffect(() => {
+    applyPreferences(loadLocalPreferences());
+    const handlePreferences = (event: Event) => {
+      const prefs = (event as CustomEvent<UserPreferences>).detail || loadLocalPreferences();
+      document.body.classList.toggle('compact-workspace', prefs.compactWorkspace);
+    };
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const loadDigest = async () => {
+      const prefs = await fetchUserPreferences().catch(() => loadLocalPreferences());
+      if (!canShowDesktopDigest(prefs)) return;
+      const [alertsResult, ordersResult] = await Promise.allSettled([
+        api.get('/settings/threshold-alerts'),
+        api.get('/workorders/'),
+      ]);
+      if (cancelled) return;
+
+      const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value.data : null;
+      const rawOrders = ordersResult.status === 'fulfilled' ? ordersResult.value.data : [];
+      const orders = Array.isArray(rawOrders) ? rawOrders : rawOrders.workorders || [];
+      const todoCount = orders.filter((order: { status?: string }) => (
+        ['pending', 'assigned', 'in_progress', 'review'].includes(order.status || '')
+      )).length;
+      setDesktopDigest({
+        lowHiCount: alerts?.low_count || 0,
+        threshold: alerts?.threshold ?? 70,
+        todoCount,
+      });
+      markDesktopDigestShown();
+    };
+    loadDigest();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!resizing.current) return;
+      const next = clampSidebarWidth(event.clientX);
+      setSidebarWidth(next);
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
+    };
+    const handleUp = () => {
+      resizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  const startResize = (event: ReactMouseEvent) => {
+    resizing.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    event.preventDefault();
+  };
 
   return (
     <div className="flex h-screen w-screen" style={{ background: '#071A35' }}>
       <aside
-        className="w-[200px] flex-shrink-0 flex flex-col border-r"
-        style={{ background: 'linear-gradient(180deg, #0A1F3F 0%, #071A35 100%)', borderColor: 'rgba(59,130,246,0.10)' }}
+        className="relative flex flex-shrink-0 flex-col border-r"
+        style={{ width: sidebarWidth, background: 'linear-gradient(180deg, #0A1F3F 0%, #071A35 100%)', borderColor: 'rgba(59,130,246,0.10)' }}
       >
         <div className="h-16 flex items-center gap-3 px-5 border-b" style={{ borderColor: 'rgba(59,130,246,0.08)' }}>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -130,11 +226,54 @@ export default function AppLayout() {
             </div>
           </div>
         </div>
+        <button
+          type="button"
+          aria-label="调整侧边栏宽度"
+          title="拖动调整侧边栏宽度"
+          onMouseDown={startResize}
+          className="absolute right-[-4px] top-0 z-20 h-full w-2 cursor-col-resize bg-transparent transition-colors hover:bg-accent-blue/30"
+        >
+          <span className="absolute right-[3px] top-1/2 h-10 w-px -translate-y-1/2 rounded bg-border-active opacity-60" />
+        </button>
       </aside>
 
-      <main className="flex-1 overflow-hidden" style={{ background: '#071A35' }}>
+      <main className="min-w-0 flex-1 overflow-hidden" style={{ background: '#071A35' }}>
+        {desktopDigest && (
+          <DesktopDigestToast summary={desktopDigest} onClose={() => setDesktopDigest(null)} />
+        )}
         <Outlet />
       </main>
+    </div>
+  );
+}
+
+function DesktopDigestToast({ summary, onClose }: { summary: DesktopDigestSummary; onClose: () => void }) {
+  const hasRisk = summary.lowHiCount > 0 || summary.todoCount > 0;
+  return (
+    <div className="fixed right-5 top-5 z-[900] w-[300px] rounded-lg border border-border-card bg-bg-panel/95 p-4 shadow-2xl backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-text-primary">桌面摘要</p>
+          <p className={`mt-1 text-[11px] ${hasRisk ? 'text-accent-yellow' : 'text-accent-green'}`}>
+            {hasRisk ? '存在待关注事项' : '当前暂无重点待办'}
+          </p>
+        </div>
+        <button onClick={onClose} className="text-sm text-text-muted hover:text-text-primary" aria-label="关闭桌面摘要">
+          ×
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-border-default bg-bg-card px-3 py-2">
+          <p className="text-[10px] text-text-muted">低 HI 告警</p>
+          <p className="mt-1 font-mono text-lg font-bold text-accent-yellow">{summary.lowHiCount}</p>
+          <p className="text-[10px] text-text-muted">阈值 {summary.threshold}</p>
+        </div>
+        <div className="rounded-md border border-border-default bg-bg-card px-3 py-2">
+          <p className="text-[10px] text-text-muted">待办工单</p>
+          <p className="mt-1 font-mono text-lg font-bold text-accent-blue">{summary.todoCount}</p>
+          <p className="text-[10px] text-text-muted">待处理</p>
+        </div>
+      </div>
     </div>
   );
 }
