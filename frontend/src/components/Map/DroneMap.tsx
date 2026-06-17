@@ -151,7 +151,7 @@ export default function DroneMap({
       const shot = completedIds.has(t.id);
       const assigned = assignedIds.has(t.id);
       const borderColor = t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : shot ? '#3fb950' : assigned ? '#388bfd' : '#54657e';
-      const size = 160;
+      const size = 80;
 
       const icon = L.icon({
         iconUrl: '/turbine-marker.png',
@@ -187,16 +187,22 @@ export default function DroneMap({
       const color = drone.color;
       const progressIdx = Math.floor(drone.progress);
 
-      // Completed segment
+      // Completed segment with glow
       if (progressIdx > 0) {
+        // Glow layer
         L.polyline(latlngs.slice(0, progressIdx + 1), {
-          color, weight: 2.5, opacity: 0.9,
+          color, weight: 7, opacity: 0.15,
+        }).addTo(layer);
+        // Core line
+        L.polyline(latlngs.slice(0, progressIdx + 1), {
+          color, weight: 3.5, opacity: 1,
         }).addTo(layer);
       }
-      // Remaining segment
+      // Remaining segment (animated dash)
       if (progressIdx < latlngs.length - 1) {
         L.polyline(latlngs.slice(progressIdx), {
-          color, weight: 2, opacity: 0.35, dashArray: '6 6',
+          color, weight: 2.5, opacity: 0.45, dashArray: '12 10', dashOffset: '0',
+          className: 'drone-path-remaining',
         }).addTo(layer);
       }
       // Takeoff marker
@@ -205,8 +211,8 @@ export default function DroneMap({
         L.marker([takeoff.lat, takeoff.lng], {
           icon: L.icon({
             iconUrl: '/takeoff.png',
-            iconSize: [140, 140],
-            iconAnchor: [70, 140],
+            iconSize: [70, 70],
+            iconAnchor: [35, 70],
             className: '',
           }), zIndexOffset: 500,
         }).bindTooltip(`<div style="font-size:10px"><b>${drone.name} 起飞点</b></div>`, { direction: 'top' }).addTo(layer);
@@ -220,8 +226,8 @@ export default function DroneMap({
         const angle = (Math.atan2(b.lat - a.lat, b.lng - a.lng) * 180) / Math.PI;
         L.marker(mid, {
           icon: L.divIcon({
-            className: '', html: `<div style="transform:rotate(${-angle}deg);color:${color};font-size:40px;opacity:0.6;">▶</div>`,
-            iconSize: [50, 50], iconAnchor: [25, 25],
+            className: '', html: `<div style="transform:rotate(${-angle}deg);color:${color};font-size:18px;opacity:0.7;">▶</div>`,
+            iconSize: [24, 24], iconAnchor: [12, 12],
           }), interactive: false,
         }).addTo(layer);
       }
@@ -236,13 +242,13 @@ export default function DroneMap({
         L.marker([drone.currentPosition.lat, drone.currentPosition.lng], {
           icon: L.divIcon({
             className: '',
-            html: `<div style="width:210px;height:210px;display:flex;align-items:center;justify-content:center;
+            html: `<div style="width:105px;height:105px;display:flex;align-items:center;justify-content:center;
               filter:drop-shadow(0 0 14px ${color});transform:rotate(${angle - 90}deg);">
-              <img src="/drone.png" width="190" height="190" style="display:block;" />
-              <span style="position:absolute;top:-8px;right:-16px;color:#fff;background:${color};
-                font-size:11px;font-weight:700;border-radius:50%;width:22px;height:22px;
+              <img src="/drone.png" width="95" height="95" style="display:block;" />
+              <span style="position:absolute;top:-6px;right:-12px;color:#fff;background:${color};
+                font-size:9px;font-weight:700;border-radius:50%;width:18px;height:18px;
                 display:flex;align-items:center;justify-content:center;border:1px solid rgba(0,0,0,0.4);">${drone.id}</span></div>`,
-            iconSize: [210, 210], iconAnchor: [105, 105],
+            iconSize: [105, 105], iconAnchor: [52, 52],
           }), zIndexOffset: 1000,
         }).bindTooltip(
           `<div style="font-size:11px"><b>${drone.name}</b><br/>🔋 ${drone.battery.toFixed(0)}% | 📸 ${drone.completedTurbines.length}/${drone.assignedTurbines.length}</div>`,
