@@ -274,10 +274,10 @@ export default function TurbineMap({ turbines, selectedId, onSelect, onFarmChang
       markerZoomAnimation: false,
     });
 
-    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       minZoom: MIN_ZOOM,
-      maxZoom: Math.min(MAX_ZOOM, 18),
-      maxNativeZoom: 18,
+      maxZoom: MAX_ZOOM,
+      maxNativeZoom: 20,
       noWrap: true,
       keepBuffer: 8,
       updateWhenIdle: true,
