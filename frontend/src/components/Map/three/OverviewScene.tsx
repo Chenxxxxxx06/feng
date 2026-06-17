@@ -38,6 +38,22 @@ export default function OverviewScene() {
 
   return (
     <>
+      {/* 调试: 原点大红球 — 验证 WebGL 是否渲染 */}
+      <mesh position={[0, 30, 0]}>
+        <sphereGeometry args={[15, 16, 16]} />
+        <meshStandardMaterial color="red" emissive="red" emissiveIntensity={1} />
+      </mesh>
+      {/* 绿色 X 轴标记 */}
+      <mesh position={[100, 5, 0]}>
+        <boxGeometry args={[8, 8, 8]} />
+        <meshStandardMaterial color="lime" emissive="lime" emissiveIntensity={0.8} />
+      </mesh>
+      {/* 蓝色 Z 轴标记 */}
+      <mesh position={[0, 5, 100]}>
+        <boxGeometry args={[8, 8, 8]} />
+        <meshStandardMaterial color="blue" emissive="blue" emissiveIntensity={0.8} />
+      </mesh>
+
       <TerrainSurface width={terrainConfig.width} depth={terrainConfig.depth} />
 
       {visibleTurbines.map((turbine) => (
