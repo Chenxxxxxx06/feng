@@ -23,13 +23,6 @@ interface MaintenancePlanResponse {
   high_count: number; total_cost_estimate: number;
 }
 
-const FAULT_TYPES_DEFAULT = [
-  { value: 'bearing_wear', label: '轴承磨损' }, { value: 'gearbox_failure', label: '齿轮箱故障' },
-  { value: 'blade_damage', label: '叶片损伤' }, { value: 'generator_failure', label: '发电机故障' },
-  { value: 'pitch_system_fault', label: '变桨系统故障' }, { value: 'main_shaft_misalignment', label: '主轴不对中' },
-  { value: 'cooling_system_fault', label: '冷却系统故障' }, { value: 'electrical_connection', label: '电气连接松动' },
-] as const;
-
 type SortKey = 'rul_asc' | 'rul_desc' | 'name_asc';
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'rul_asc', label: '剩余寿命 ↑' }, { key: 'rul_desc', label: '剩余寿命 ↓' }, { key: 'name_asc', label: '风机名称' },
@@ -74,11 +67,11 @@ export default function PredictionPage() {
   const [scheduledTasks, setScheduledTasks] = useState<any[]>([]);
   const [overflowTasks, setOverflowTasks] = useState<any[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
+  const [predSettings, setPredSettings] = useState({rul_warning_threshold: 90, shift_start_time: '08:00', farm_lat: 37.84, farm_lng: 107.74, hi_warning_threshold: 70.0});
   const [scheduling, setScheduling] = useState(false);
   const [schedulePreview, setSchedulePreview] = useState<any[] | null>(null);
-  const [faultTypes, setFaultTypes] = useState<{value:string;label:string}[]>(FAULT_TYPES_DEFAULT as unknown as {value:string;label:string}[]);
-
-  const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('bearing_wear');
+  const [faultTypes, setFaultTypes] = useState<{value:string;label:string}[]>([]);
+  const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('');
   const [costResult, setCostResult] = useState<CostComparison | null>(null); const [costLoading, setCostLoading] = useState(false);
 
   const [sortKey, setSortKey] = useState<SortKey>('rul_asc'); const [chartLimit, setChartLimit] = useState(20);
@@ -87,17 +80,18 @@ export default function PredictionPage() {
   const loadData = useCallback(async () => {
     setError(null);
     try {
-      const [rulData, woRes, turbData, sumData, planRes, ftData] = await Promise.all([
+      const [rulData, woRes, turbData, sumData, planRes, ftData, setRes] = await Promise.all([
         predictionService.getRUL(), api.get('/workorders/'), predictionService.getTurbines(),
         predictionService.getSummary(), api.get('/prediction/maintenance-plan', { params: { top_n: 50 } }),
-        predictionService.getFaultTypes(),
+        predictionService.getFaultTypes(), predictionService.getSettings().catch(() => ({ data: {} })),
       ]);
+      if (setRes.data && Object.keys(setRes.data).length > 0) setPredSettings(setRes.data);
       setPredictions(rulData); const d = woRes.data; setWorkOrders(Array.isArray(d) ? d : d.workorders || []);
       setTurbines(turbData); setSummary(sumData); setMaintPlan(planRes.data);
-      const loadedFt = ftData.length > 0 ? ftData.map((ft: {value:string;label:string}) => ({value: ft.value, label: ft.label})) : FAULT_TYPES_DEFAULT as unknown as {value:string;label:string}[];
+      const loadedFt = ftData.length > 0 ? ftData.map((ft: {value:string;label:string}) => ({value: ft.value, label: ft.label})) : [];
       setFaultTypes(loadedFt);
       if (turbData.length > 0 && !costTurbineId) setCostTurbineId(turbData[0].id);
-      if (loadedFt.length > 0 && costFaultType && !loadedFt.find(ft => ft.value === costFaultType)) {
+      if (loadedFt.length > 0 && (!costFaultType || !loadedFt.find(ft => ft.value === costFaultType))) {
         setCostFaultType(loadedFt[0].value);
       }
     } catch (err: any) { setError(err?.response?.data?.detail || err?.message || '加载失败'); }
@@ -116,7 +110,7 @@ export default function PredictionPage() {
       xAxis: { type: 'category', data: sortedPredictions.map(p => `${p.turbine_name}-${p.component}`), axisLabel: { color: '#64748B', fontSize: 9, rotate: 30 } },
       yAxis: { type: 'value', name: '剩余天数', axisLabel: { color: '#64748B' } },
       series: [{ type: 'bar', data: sortedPredictions.map(p => ({ value: p.remaining_life_days, itemStyle: { color: rulColor(p.remaining_life_days), borderRadius: [3, 3, 0, 0] } })),
-        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#EF4444', type: 'dashed', width: 1 }, data: [{ yAxis: 90, label: { formatter: '告警线', color: '#EF4444', fontSize: 9 } }] } }] });
+        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#EF4444', type: 'dashed', width: 1 }, data: [{ yAxis: predSettings.rul_warning_threshold, label: { formatter: '告警线', color: '#EF4444', fontSize: 9 } }] } }] });
     const hr = () => chart.resize(); window.addEventListener('resize', hr);
     return () => { window.removeEventListener('resize', hr); chart.dispose(); };
   }, [sortedPredictions]);
@@ -154,7 +148,8 @@ export default function PredictionPage() {
     setSchedulePreview(null);
   };
   const handleScheduleItem = (task: any, date: Date) => {
-    const dated = { ...task, scheduled_date: date.toISOString().slice(0, 10), time_slot: '08:00-12:00' };
+    const shiftStart = predSettings.shift_start_time || '08:00';
+    const dated = { ...task, scheduled_date: date.toISOString().slice(0, 10), time_slot: `${shiftStart}-${String(Number(shiftStart.split(':')[0]) + 4).padStart(2, '0')}:00` };
     setScheduledTasks(prev => [...prev.filter(t => !(t.turbine_id === task.turbine_id && t.component === task.component)), dated]);
   };
 
@@ -245,7 +240,7 @@ export default function PredictionPage() {
 
           {/* Calendar + High Risk */}
           <div className="grid grid-cols-2 gap-4">
-            <MaintenanceCalendar workOrders={workOrders} rulItems={predictions} turbines={turbines}
+            <MaintenanceCalendar workOrders={workOrders} rulItems={predictions} turbines={turbines} farmLat={predSettings.farm_lat} farmLng={predSettings.farm_lng}
               scheduledTasks={scheduledTasks} conflicts={conflicts}
               onAutoSchedule={handleAutoSchedule} onScheduleItem={handleScheduleItem} scheduling={scheduling}/>
             <div className="ops-panel p-4"><h3 className="text-sm font-medium mb-3">高风险部件列表</h3>

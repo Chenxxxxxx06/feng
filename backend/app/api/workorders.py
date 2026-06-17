@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ai import _detect_anomalies, _generate_local_diagnosis
 from app.api.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import (
     Fault,
@@ -316,7 +317,8 @@ async def _try_ai_analysis(
     or a local-fallback dict if the AI call fails,
     or None when the user has no API key configured at all.
     """
-    if not user.api_key:
+    effective_key = user.api_key or get_settings().DASHSCOPE_API_KEY or None
+    if not effective_key:
         return None
 
     turbine = await _fetch_turbine_info(wo, db)
@@ -361,17 +363,20 @@ async def _try_ai_analysis(
 
     try:
         anomalies = _detect_anomalies(scada_records, turbine.power_mw or 2.0)
-        diagnosis = await asyncio.to_thread(
-            diagnose_fault,
-            turbine_data,
-            fault_data,
-            model=user.model_preference,
-            api_key=user.api_key,
-            api_provider=user.api_provider,
-            base_url=user.api_base_url,
+        diagnosis = await asyncio.wait_for(
+            asyncio.to_thread(
+                diagnose_fault,
+                turbine_data,
+                fault_data,
+                model=user.model_preference,
+                api_key=effective_key,
+                api_provider=user.api_provider or get_settings().DASHSCOPE_API_KEY,
+                base_url=user.api_base_url,
+            ),
+            timeout=20.0,
         )
         return {"diagnosis": diagnosis, "anomalies": anomalies, "source": "ai"}
-    except Exception:
+    except (Exception, asyncio.TimeoutError):
         logger.warning("AI diagnosis failed for WO-%04d, falling back to local", wo.id)
         # Re-compute anomalies inside the handler in case _detect_anomalies was the failure point
         try:
