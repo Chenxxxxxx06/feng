@@ -81,7 +81,7 @@ export default {
         'glow-green': '0 0 16px rgba(16,185,129,0.2)',
       },
       fontFamily: {
-        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"PingFang SC"', '"Microsoft YaHei"', '"Helvetica Neue"', 'sans-serif'],
+        sans: ['"Noto Sans SC"', '-apple-system', 'BlinkMacSystemFont', '"PingFang SC"', '"Microsoft YaHei"', '"Helvetica Neue"', 'sans-serif'],
         mono: ['"SF Mono"', '"JetBrains Mono"', '"Fira Code"', '"Consolas"', 'monospace'],
       },
       animation: {
