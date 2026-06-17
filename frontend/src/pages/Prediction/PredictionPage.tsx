@@ -193,13 +193,12 @@ export default function PredictionPage() {
         {!loading && !error && predictions.length === 0 && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><span className="ops-status-dot text-accent-blue" /><p className="text-sm">暂无 RUL 预测数据</p><p className="text-xs">请点击「刷新 RUL」生成预测数据</p><RefreshRULButton onDone={loadData}/></div></div>}
 
         {!loading && !error && summary && (
-          <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-3 lg:grid-cols-5 gap-3">
             <StatCard label="全队健康指数" value={summary.fleet.avg_hi?.toFixed(1) ?? '--'} color={summary.fleet.avg_hi && summary.fleet.avg_hi >= 80 ? 'text-accent-green' : 'text-accent-yellow'} sub={`${summary.fleet.healthy}正常·${summary.fleet.warning}预警·${summary.fleet.fault}故障`}/>
             <StatCard label="RUL 预测总数" value={summary.rul.total_predictions} sub={`平均 ${summary.rul.avg_days?.toFixed(0) ?? '--'} 天`}/>
             <StatCard label="关键风险 (<90天)" value={summary.rul.critical_count} color={summary.rul.critical_count > 0 ? 'text-accent-yellow' : 'text-accent-green'} sub={`紧急 ${summary.rul.imminent_count} 个`}/>
             <StatCard label="最短 RUL" value={`${summary.rul.min_days?.toFixed(0) ?? '--'} 天`} color={summary.rul.min_days && summary.rul.min_days < 90 ? 'text-accent-red' : 'text-text-primary'}/>
             <StatCard label="MTBF" value={`${(summary.reliability.mtbf_hours / 24).toFixed(0)} 天`} sub="平均故障间隔"/>
-            <StatCard label="MTTR" value={`${summary.reliability.mttr_hours.toFixed(1)} h`} sub="平均修复时间"/>
           </div>
         )}
 
