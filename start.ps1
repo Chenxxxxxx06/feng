@@ -280,29 +280,69 @@ function Get-PortProcessIds {
     return @($Connections | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
+function Get-PortProcesses {
+    param([int]$Port)
+
+    $ProcessIds = Get-PortProcessIds $Port
+    foreach ($ProcessId in $ProcessIds) {
+        Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-ProjectOwnedProcess {
+    param($Process)
+
+    if (-not $Process -or -not $Process.CommandLine) {
+        return $false
+    }
+
+    $CommandLine = $Process.CommandLine
+    if ($CommandLine -match "uvicorn\s+app\.main:app" -and $CommandLine -match "--port\s+$BackendPort\b") {
+        return $true
+    }
+
+    foreach ($Path in @($RootDir, $BackendDir, $FrontendDir)) {
+        $FullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\")
+        $ForwardPath = $FullPath -replace "\\", "/"
+        if (
+            $CommandLine.IndexOf($FullPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $CommandLine.IndexOf($ForwardPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        ) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Assert-PortAvailable {
     param([int]$Port, [string]$Name)
 
-    $Pids = Get-PortProcessIds $Port
-    if ($Pids.Count -eq 0) {
+    $Processes = @(Get-PortProcesses $Port)
+    if ($Processes.Count -eq 0) {
         return
     }
 
-    if ($StopExisting) {
-        Write-Step "Stopping existing process on $Name port $Port"
-        foreach ($ProcessId in $Pids) {
-            Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    $ForeignProcesses = @($Processes | Where-Object { -not (Test-ProjectOwnedProcess $_) })
+    if ($StopExisting -or $ForeignProcesses.Count -eq 0) {
+        if ($StopExisting) {
+            Write-Step "Stopping existing process on $Name port $Port"
+        }
+        else {
+            Write-Step "Restarting existing project process on $Name port $Port"
+        }
+
+        foreach ($Process in $Processes) {
+            Write-Info "stopping PID $($Process.ProcessId): $($Process.CommandLine)"
+            Stop-Process -Id $Process.ProcessId -Force -ErrorAction SilentlyContinue
         }
         Start-Sleep -Seconds 1
         return
     }
 
-    $Details = foreach ($ProcessId in $Pids) {
-        Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue |
-            Select-Object ProcessId, CommandLine
-    }
+    $Details = $Processes | Select-Object ProcessId, CommandLine
     $Details | Format-List | Out-String | Write-Host
-    throw "$Name port $Port is already in use. Close that process or run .\start.ps1 -StopExisting."
+    throw "$Name port $Port is already in use by a non-project process. Close it or run .\start.ps1 -StopExisting."
 }
 
 function Wait-Backend {
