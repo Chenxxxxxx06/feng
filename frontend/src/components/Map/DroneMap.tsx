@@ -151,12 +151,13 @@ export default function DroneMap({
       const shot = completedIds.has(t.id);
       const assigned = assignedIds.has(t.id);
       const borderColor = t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : shot ? '#3fb950' : assigned ? '#388bfd' : '#54657e';
-      const size = 32;
+      const sizeW = 95;
+      const sizeH = 90;
 
       const icon = L.icon({
         iconUrl: '/turbine-marker.png',
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
+        iconSize: [sizeW, sizeH],
+        iconAnchor: [sizeW / 2, sizeH / 2],
         className: 'drone-turbine-icon',
       });
 
@@ -187,16 +188,22 @@ export default function DroneMap({
       const color = drone.color;
       const progressIdx = Math.floor(drone.progress);
 
-      // Completed segment
+      // Completed segment with glow
       if (progressIdx > 0) {
+        // Glow layer
         L.polyline(latlngs.slice(0, progressIdx + 1), {
-          color, weight: 2.5, opacity: 0.9,
+          color, weight: 7, opacity: 0.15,
+        }).addTo(layer);
+        // Core line
+        L.polyline(latlngs.slice(0, progressIdx + 1), {
+          color, weight: 3.5, opacity: 1,
         }).addTo(layer);
       }
-      // Remaining segment
+      // Remaining segment (animated dash)
       if (progressIdx < latlngs.length - 1) {
         L.polyline(latlngs.slice(progressIdx), {
-          color, weight: 2, opacity: 0.35, dashArray: '6 6',
+          color, weight: 2.5, opacity: 0.45, dashArray: '12 10', dashOffset: '0',
+          className: 'drone-path-remaining',
         }).addTo(layer);
       }
       // Takeoff marker
@@ -205,8 +212,8 @@ export default function DroneMap({
         L.marker([takeoff.lat, takeoff.lng], {
           icon: L.icon({
             iconUrl: '/takeoff.png',
-            iconSize: [28, 28],
-            iconAnchor: [14, 28],
+            iconSize: [80, 80],
+            iconAnchor: [40, 80],
             className: '',
           }), zIndexOffset: 500,
         }).bindTooltip(`<div style="font-size:10px"><b>${drone.name} 起飞点</b></div>`, { direction: 'top' }).addTo(layer);
@@ -220,7 +227,7 @@ export default function DroneMap({
         const angle = (Math.atan2(b.lat - a.lat, b.lng - a.lng) * 180) / Math.PI;
         L.marker(mid, {
           icon: L.divIcon({
-            className: '', html: `<div style="transform:rotate(${-angle}deg);color:${color};font-size:10px;opacity:0.6;">▶</div>`,
+            className: '', html: `<div style="transform:rotate(${-angle}deg);color:${color};font-size:9px;opacity:0.65;">▶</div>`,
             iconSize: [10, 10], iconAnchor: [5, 5],
           }), interactive: false,
         }).addTo(layer);
@@ -236,13 +243,13 @@ export default function DroneMap({
         L.marker([drone.currentPosition.lat, drone.currentPosition.lng], {
           icon: L.divIcon({
             className: '',
-            html: `<div style="width:42px;height:42px;display:flex;align-items:center;justify-content:center;
-              filter:drop-shadow(0 0 14px ${color});transform:rotate(${angle - 90}deg);">
-              <img src="/drone.png" width="38" height="38" style="display:block;" />
+            html: `<div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+              filter:drop-shadow(0 0 12px ${color});transform:rotate(${angle - 90}deg);">
+              <img src="/drone.png" width="32" height="32" style="display:block;" />
               <span style="position:absolute;top:-4px;right:-8px;color:#fff;background:${color};
-                font-size:7px;font-weight:700;border-radius:50%;width:14px;height:14px;
+                font-size:7px;font-weight:700;border-radius:50%;width:13px;height:13px;
                 display:flex;align-items:center;justify-content:center;border:1px solid rgba(0,0,0,0.4);">${drone.id}</span></div>`,
-            iconSize: [42, 42], iconAnchor: [21, 21],
+            iconSize: [36, 36], iconAnchor: [18, 18],
           }), zIndexOffset: 1000,
         }).bindTooltip(
           `<div style="font-size:11px"><b>${drone.name}</b><br/>🔋 ${drone.battery.toFixed(0)}% | 📸 ${drone.completedTurbines.length}/${drone.assignedTurbines.length}</div>`,
