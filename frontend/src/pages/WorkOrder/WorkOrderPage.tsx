@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
-import type { WorkOrder } from '../../types';
+import type { WorkOrder, Turbine } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
 const STATUS_FLOW = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'closed'];
@@ -133,6 +133,7 @@ function WorkOrderStepper({ status }: { status: string }) {
 
 export default function WorkOrderPage() {
   const [orders, setOrders] = useState<WorkOrder[]>([]);
+  const [turbines, setTurbines] = useState<Turbine[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -182,6 +183,7 @@ export default function WorkOrderPage() {
   useEffect(() => {
     fetchOrders();
     api.get('/personnel/').then(({ data }) => setPersonnel(data)).catch(() => {});
+    api.get<{ turbines: Turbine[] }>('/turbines/').then(({ data }) => setTurbines(data.turbines || [])).catch(() => {});
   }, [statusFilter, priorityFilter]);
 
   const stats = useMemo(() => {
@@ -425,8 +427,13 @@ export default function WorkOrderPage() {
                 <div>
                   <p className="mb-3 text-xs font-medium text-text-secondary">基础信息</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <input placeholder="风机 ID *" value={form.turbine_id} onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
-                      className="form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none" />
+                    <select value={form.turbine_id} onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
+                      className="form-input px-3 py-2 text-sm text-text-primary">
+                      <option value="">选择风机 *</option>
+                      {turbines.map((t) => (
+                        <option key={t.id} value={String(t.id)}>{t.name} · {t.region}</option>
+                      ))}
+                    </select>
                     <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}
                       className="form-input px-3 py-2 text-sm text-text-primary">
                       <option value="low">低优先级</option><option value="medium">中优先级</option><option value="high">高优先级</option><option value="urgent">紧急</option>

@@ -138,8 +138,6 @@ export default function DashboardPage() {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [mtbfHours, setMtbfHours] = useState<number | null>(null);
-  const [mttrHours, setMttrHours] = useState<number | null>(null);
-  const [mttrSource, setMttrSource] = useState<string>('');
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const fetchData = async () => { setLoading(true); try { const params = new URLSearchParams(filters); const { data } = await api.get(`/turbines/?${params}`); setSummary(data); } catch { setSummary(EMPTY_SUMMARY); } finally { setLoading(false); } };
@@ -148,7 +146,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let c = false;
-    (async () => { try { const { data } = await api.get('/turbines/monitoring-metrics'); if (!c && data?.mtbf_hours != null) setMtbfHours(data.mtbf_hours); } catch {}; try { const { data } = await api.get('/prediction/summary'); if (!c && data?.reliability?.mttr_hours != null) { setMttrHours(data.reliability.mttr_hours); setMttrSource(' (估)'); } } catch {}; })();
+    (async () => { try { const { data } = await api.get('/turbines/monitoring-metrics'); if (!c && data?.mtbf_hours != null) setMtbfHours(data.mtbf_hours); } catch {}; })();
     return () => { c = true; };
   }, []);
 
@@ -162,7 +160,6 @@ export default function DashboardPage() {
   const stats = useMemo(() => scopedStats(scopedTurbines), [scopedTurbines]);
 
   const fmtMtbf = (h: number | null) => { if (h == null) return '--'; if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`; if (h >= 720) return `${(h / 720).toFixed(0)} 月`; if (h >= 24) return `${(h / 24).toFixed(0)} 天`; return h.toFixed(0); };
-  const fmtMttr = (h: number | null) => (h != null ? h.toFixed(1) : '--');
 
   const windSpeedData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 4 + Math.sin(i / 4) * 3 + Math.random() * 4 })), []);
   const powerData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 800 + Math.sin(i / 4) * 600 + Math.random() * 400 })), []);
@@ -214,13 +211,12 @@ export default function DashboardPage() {
 
       {/* ═══ KPI Strip ═══ */}
       <div className="flex-shrink-0 px-6 pt-4 pb-2">
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <KPICard label="风机可用率" value={avail} unit="%" color="#3B82F6" />
           <KPICard label="正常运行" value={String(healthy)} unit="台" color="#10B981" />
           <KPICard label="预警风机" value={String(warning)} unit="台" color="#F59E0B" />
           <KPICard label="故障风机" value={String(faulty)} unit="台" color="#EF4444" trend={faulty > 0 ? 'up' : undefined} />
           <KPICard label="MTBF" value={mtbfHours != null ? fmtMtbf(mtbfHours) : '--'} unit="" color="#22D3EE" />
-          <KPICard label="MTTR" value={fmtMttr(mttrHours)} unit={`h${mttrSource}`} color="#8B5CF6" />
         </div>
       </div>
 
