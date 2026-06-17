@@ -351,7 +351,7 @@ export default function DroneSchedulerPage() {
         <div className="grid grid-cols-5 gap-3">
           <KPICard label="风机总数" value={String(turbines.length)} unit="台" color="#388bfd" />
           <KPICard label="当前风场" value={activeFarm ? String(farmTurbineCount) : '--'} unit="台" color="#39d2c0" />
-          <KPICard label="无人机" value={String(config.count)} unit="架" color="#a371f7" />
+          <KPICard label="无人机" value={String(drones.length || config.count)} unit="架" color="#a371f7" />
           <KPICard label="已拍摄" value={hasPlan ? `${completedCount}/${totalCount}` : '--'} unit="" color="#3fb950" />
           <KPICard label="飞行时间" value={isRunning ? formatTime(elapsedTime) : '--'} unit="" color="#f0883e" />
         </div>
