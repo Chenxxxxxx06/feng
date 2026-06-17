@@ -322,7 +322,7 @@ export default function WorkOrderPage() {
         recipient_emails: recipients,
         subject: `[风调预顺] WO-${String(wo.id).padStart(4, '0')} ${wo.title}`,
         use_preview_template: true,
-      });
+      }, { timeout: 60000 });
       if ((data.sent || 0) === 0) {
         const failedLog = data.logs?.find((log: any) => log.status === 'failed');
         if (failedLog?.error_message) {
