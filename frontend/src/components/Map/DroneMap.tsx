@@ -85,9 +85,10 @@ export default function DroneMap({
       zoomControl: false, attributionControl: false,
       fadeAnimation: true, zoomAnimation: true, markerZoomAnimation: true,
     });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxNativeZoom: 20,
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxNativeZoom: 19,
       noWrap: true, keepBuffer: 16, updateWhenIdle: false, updateWhenZooming: true,
+      attribution: '&copy; OpenStreetMap contributors',
     }).addTo(map);
     staticLayerRef.current = L.layerGroup().addTo(map);
     droneLayerRef.current = L.layerGroup().addTo(map);

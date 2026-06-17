@@ -20,8 +20,8 @@ export default function EnvironmentSetup() {
       {/* 太阳光 + 阴影 */}
       <directionalLight
         position={[200, 350, 100]}
-        color="#fff3e0"
-        intensity={1.2}
+        color="#fff8e7"
+        intensity={1.5}
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
@@ -32,15 +32,18 @@ export default function EnvironmentSetup() {
         shadow-camera-bottom={-400}
       />
 
-      {/* 环境光 */}
-      <ambientLight color="#4a6c8f" intensity={0.6} />
+      {/* 环境光 — 提高确保场景永远可见 */}
+      <ambientLight color="#ffffff" intensity={0.9} />
 
-      {/* 半球光 (天空+地面反射) */}
+      {/* 半球光 */}
       <hemisphereLight
-        color="#87CEEB"
+        color="#b1e1ff"
         groundColor="#8B7355"
-        intensity={0.4}
+        intensity={0.7}
       />
+
+      {/* 调试辅助网格 (2000m × 2000m, 100m 间距) */}
+      <gridHelper args={[2000, 20, '#888888', '#444444']} position={[0, 0.5, 0]} />
     </>
   );
 }
