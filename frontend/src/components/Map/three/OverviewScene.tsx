@@ -16,6 +16,7 @@ export default function OverviewScene() {
   const drones = useDrone3DStore((s) => s.drones);
   const activeFarm = useDrone3DStore((s) => s.activeFarm);
   const focusTurbine = useDrone3DStore((s) => s.focusTurbine);
+  const cruiseAltitude = useDrone3DStore((s) => s.cruiseAltitude);
 
   const visibleTurbines = useMemo(
     () => activeFarm
@@ -70,7 +71,7 @@ export default function OverviewScene() {
       ))}
 
       {drones.map((drone) => (
-        <FlightPathLines key={`path-${drone.id}`} drone={drone} />
+        <FlightPathLines key={`path-${drone.id}`} drone={drone} cruiseAltitude={cruiseAltitude} />
       ))}
     </>
   );

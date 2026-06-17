@@ -1,14 +1,13 @@
 /**
- * 3D 风场视图状态管理
- * 共享 zustand store: 2D DroneSchedulerPage 写 → 3D WindFarm3DView 读
- * 模式: 与 copilotStore.ts 一致 (zustand v5 create)
+ * 3D 风场视图 + 无人机调度状态管理
+ * zustand store: 2D DroneSchedulerPage 写 → 3D WindFarm3DView 读
  */
 
 import { create } from 'zustand';
-import type { Turbine, Drone } from '../types';
+import type { Turbine, Drone, NoFlyZone } from '../types';
 
 export interface Drone3DState {
-  // ── 数据 (DroneSchedulerPage 写入) ──
+  // ── 数据 ──
   turbines: Turbine[];
   drones: Drone[];
   activeFarm: string | null;
@@ -16,9 +15,15 @@ export interface Drone3DState {
   isRunning: boolean;
   speedMultiplier: number;
 
-  // ── 3D 视图专属 ──
+  // ── 禁飞区 ──
+  noFlyZones: NoFlyZone[];
+  showNoFlyZones: boolean;
+
+  // ── 3D 视图 ──
   viewMode: 'overview' | 'detail';
   focusedTurbineId: number | null;
+  cruiseAltitude: number;
+  cameraMode: 'follow' | 'overview' | 'free';
 
   // ── Actions ──
   setTurbines: (t: Turbine[]) => void;
@@ -29,6 +34,12 @@ export interface Drone3DState {
   setSpeedMultiplier: (v: number) => void;
   setViewMode: (m: 'overview' | 'detail') => void;
   focusTurbine: (id: number | null) => void;
+  setNoFlyZones: (zones: NoFlyZone[]) => void;
+  addNoFlyZone: (zone: NoFlyZone) => void;
+  removeNoFlyZone: (index: number) => void;
+  toggleNoFlyZones: () => void;
+  setCruiseAltitude: (alt: number) => void;
+  setCameraMode: (mode: 'follow' | 'overview' | 'free') => void;
 }
 
 export const useDrone3DStore = create<Drone3DState>((set) => ({
@@ -38,8 +49,14 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   hasPlan: false,
   isRunning: false,
   speedMultiplier: 1,
+
+  noFlyZones: [],
+  showNoFlyZones: true,
+
   viewMode: 'overview',
   focusedTurbineId: null,
+  cruiseAltitude: 50,
+  cameraMode: 'overview',
 
   setTurbines: (turbines) => set({ turbines }),
   setDrones: (drones) => set({ drones }),
@@ -50,4 +67,13 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   setViewMode: (viewMode) => set({ viewMode }),
   focusTurbine: (id) =>
     set({ focusedTurbineId: id, viewMode: id ? 'detail' : 'overview' }),
+
+  setNoFlyZones: (noFlyZones) => set({ noFlyZones }),
+  addNoFlyZone: (zone) => set((s) => ({ noFlyZones: [...s.noFlyZones, zone] })),
+  removeNoFlyZone: (index) => set((s) => ({
+    noFlyZones: s.noFlyZones.filter((_, i) => i !== index),
+  })),
+  toggleNoFlyZones: () => set((s) => ({ showNoFlyZones: !s.showNoFlyZones })),
+  setCruiseAltitude: (cruiseAltitude) => set({ cruiseAltitude }),
+  setCameraMode: (cameraMode) => set({ cameraMode }),
 }));

@@ -3,14 +3,15 @@ import api from '../../services/api';
 import DroneMap from '../../components/Map/DroneMap';
 import { solveTsp, solveVrp } from '../../utils/dronePathPlanner';
 import { buildFleet, tickSimulation, createDefaultConfig } from '../../utils/droneSimulator';
-import type { Turbine, Drone, DroneFleetConfig } from '../../types';
+import { AStar3DPathPlanner } from '../../utils/aStar3DPathPlanner';
+import type { Turbine, Drone, DroneFleetConfig, NoFlyZone } from '../../types';
 import type { TspResult, VrpResult } from '../../utils/dronePathPlanner';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 import WindFarm3DView from '../../components/Map/three/WindFarm3DView';
 import ErrorBoundary from '../../components/Common/ErrorBoundary';
 import { useDrone3DStore } from '../../services/drone3dStore';
 
-type Mode = 'tsp' | 'vrp';
+type Mode = 'tsp' | 'vrp' | 'astar3d';
 
 export default function DroneSchedulerPage() {
   // ── Data ──
@@ -42,6 +43,13 @@ export default function DroneSchedulerPage() {
   const [mode, setMode] = useState<Mode>('vrp');
   const [config, setConfig] = useState<DroneFleetConfig>(createDefaultConfig());
   const [assignmentMode, setAssignmentMode] = useState<'auto' | 'manual'>('auto');
+
+  // ── A* 3D Path Planner ──
+  const [cruiseAltitude, setCruiseAltitude] = useState(50);
+  const [noFlyZones, setNoFlyZones] = useState<NoFlyZone[]>([]);
+  const [addingNoFly, setAddingNoFly] = useState(false);
+  const [nfzCorner1, setNfzCorner1] = useState<{ lat: number; lng: number } | null>(null);
+  const aStarPlanner = useRef(new AStar3DPathPlanner({ gridResolution: 80 }));
 
   // ── Fleet ──
   const [drones, setDrones] = useState<Drone[]>([]);
@@ -79,20 +87,73 @@ export default function DroneSchedulerPage() {
     setCompletedCount(0);
     setElapsedTime(0);
     setIsRunning(false);
+
+    if (m === 'astar3d') {
+      // ── A* 3D 路径规划 ──
+      if (points.length < 2) { setMessage('至少需要2台风机'); return; }
+      aStarPlanner.current.setNoFlyZones(noFlyZones);
+
+      // 使用第一台风机作为起点，按TSP顺序构建3D路径
+      const startPoint = points[0];
+      const endPoint = points[points.length - 1];
+      const result3d = aStarPlanner.current.planFullFlightPath(
+        { lat: startPoint.lat, lng: startPoint.lng, altitude: 0 },
+        { lat: endPoint.lat, lng: endPoint.lng, altitude: 0 },
+        cruiseAltitude,
+        { smoothPath: true },
+      );
+
+      if (result3d.success && result3d.path.length > 0) {
+        // 构建单架无人机的3D飞行任务
+        const drone: Drone = {
+          id: 1,
+          name: 'Drone-A*',
+          status: 'idle' as const,
+          battery: 100,
+          range: cfg.range,
+          speed: cfg.speed,
+          color: '#39d2c0',
+          assignedTurbines: points.map((p) => p.id ?? 0).filter((id) => id > 0),
+          completedTurbines: [],
+          currentPosition: result3d.path[0] ? { lat: result3d.path[0].lat, lng: result3d.path[0].lng } : null,
+          path: result3d.path.map((wp) => ({ lat: wp.lat, lng: wp.lng })),
+          progress: 0,
+          _altitude: cruiseAltitude,
+        };
+        setDrones([drone]);
+        setHasPlan(true);
+        const store = useDrone3DStore.getState();
+        store.setDrones([drone]);
+        store.setHasPlan(true);
+        store.setActiveFarm(farm);
+        store.setCruiseAltitude(cruiseAltitude);
+        store.setNoFlyZones(noFlyZones);
+        const dist = result3d.statistics?.totalDistance ?? 0;
+        setMessage(`A* 3D · ${(dist / 1000).toFixed(1)}km · ${result3d.statistics?.totalWaypoints ?? 0}航点 · ${cruiseAltitude}m巡航`);
+      } else {
+        setMessage(`A* 路径规划失败: ${result3d.error || '未知错误'}`);
+      }
+      return;
+    }
+
+    // ── 传统 TSP/VRP 2D 规划 ──
     const result: TspResult | VrpResult = (m === 'tsp' || cfg.count <= 1)
       ? solveTsp(points)
       : solveVrp(points, cfg.count);
     const fleet = buildFleet(result, cfg, farm);
+    // 为所有无人机设置默认高度
+    fleet.forEach((d) => { d._altitude = cruiseAltitude; });
     setDrones(fleet);
     setHasPlan(true);
-    // 🆕 同步 3D store
     const store = useDrone3DStore.getState();
     store.setDrones(fleet);
     store.setHasPlan(true);
     store.setActiveFarm(farm);
+    store.setCruiseAltitude(cruiseAltitude);
+    store.setNoFlyZones(noFlyZones);
     const dist = 'assignments' in result ? result.totalDistance : result.totalDistance;
     setMessage(`${m === 'tsp' ? '单机' : `${cfg.count}机分区`} · ${dist.toLocaleString()}m · ${points.length}台风机`);
-  }, [turbines]);
+  }, [turbines, cruiseAltitude, noFlyZones]);
 
   useEffect(() => {
     if (activeFarm) planPath(activeFarm, mode, config);
@@ -101,6 +162,33 @@ export default function DroneSchedulerPage() {
   }, [activeFarm]);
 
   const handleReplan = () => { if (activeFarm) planPath(activeFarm, mode, config); };
+
+  // ── Map click for no-fly zone ──
+  const handleMapClick = useCallback((latlng: { lat: number; lng: number }) => {
+    if (!addingNoFly) return;
+    if (!nfzCorner1) {
+      setNfzCorner1(latlng);
+      setMessage('已选第一个角点，请点击地图选第二个角点');
+    } else {
+      // Second corner — create the zone
+      const south_lat = Math.min(nfzCorner1.lat, latlng.lat);
+      const north_lat = Math.max(nfzCorner1.lat, latlng.lat);
+      const west_lng = Math.min(nfzCorner1.lng, latlng.lng);
+      const east_lng = Math.max(nfzCorner1.lng, latlng.lng);
+      const newZone: NoFlyZone = {
+        name: `禁飞区 ${noFlyZones.length + 1}`,
+        south_lat, north_lat, west_lng, east_lng,
+        min_altitude: 0,
+        max_altitude: cruiseAltitude + 50,
+      };
+      const updated = [...noFlyZones, newZone];
+      setNoFlyZones(updated);
+      setNfzCorner1(null);
+      setAddingNoFly(false);
+      useDrone3DStore.getState().setNoFlyZones(updated);
+      setMessage(`禁飞区已添加: ${newZone.name}`);
+    }
+  }, [addingNoFly, nfzCorner1, noFlyZones, cruiseAltitude]);
 
   // ── Manual assignment: click turbine → assign to selected drone ──
   const handleTurbineClick = useCallback((turbine: Turbine) => {
@@ -274,9 +362,11 @@ export default function DroneSchedulerPage() {
               activeFarm={activeFarm}
               onFarmSelect={setActiveFarm}
               onTurbineClick={handleTurbineClick}
+              onMapClick={handleMapClick}
               showPaths={hasPlan}
               manualMode={assignmentMode === 'manual'}
               selectedDroneId={selectedDroneId}
+              noFlyZones={noFlyZones}
             />
           </div>
         </div>
@@ -312,13 +402,13 @@ export default function DroneSchedulerPage() {
             {/* Mode */}
             <div className="industrial-card rounded-lg p-3">
               <h4 className="text-xs font-medium text-text-secondary mb-2">规划模式</h4>
-              <div className="flex gap-2">
-                {(['tsp', 'vrp'] as Mode[]).map((m) => (
+              <div className="flex gap-1.5">
+                {(['tsp', 'vrp', 'astar3d'] as Mode[]).map((m) => (
                   <button key={m} onClick={() => setMode(m)}
-                    className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                    className={`flex-1 rounded-md border px-2 py-2 text-[10px] transition-colors ${
                       mode === m ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-secondary hover:border-accent-blue/40'
                     }`}>
-                    {m === 'tsp' ? '单机 TSP' : '多机 VRP'}
+                    {m === 'tsp' ? '单机TSP' : m === 'vrp' ? '多机VRP' : 'A* 3D'}
                   </button>
                 ))}
               </div>
@@ -335,6 +425,61 @@ export default function DroneSchedulerPage() {
                 <SliderRow label="飞行速度" value={config.speed} min={5} max={30} step={1} unit="m/s"
                   onChange={(v) => setConfig({ ...config, speed: v })} />
               </div>
+            </div>
+
+            {/* Cruise Altitude (A* 3D only) */}
+            <div className="industrial-card rounded-lg p-3">
+              <h4 className="text-xs font-medium text-text-secondary mb-2">
+                🛫 巡航高度 <span className="text-accent-blue">{cruiseAltitude}m</span>
+              </h4>
+              <input type="range" min={20} max={300} step={10} value={cruiseAltitude}
+                onChange={(e) => { setCruiseAltitude(Number(e.target.value)); useDrone3DStore.getState().setCruiseAltitude(Number(e.target.value)); }}
+                className="w-full accent-blue-500 h-1.5" />
+              <div className="flex justify-between text-[9px] text-text-muted mt-0.5">
+                <span>20m (低空)</span><span>300m (高空)</span>
+              </div>
+            </div>
+
+            {/* No-Fly Zones */}
+            <div className="industrial-card rounded-lg p-3">
+              <h4 className="text-xs font-medium text-text-secondary mb-2">
+                🚫 禁飞区 ({noFlyZones.length})
+              </h4>
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={() => { setAddingNoFly(!addingNoFly); setNfzCorner1(null); }}
+                  className={`flex-1 rounded-md border px-2 py-1.5 text-[10px] transition-colors ${
+                    addingNoFly ? 'border-red-400/50 bg-red-400/10 text-red-400' : 'border-border-default text-text-secondary hover:border-accent-blue/40'
+                  }`}>
+                  {addingNoFly ? '取消选区' : '➕ 框选禁飞区'}
+                </button>
+                <button onClick={() => { setNoFlyZones([]); useDrone3DStore.getState().setNoFlyZones([]); }}
+                  className="rounded-md border border-border-default px-2 py-1.5 text-[10px] text-text-muted hover:text-red-400 transition-colors">
+                  清空
+                </button>
+              </div>
+              {addingNoFly && (
+                <p className="text-[10px] text-accent-yellow mb-1">
+                  {nfzCorner1 ? '📍 点击地图选第二个角点' : '📍 点击地图选第一个角点'}
+                </p>
+              )}
+              {/* No-fly zone list */}
+              {noFlyZones.length > 0 && (
+                <div className="space-y-1 max-h-24 overflow-y-auto">
+                  {noFlyZones.map((zone, i) => (
+                    <div key={i} className="flex items-center justify-between text-[10px] bg-red-400/5 border border-red-400/15 rounded px-2 py-1">
+                      <span className="text-text-secondary truncate flex-1">{zone.name}</span>
+                      <span className="text-text-muted mx-1">{zone.min_altitude}-{zone.max_altitude}m</span>
+                      <button onClick={() => {
+                        const newZones = noFlyZones.filter((_, j) => j !== i);
+                        setNoFlyZones(newZones);
+                        useDrone3DStore.getState().setNoFlyZones(newZones);
+                      }}
+                        className="text-red-400 hover:text-red-300 ml-1">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Assignment */}
