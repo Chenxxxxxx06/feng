@@ -28,8 +28,9 @@ export default function FlightPathLines({ drone, cruiseAltitude = 50 }: Props) {
     }
 
     const pts = drone.path.map((p) => {
-      const [x, , z] = gpsToScene(p.lat, p.lng);
-      return new THREE.Vector3(x, cruiseAltitude, z);
+      const altitude = p.alt ?? cruiseAltitude;
+      const [x, , z] = gpsToScene(p.lat, p.lng, altitude);
+      return new THREE.Vector3(x, altitude, z);
     });
 
     const idx = Math.floor(drone.progress);
@@ -137,9 +138,10 @@ export default function FlightPathLines({ drone, cruiseAltitude = 50 }: Props) {
       {drone.path.length > 0 && drone.path
         .filter((_, i) => i % 5 === 0 || i === 0 || i === drone.path.length - 1)
         .map((p, i) => {
+          const altitude = p.alt ?? cruiseAltitude;
           const [x, , z] = gpsToScene(p.lat, p.lng);
           return (
-            <mesh key={`wp-${i}`} position={[x, cruiseAltitude, z]}>
+            <mesh key={`wp-${i}`} position={[x, altitude, z]}>
               <sphereGeometry args={[1.2, 8, 8]} />
               <meshBasicMaterial color={color} transparent opacity={0.6} />
             </mesh>

@@ -368,7 +368,11 @@ class ThresholdConfigRequest(BaseModel):
     hi_threshold: float = Field(ge=0, le=100)
     email_enabled: bool = False
     email_address: Optional[str] = None
-    wechat_enabled: bool = False
+
+    @field_validator("email_address")
+    @classmethod
+    def validate_email_address(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_format(value) if value else None
 
     @field_validator("email_address")
     @classmethod
@@ -380,7 +384,42 @@ class ThresholdConfigResponse(BaseModel):
     hi_threshold: float
     email_enabled: bool
     email_address: Optional[str] = None
-    wechat_enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ThresholdAlertTurbine(BaseModel):
+    id: int
+    name: str
+    region: Optional[str] = None
+    status: str
+    hi_value: float
+    model: Optional[str] = None
+
+
+class ThresholdAlertStatus(BaseModel):
+    threshold: float
+    low_count: int
+    turbines: list[ThresholdAlertTurbine]
+    email_enabled: bool
+    email_address: Optional[str] = None
+    checked_at: datetime
+
+
+class OperationLogCreate(BaseModel):
+    page: str = Field(default="system-settings", min_length=1, max_length=64)
+    action: str = Field(min_length=1, max_length=128)
+    result: Optional[str] = Field(default=None, max_length=512)
+    level: str = Field(default="info", max_length=16)
+
+
+class OperationLogResponse(BaseModel):
+    id: int
+    page: str
+    action: str
+    result: Optional[str] = None
+    level: str
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -452,7 +491,8 @@ class AIProviderTestRequest(BaseModel):
 # --- AI ---
 class AISummaryRequest(BaseModel):
     page_type: str = Field(min_length=1, max_length=64)
-    page_data: dict
+    page_data: dict = Field(default_factory=dict)
+    turbine_id: Optional[int] = Field(default=None, gt=0)
     provider_config_id: Optional[int] = Field(default=None, gt=0)
     model: Optional[str] = Field(default=None, max_length=128)
 

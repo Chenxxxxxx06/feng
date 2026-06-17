@@ -206,7 +206,42 @@ async def generate_summary(
     """Generate AI summary for a page.
 
     Uses Qwen API with fallback to local summary.
+    When turbine_id is set, fetches live turbine + SCADA data automatically.
     """
+    # Build page_data from turbine when turbine_id is provided
+    if data.turbine_id and not data.page_data:
+        from datetime import datetime, timedelta, timezone as _tz
+        turbine = await db.get(Turbine, data.turbine_id)
+        if turbine:
+            since = datetime.now(_tz.utc) - timedelta(hours=24)
+            scada_result = await db.execute(
+                select(SCADARecord)
+                .where(SCADARecord.turbine_id == data.turbine_id, SCADARecord.timestamp >= since)
+                .order_by(SCADARecord.timestamp.desc())
+                .limit(144)
+            )
+            scada_rows = scada_result.scalars().all()
+            winds = [r.wind_speed_ms for r in scada_rows if r.wind_speed_ms is not None]
+            powers = [r.power_kw for r in scada_rows if r.power_kw is not None]
+            gen_temps = [r.gen_temperature_c for r in scada_rows if r.gen_temperature_c is not None]
+            avg_wind = sum(winds) / len(winds) if winds else 0
+            avg_power = sum(powers) / len(powers) if powers else 0
+            avg_gen_temp = sum(gen_temps) / len(gen_temps) if gen_temps else 0
+            data.page_data = {
+                "turbineName": turbine.name,
+                "turbineModel": turbine.model or "",
+                "turbineRegion": getattr(turbine, "region", "") or "",
+                "powerMW": turbine.power_mw or 0,
+                "hiValue": turbine.hi_value or 0,
+                "status": turbine.status or "normal",
+                "scadaRecords": len(scada_rows),
+                "avgWindSpeed": round(avg_wind, 2),
+                "avgPowerKW": round(avg_power, 1),
+                "avgGenTempC": round(avg_gen_temp, 1),
+                "faultType": "",
+                "confidence": 0,
+            }
+
     session_provider: Optional[AIProviderConfig] = None
     if data.provider_config_id:
         provider_result = await db.execute(
@@ -256,24 +291,32 @@ async def generate_summary(
         })
 
     try:
-        summary = await asyncio.to_thread(
-            summarize_page,
-            data.page_type,
-            data.page_data,
-            model=effective_model,
-            api_key=effective_key,
-            api_provider=effective_provider,
-            base_url=effective_base_url,
-            raise_on_error=True,
+        # Use qwen-turbo for page summaries — fast enough for inline UX
+        summary_model = effective_model
+        provider_str = (session_provider.provider if session_provider else effective_provider) or ""
+        if "dashscope" in str(provider_str).lower():
+            summary_model = "qwen-turbo"
+        summary = await asyncio.wait_for(
+            asyncio.to_thread(
+                summarize_page,
+                data.page_type,
+                data.page_data,
+                model=summary_model,
+                api_key=effective_key,
+                api_provider=effective_provider,
+                base_url=effective_base_url,
+                raise_on_error=True,
+            ),
+            timeout=20.0,
         )
         return AISummaryResponse(
             **summary,
             status="success",
             model_status=model_status,
         )
-    except Exception as e:
-        error_code, error_message = _classify_ai_error(e)
-        logger.warning(f"AI summary failed [{error_code}]: {_safe_ai_error_message(e)}")
+    except (Exception, asyncio.TimeoutError) as exc:
+        error_code, error_message = _classify_ai_error(exc)
+        logger.warning(f"AI summary failed [{error_code}]: {_safe_ai_error_message(exc)}")
         from app.services.qwen_client import fallback_summary
         fallback = fallback_summary(data.page_type, data.page_data)
         fallback_mode = model_status["mode"] if model_status.get("mode") in {"key_unbound", "provider_mismatch"} else "local_fallback"

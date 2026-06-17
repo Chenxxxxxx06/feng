@@ -1,6 +1,16 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAuthStore } from '../../services/authStore';
+import api from '../../services/api';
+import {
+  applyPreferences,
+  canShowDesktopDigest,
+  fetchUserPreferences,
+  loadLocalPreferences,
+  markDesktopDigestShown,
+  PREFERENCES_UPDATED_EVENT,
+  type UserPreferences,
+} from '../../services/preferences';
 
 const navItems = [
   {
@@ -73,14 +83,60 @@ const SIDEBAR_WIDTH_KEY = 'app.sidebar.width';
 
 const clampSidebarWidth = (value: number) => Math.max(SIDEBAR_MIN, Math.min(value, SIDEBAR_MAX));
 
+interface DesktopDigestSummary {
+  lowHiCount: number;
+  todoCount: number;
+  threshold: number;
+}
+
 export default function AppLayout() {
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const [desktopDigest, setDesktopDigest] = useState<DesktopDigestSummary | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
     return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : SIDEBAR_DEFAULT;
   });
   const resizing = useRef(false);
+
+  useEffect(() => {
+    applyPreferences(loadLocalPreferences());
+    const handlePreferences = (event: Event) => {
+      const prefs = (event as CustomEvent<UserPreferences>).detail || loadLocalPreferences();
+      document.body.classList.toggle('compact-workspace', prefs.compactWorkspace);
+    };
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const loadDigest = async () => {
+      const prefs = await fetchUserPreferences().catch(() => loadLocalPreferences());
+      if (!canShowDesktopDigest(prefs)) return;
+      const [alertsResult, ordersResult] = await Promise.allSettled([
+        api.get('/settings/threshold-alerts'),
+        api.get('/workorders/'),
+      ]);
+      if (cancelled) return;
+
+      const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value.data : null;
+      const rawOrders = ordersResult.status === 'fulfilled' ? ordersResult.value.data : [];
+      const orders = Array.isArray(rawOrders) ? rawOrders : rawOrders.workorders || [];
+      const todoCount = orders.filter((order: { status?: string }) => (
+        ['pending', 'assigned', 'in_progress', 'review'].includes(order.status || '')
+      )).length;
+      setDesktopDigest({
+        lowHiCount: alerts?.low_count || 0,
+        threshold: alerts?.threshold ?? 70,
+        todoCount,
+      });
+      markDesktopDigestShown();
+    };
+    loadDigest();
+    return () => { cancelled = true; };
+  }, [user]);
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
@@ -182,8 +238,42 @@ export default function AppLayout() {
       </aside>
 
       <main className="min-w-0 flex-1 overflow-hidden" style={{ background: '#071A35' }}>
+        {desktopDigest && (
+          <DesktopDigestToast summary={desktopDigest} onClose={() => setDesktopDigest(null)} />
+        )}
         <Outlet />
       </main>
+    </div>
+  );
+}
+
+function DesktopDigestToast({ summary, onClose }: { summary: DesktopDigestSummary; onClose: () => void }) {
+  const hasRisk = summary.lowHiCount > 0 || summary.todoCount > 0;
+  return (
+    <div className="fixed right-5 top-5 z-[900] w-[300px] rounded-lg border border-border-card bg-bg-panel/95 p-4 shadow-2xl backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-text-primary">桌面摘要</p>
+          <p className={`mt-1 text-[11px] ${hasRisk ? 'text-accent-yellow' : 'text-accent-green'}`}>
+            {hasRisk ? '存在待关注事项' : '当前暂无重点待办'}
+          </p>
+        </div>
+        <button onClick={onClose} className="text-sm text-text-muted hover:text-text-primary" aria-label="关闭桌面摘要">
+          ×
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-border-default bg-bg-card px-3 py-2">
+          <p className="text-[10px] text-text-muted">低 HI 告警</p>
+          <p className="mt-1 font-mono text-lg font-bold text-accent-yellow">{summary.lowHiCount}</p>
+          <p className="text-[10px] text-text-muted">阈值 {summary.threshold}</p>
+        </div>
+        <div className="rounded-md border border-border-default bg-bg-card px-3 py-2">
+          <p className="text-[10px] text-text-muted">待办工单</p>
+          <p className="mt-1 font-mono text-lg font-bold text-accent-blue">{summary.todoCount}</p>
+          <p className="text-[10px] text-text-muted">待处理</p>
+        </div>
+      </div>
     </div>
   );
 }

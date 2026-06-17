@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +22,10 @@ from app.services.data_pipeline.geo_loader import geo_loader
 from app.api.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+# ── Simple in-memory cache for heavy dashboard-aggregate query ──
+_agg_cache: dict = {"data": None, "ts": 0}
+_AGG_CACHE_TTL = 60  # seconds
 
 CARE_POWER_SOURCE_FIELDS = {
     "Wind Farm A": "power_30_avg",
@@ -140,17 +145,26 @@ async def get_shaanxi_boundary():
 
 @router.get("/dashboard-aggregate")
 async def get_dashboard_aggregate(
-    source_dataset: str = Query(CARE_DATASET_ID, description="数据集ID"),
+    source_dataset: str | None = Query(None, description="数据集ID；不传或传 all 返回全部数据"),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate dashboard data: component temps, SCADA trends, total power, energy.
 
     Returns data derived from real SCADA records — no hardcoded values.
+    Cached for 60s to avoid repeated heavy queries on 5M+ SCADA rows.
     """
+    # ── Cache hit ──
+    now_ts = time.time()
+    if _agg_cache["data"] is not None and (now_ts - _agg_cache["ts"]) < _AGG_CACHE_TTL:
+        return _agg_cache["data"]
+
+    dataset_filter = _source_dataset_filter(source_dataset)
+
     # ── Turbines ──
-    turbine_result = await db.execute(
-        select(Turbine).where(Turbine.source_dataset == source_dataset)
-    )
+    q = select(Turbine)
+    if dataset_filter:
+        q = q.where(Turbine.source_dataset == dataset_filter)
+    turbine_result = await db.execute(q)
     turbines = turbine_result.scalars().all()
     turbine_ids = [t.id for t in turbines]
     total_count = len(turbines)
@@ -288,21 +302,105 @@ async def get_dashboard_aggregate(
     today_energy_kwh = round(total_power_for_energy / trend_count * 24, 0) if total_power_for_energy > 0 else 0
 
     data_window = "recent_24h" if trends_rows else "fallback_samples"
-    return {
+
+    # ── Health Scores: component-level interpretable scores ──
+    # Computed from data already fetched — no hardcoded fallbacks.
+    # Each score 0-100: 100-80 normal(green), 79-60 warning(yellow), <60 fault(red).
+    scada_available = len(latest_rows) > 0
+
+    # Maintenance score: based on days since last maintenance per turbine
+    now = datetime.now(timezone.utc)
+    maint_scores: list[float] = []
+    for t in turbines:
+        if t.last_maintenance:
+            days = (now - t.last_maintenance).days
+            if days < 90:
+                maint_scores.append(95.0)
+            elif days < 180:
+                maint_scores.append(85.0)
+            elif days < 365:
+                maint_scores.append(70.0)
+            else:
+                maint_scores.append(max(40.0, 55.0 - (days - 365) / 30))
+        else:
+            maint_scores.append(75.0)  # unknown → conservative neutral
+    avg_maint = round(sum(maint_scores) / len(maint_scores), 1) if maint_scores else 0.0
+
+    # Performance score: derived from SCADA temperature statuses
+    perf_scores: list[float] = []
+    if scada_available:
+        for r in latest_rows:
+            score = 100.0
+            gen_t = r.get("gen_temperature_c")
+            gear_t = r.get("gearbox_temperature_c")
+            bear_t = r.get("bearing_temperature_c")
+            if gen_t is not None:
+                if gen_t >= 76: score -= 20  # ≥95% of 80°C max
+                elif gen_t >= 68: score -= 10
+            if gear_t is not None:
+                if gear_t >= 85: score -= 20
+                elif gear_t >= 76: score -= 10
+            if bear_t is not None:
+                if bear_t >= 80: score -= 20
+                elif bear_t >= 72: score -= 10
+            perf_scores.append(max(0.0, score))
+    avg_perf = round(sum(perf_scores) / len(perf_scores), 1) if perf_scores else 0.0
+
+    # HI snapshot: average persisted HI across turbines (always available)
+    hi_values = [t.hi_value for t in turbines if t.hi_value is not None]
+    avg_hi = round(sum(hi_values) / len(hi_values), 1) if hi_values else 0.0
+
+    health_scores = [
+        {
+            "key": "scada_performance",
+            "label": "传动性能",
+            "score": avg_perf if scada_available else None,
+            "status": "normal" if avg_perf >= 80 else "warning" if avg_perf >= 60 else "fault",
+            "source": "SCADA温度分析" if scada_available else "无SCADA数据",
+            "description": "基于风机关键部件温度的综合评估。高温→传动链异常(轴承磨损/齿轮点蚀/润滑失效)。" if scada_available else "SCADA数据集未导入，无法计算传动性能。请前往设置→数据源管理导入。",
+            "data_available": scada_available,
+        },
+        {
+            "key": "maintenance",
+            "label": "维护状态",
+            "score": avg_maint,
+            "status": "normal" if avg_maint >= 80 else "warning" if avg_maint >= 60 else "fault",
+            "source": "维护记录",
+            "description": "基于各风机距上次维护天数的综合评分。维护越久→部件退化风险越高→建议优先排程。",
+            "data_available": True,
+        },
+        {
+            "key": "overall_hi",
+            "label": "综合健康指数",
+            "score": avg_hi,
+            "status": "normal" if avg_hi >= 80 else "warning" if avg_hi >= 60 else "fault",
+            "source": "HI快照",
+            "description": "各风机持久化HI平均值。HI融合SCADA性能+振动+叶片+维护+退化趋势五维计算。",
+            "data_available": True,
+        },
+    ]
+
+    result = {
         "source_dataset": source_dataset,
         "total_turbines": total_count,
         "component_temps": component_temps,
+        "health_scores": health_scores,
         "scada_trends": {"wind_speed_ms": wind_trend, "power_kw": power_trend, "gearbox_temp_c": temp_trend},
         "total_power_kw": total_power_kw,
         "today_energy_kwh": today_energy_kwh,
         "power_is_per_unit": is_per_unit,
         "power_multiplier": power_multiplier,
         "avg_rated_power_kw": avg_rated_kw,
-        "data_available": bool(component_temps or wind_trend or power_trend or temp_trend),
+        "data_available": scada_available,
         "data_window": data_window,
         "latest_data_ts": latest_ts.isoformat() if latest_ts else None,
         "note": f"数据集最新时间: {latest_ts.isoformat() if latest_ts else 'N/A'}; 窗口模式: {data_window}; 功率因数: ×{power_multiplier:.0f}",
     }
+
+    # ── Cache write ──
+    _agg_cache["data"] = result
+    _agg_cache["ts"] = now_ts
+    return result
 
 
 @router.get("/{turbine_id}", response_model=TurbineResponse)
