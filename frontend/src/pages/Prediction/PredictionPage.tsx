@@ -22,14 +22,6 @@ interface MaintenancePlanResponse {
   plan: MaintenanceTask[]; total: number; urgent_count: number;
   high_count: number; total_cost_estimate: number;
 }
-interface AIAnalysisResult { analysis: string; plan: MaintenanceTask[]; total_plan_items: number; }
-
-const FAULT_TYPES = [
-  { value: 'bearing_wear', label: '轴承磨损' }, { value: 'gearbox_failure', label: '齿轮箱故障' },
-  { value: 'blade_damage', label: '叶片损伤' }, { value: 'generator_failure', label: '发电机故障' },
-  { value: 'pitch_system_fault', label: '变桨系统故障' }, { value: 'main_shaft_misalignment', label: '主轴不对中' },
-  { value: 'cooling_system_fault', label: '冷却系统故障' }, { value: 'electrical_connection', label: '电气连接松动' },
-] as const;
 
 type SortKey = 'rul_asc' | 'rul_desc' | 'name_asc';
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
@@ -66,33 +58,20 @@ function StatCard({ label, value, sub, color = 'text-text-primary' }: { label: s
   );
 }
 
-function RefreshRULButton({ onDone }: { onDone: () => void }) {
-  const [spinning, setSpinning] = useState(false);
-  const handleRefresh = async () => {
-    setSpinning(true);
-    try { const r = await predictionService.refreshRUL(); alert(`RUL 已刷新: ${r.refreshed} 台风机, ${r.predictions} 条预测`); onDone(); }
-    catch (e: any) { alert(e?.response?.data?.detail || '刷新失败'); }
-    finally { setSpinning(false); }
-  };
-  return <button onClick={handleRefresh} disabled={spinning} className="ops-btn px-3 py-1 text-xs disabled:opacity-50">{spinning ? '刷新中...' : '刷新 RUL'}</button>;
-}
-
-// ── Calendar ──
-// ── Main ──
 export default function PredictionPage() {
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null);
   const [turbines, setTurbines] = useState<Turbine[]>([]); const [predictions, setPredictions] = useState<RULPrediction[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]); const [summary, setSummary] = useState<PredictionSummary | null>(null);
   const [maintPlan, setMaintPlan] = useState<MaintenancePlanResponse | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null); const [aiLoading, setAiLoading] = useState(false);
   const [showFullPlan, setShowFullPlan] = useState(false);
   const [scheduledTasks, setScheduledTasks] = useState<any[]>([]);
   const [overflowTasks, setOverflowTasks] = useState<any[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
+  const [predSettings, setPredSettings] = useState({rul_warning_threshold: 90, shift_start_time: '08:00', farm_lat: 37.84, farm_lng: 107.74, hi_warning_threshold: 70.0});
   const [scheduling, setScheduling] = useState(false);
-  const [schedulePreview, setSchedulePreview] = useState<any[] | null>(null); // null = no preview, array = show modal
-
-  const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('bearing_wear');
+  const [schedulePreview, setSchedulePreview] = useState<any[] | null>(null);
+  const [faultTypes, setFaultTypes] = useState<{value:string;label:string}[]>([]);
+  const [costTurbineId, setCostTurbineId] = useState<number | null>(null); const [costFaultType, setCostFaultType] = useState<string>('');
   const [costResult, setCostResult] = useState<CostComparison | null>(null); const [costLoading, setCostLoading] = useState(false);
 
   const [sortKey, setSortKey] = useState<SortKey>('rul_asc'); const [chartLimit, setChartLimit] = useState(20);
@@ -101,13 +80,20 @@ export default function PredictionPage() {
   const loadData = useCallback(async () => {
     setError(null);
     try {
-      const [rulData, woRes, turbData, sumData, planRes] = await Promise.all([
+      const [rulData, woRes, turbData, sumData, planRes, ftData, setRes] = await Promise.all([
         predictionService.getRUL(), api.get('/workorders/'), predictionService.getTurbines(),
         predictionService.getSummary(), api.get('/prediction/maintenance-plan', { params: { top_n: 50 } }),
+        predictionService.getFaultTypes(), predictionService.getSettings().catch(() => ({ data: {} })),
       ]);
+      if (setRes.data && Object.keys(setRes.data).length > 0) setPredSettings(setRes.data);
       setPredictions(rulData); const d = woRes.data; setWorkOrders(Array.isArray(d) ? d : d.workorders || []);
       setTurbines(turbData); setSummary(sumData); setMaintPlan(planRes.data);
+      const loadedFt = ftData.length > 0 ? ftData.map((ft: {value:string;label:string}) => ({value: ft.value, label: ft.label})) : [];
+      setFaultTypes(loadedFt);
       if (turbData.length > 0 && !costTurbineId) setCostTurbineId(turbData[0].id);
+      if (loadedFt.length > 0 && (!costFaultType || !loadedFt.find(ft => ft.value === costFaultType))) {
+        setCostFaultType(loadedFt[0].value);
+      }
     } catch (err: any) { setError(err?.response?.data?.detail || err?.message || '加载失败'); }
     finally { setLoading(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,7 +110,7 @@ export default function PredictionPage() {
       xAxis: { type: 'category', data: sortedPredictions.map(p => `${p.turbine_name}-${p.component}`), axisLabel: { color: '#64748B', fontSize: 9, rotate: 30 } },
       yAxis: { type: 'value', name: '剩余天数', axisLabel: { color: '#64748B' } },
       series: [{ type: 'bar', data: sortedPredictions.map(p => ({ value: p.remaining_life_days, itemStyle: { color: rulColor(p.remaining_life_days), borderRadius: [3, 3, 0, 0] } })),
-        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#EF4444', type: 'dashed', width: 1 }, data: [{ yAxis: 90, label: { formatter: '告警线', color: '#EF4444', fontSize: 9 } }] } }] });
+        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#EF4444', type: 'dashed', width: 1 }, data: [{ yAxis: predSettings.rul_warning_threshold, label: { formatter: '告警线', color: '#EF4444', fontSize: 9 } }] } }] });
     const hr = () => chart.resize(); window.addEventListener('resize', hr);
     return () => { window.removeEventListener('resize', hr); chart.dispose(); };
   }, [sortedPredictions]);
@@ -148,7 +134,7 @@ export default function PredictionPage() {
     try {
       const { data } = await api.post('/prediction/schedule', {}, { params: { top_n: 30 } });
       if (!data.scheduled || data.scheduled.length === 0) {
-        alert('排程结果为空，请先刷新 RUL 预测数据');
+        alert('排程结果为空，请检查当前RUL预测数据或维修计划配置');
         return;
       }
       setSchedulePreview(data.scheduled || []); // show preview, don't apply yet
@@ -162,12 +148,12 @@ export default function PredictionPage() {
     setSchedulePreview(null);
   };
   const handleScheduleItem = (task: any, date: Date) => {
-    const dated = { ...task, scheduled_date: date.toISOString().slice(0, 10), time_slot: '08:00-12:00' };
+    const shiftStart = predSettings.shift_start_time || '08:00';
+    const dated = { ...task, scheduled_date: date.toISOString().slice(0, 10), time_slot: `${shiftStart}-${String(Number(shiftStart.split(':')[0]) + 4).padStart(2, '0')}:00` };
     setScheduledTasks(prev => [...prev.filter(t => !(t.turbine_id === task.turbine_id && t.component === task.component)), dated]);
   };
 
   const handleCostCompare = async () => { if (!costTurbineId) return; setCostLoading(true); try { setCostResult(await predictionService.compareCost(costTurbineId, costFaultType)); } catch (e: any) { setCostResult(null); alert(e?.response?.data?.detail || '计算失败'); } finally { setCostLoading(false); } };
-  const handleAIAnalysis = async () => { setAiLoading(true); setAiAnalysis(null); try { const { data } = await api.post('/ai/analyze-maintenance-plan'); setAiAnalysis(data); } catch (e: any) { alert(e?.response?.data?.detail || 'AI分析失败'); } finally { setAiLoading(false); } };
 
   const selectedTurbine = useMemo(() => turbines.find(t => t.id === costTurbineId), [turbines, costTurbineId]);
   const highRisk = useMemo(() => predictions.filter(p => p.remaining_life_days < 180).sort((a, b) => a.remaining_life_days - b.remaining_life_days), [predictions]);
@@ -185,12 +171,11 @@ export default function PredictionPage() {
             <h2 className="ops-title gradient-text">预测性维护决策</h2>
             <p className="ops-subtitle">汇总剩余寿命、维修计划、成本对比和排程结果，帮助优先处理高风险任务。</p>
           </div>
-          <RefreshRULButton onDone={loadData}/>
         </div>
 
         {loading && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><svg className="animate-spin w-8 h-8 text-accent-blue" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span className="text-sm">加载预测数据...</span></div></div>}
         {error && !loading && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3"><span className="ops-status-dot text-accent-red" /><p className="text-accent-red text-sm">{error}</p><button onClick={loadData} className="ops-btn px-4 py-2 text-xs">重试</button></div></div>}
-        {!loading && !error && predictions.length === 0 && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><span className="ops-status-dot text-accent-blue" /><p className="text-sm">暂无 RUL 预测数据</p><p className="text-xs">请点击「刷新 RUL」生成预测数据</p><RefreshRULButton onDone={loadData}/></div></div>}
+        {!loading && !error && predictions.length === 0 && <div className="flex items-center justify-center py-20"><div className="flex flex-col items-center gap-3 text-text-muted"><span className="ops-status-dot text-accent-blue" /><p className="text-sm">暂无 RUL 预测数据</p><p className="text-xs">当前数据源未返回剩余寿命预测结果，请检查后端预测数据导入或模型任务状态。</p></div></div>}
 
         {!loading && !error && summary && (
           <div className="grid grid-cols-3 lg:grid-cols-5 gap-3">
@@ -247,23 +232,15 @@ export default function PredictionPage() {
                   <span className="text-[9px] text-text-muted">预估 ¥{maintPlan.total_cost_estimate.toLocaleString()}</span>
                   <div className="flex items-center gap-1">
                     <button onClick={() => setShowFullPlan(!showFullPlan)} className="ops-btn px-2 py-0.5 text-[9px]">{showFullPlan ? '收起完整' : `全部 ${maintPlan.total} 项`}</button>
-                    <button onClick={handleAIAnalysis} disabled={aiLoading} className="rounded border border-accent-purple/40 bg-accent-purple/15 px-2 py-0.5 text-[9px] font-semibold text-accent-purple hover:bg-accent-purple/25 disabled:opacity-50">AI 分析</button>
                   </div>
                 </div>
-                {aiAnalysis && (
-                  <div className="mt-2 rounded border border-accent-purple/20 bg-accent-purple/5 p-2 text-[10px] text-text-secondary max-h-[200px] overflow-auto relative">
-                    <button onClick={() => setAiAnalysis(null)} className="absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded text-[10px] text-text-muted hover:text-accent-red hover:bg-accent-red/10">×</button>
-                    <span className="text-accent-purple font-medium text-xs">AI 运维分析：</span>
-                    <p className="mt-1 whitespace-pre-line leading-relaxed mr-4">{aiAnalysis.analysis}</p>
-                  </div>
-                )}
               </div>
             )}
           </div>
 
           {/* Calendar + High Risk */}
           <div className="grid grid-cols-2 gap-4">
-            <MaintenanceCalendar workOrders={workOrders} rulItems={predictions} turbines={turbines}
+            <MaintenanceCalendar workOrders={workOrders} rulItems={predictions} turbines={turbines} farmLat={predSettings.farm_lat} farmLng={predSettings.farm_lng}
               scheduledTasks={scheduledTasks} conflicts={conflicts}
               onAutoSchedule={handleAutoSchedule} onScheduleItem={handleScheduleItem} scheduling={scheduling}/>
             <div className="ops-panel p-4"><h3 className="text-sm font-medium mb-3">高风险部件列表</h3>
@@ -277,7 +254,7 @@ export default function PredictionPage() {
           <div className="ops-panel p-4"><h3 className="text-sm font-medium mb-3">维护成本对比</h3>
             <div className="flex gap-3 mb-4 flex-wrap">
               <select value={costTurbineId ?? ''} onChange={e => setCostTurbineId(e.target.value ? Number(e.target.value) : null)} className="min-w-[200px] px-3 py-2 text-sm text-text-primary"><option value="" disabled>选择风机</option>{turbines.map(t => <option key={t.id} value={t.id}>{t.name} — {t.model || '未知型号'} ({t.region})</option>)}</select>
-              <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="px-3 py-2 text-sm text-text-primary">{FAULT_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
+              <select value={costFaultType} onChange={e => setCostFaultType(e.target.value)} className="px-3 py-2 text-sm text-text-primary">{faultTypes.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select>
               <button onClick={handleCostCompare} disabled={!costTurbineId || costLoading} className="ops-btn ops-btn-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">{costLoading ? '计算中...' : '计算对比'}</button>
             </div>
             {selectedTurbine && <p className="text-[11px] text-text-muted -mt-2 mb-3">当前: {selectedTurbine.name} · {selectedTurbine.power_mw}MW · HI {selectedTurbine.hi_value}</p>}
@@ -319,7 +296,7 @@ export default function PredictionPage() {
                 <h2 className="text-base font-semibold">完整维修计划</h2>
                 <span className="text-xs text-text-muted">{maintPlan.total}项 · 紧急 {maintPlan.urgent_count} · 高优先 {maintPlan.high_count} · 总预估 ¥{maintPlan.total_cost_estimate.toLocaleString()}</span>
               </div>
-              <button onClick={() => { setShowFullPlan(false); setAiAnalysis(null); }} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-hover text-text-muted hover:text-accent-red text-lg">✕</button>
+              <button onClick={() => setShowFullPlan(false)} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-hover text-text-muted hover:text-accent-red text-lg">✕</button>
             </div>
             <div className="flex-1 overflow-auto">
               <table className="w-full text-xs">

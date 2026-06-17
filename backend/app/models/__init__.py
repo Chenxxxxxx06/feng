@@ -181,6 +181,82 @@ class WorkOrder(Base):
     downtime_hours = Column(Float, nullable=True)
 
 
+class MaintenanceRecord(Base):
+    __tablename__ = "maintenance_records"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False, index=True)
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action_type = Column(String(32), nullable=False)
+    content = Column(Text, nullable=True)
+    before_status = Column(String(16), nullable=True)
+    after_status = Column(String(16), nullable=True)
+    extra = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+
+
+class AgentActionLog(Base):
+    __tablename__ = "agent_action_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    raw_message = Column(Text, nullable=True)
+    parsed_action = Column(JSON, nullable=True)
+    action = Column(String(64), nullable=False, index=True)
+    params = Column(JSON, nullable=True)
+    before_state = Column(JSON, nullable=True)
+    after_state = Column(JSON, nullable=True)
+    status = Column(String(16), nullable=False, default="pending")
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentTaskPlanState(Base):
+    __tablename__ = "agent_task_plan_states"
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(String(64), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    raw_message = Column(Text, nullable=False)
+    playbook_id = Column(String(128), nullable=False, index=True)
+    page_context = Column(JSON, nullable=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+
+class NotificationLog(Base):
+    __tablename__ = "notification_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=True, index=True)
+    recipient_email = Column(String(128), nullable=False)
+    subject = Column(String(256), nullable=True)
+    channel = Column(String(32), default="email")
+    status = Column(String(16), nullable=False)
+    error_message = Column(Text, nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+
+
+class MaintenancePersonnel(Base):
+    __tablename__ = "maintenance_personnel"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    name = Column(String(64), nullable=False)
+    email = Column(String(128), nullable=True)
+    skills = Column(JSON, default=list)
+    region = Column(String(32), nullable=True)
+    is_available = Column(Boolean, default=True)
+    max_load = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+
 class NotificationConfig(Base):
     __tablename__ = "notification_configs"
     id = Column(Integer, primary_key=True, index=True)

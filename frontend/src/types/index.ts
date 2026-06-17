@@ -238,6 +238,22 @@ export interface AISummary {
 }
 // ── Drone Scheduler Types ──
 
+export interface Waypoint3D {
+  lat: number;
+  lng: number;
+  altitude: number;
+}
+
+export interface NoFlyZone {
+  name: string;
+  south_lat: number;
+  north_lat: number;
+  west_lng: number;
+  east_lng: number;
+  min_altitude: number;
+  max_altitude: number;
+}
+
 export interface Drone {
   id: number;
   name: string;
@@ -251,6 +267,8 @@ export interface Drone {
   currentPosition: { lat: number; lng: number } | null;
   path: { lat: number; lng: number }[];
   progress: number;
+  /** 3D 飞行高度 (m)，由巡航高度设定 */
+  _altitude?: number;
 }
 
 export interface DroneFleetConfig {

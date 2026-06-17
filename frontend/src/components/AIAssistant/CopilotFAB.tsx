@@ -1,11 +1,8 @@
-import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import api from '../../services/api';
 import { useCopilotStore } from '../../services/copilotStore';
-import { AgentExecutor } from '../../services/agent/AgentExecutor';
-import { SkillRegistry } from '../../services/agent/SkillRegistry';
-import type { ExecutionProgress } from '../../services/agent/types';
 import type { Message } from '../../services/copilotStore';
 
 const PANEL_W = 560;
@@ -80,6 +77,100 @@ interface AIProviderConfig {
   last_test_status: string | null;
 }
 
+interface AgentActionConfirmation {
+  title: string;
+  summary: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  warnings: string[];
+}
+
+interface AgentActionPlanResponse {
+  status: 'pending_confirmation' | 'needs_clarification' | 'unsupported' | 'error';
+  task_type?: string;
+  workflow?: string;
+  request_id?: string;
+  action?: string;
+  confidence?: number;
+  confirmation?: AgentActionConfirmation;
+  missing_slots?: string[];
+  clarification_question?: string;
+  error_code?: string;
+  error_message?: string;
+}
+
+interface AgentReadTaskResponse {
+  status: 'success' | 'needs_clarification' | 'unsupported' | 'error';
+  task_type?: string;
+  workflow?: string;
+  confidence?: number;
+  answer?: string;
+  missing_slots?: string[];
+  clarification_question?: string;
+  error_code?: string;
+  error_message?: string;
+  display?: Record<string, unknown>;
+}
+
+interface AgentTaskStep {
+  order: number;
+  step: string;
+  type: string;
+  status: string;
+  description?: string;
+}
+
+interface AgentTaskCandidate {
+  id: string;
+  name: string;
+  category: string;
+  implementation_status?: string | null;
+  task_kind: string;
+  score?: number | null;
+}
+
+interface AgentTaskPlanResponse {
+  status: 'answered' | 'pending_confirmation' | 'needs_clarification' | 'unsupported' | 'error';
+  task_type?: string;
+  task_kind?: string;
+  planner_source?: string;
+  plan_id?: string;
+  playbook_id?: string;
+  workflow?: string;
+  request_id?: string;
+  action?: string;
+  confidence?: number;
+  answer?: string;
+  slots?: Record<string, unknown>;
+  steps?: AgentTaskStep[];
+  candidates?: AgentTaskCandidate[];
+  display?: Record<string, unknown>;
+  confirmation?: AgentActionConfirmation;
+  missing_slots?: string[];
+  clarification_question?: string;
+  error_code?: string;
+  error_message?: string;
+}
+
+interface PendingAgentAction {
+  requestId: string;
+  action: string;
+  taskType?: string;
+  workflow?: string;
+  confidence: number;
+  confirmation: AgentActionConfirmation;
+}
+
+interface AgentActionConfirmResponse {
+  request_id: string;
+  action: string;
+  status: 'success' | 'failed' | 'cancelled';
+  result?: Record<string, unknown>;
+  display?: Record<string, unknown>;
+  error_code?: string;
+  error_message?: string;
+}
+
 type CopilotStreamEvent =
   | { type: 'meta'; model_status?: CopilotModelStatus; warnings?: string[]; context_sources?: ContextSource[] }
   | { type: 'delta'; delta?: string }
@@ -124,7 +215,353 @@ function formatCopilotError(data?: Partial<CopilotResponse>, fallback = 'AI服�
   return lines.join('\n');
 }
 
-function shouldAttachScreenshot(mode: 'chat' | 'agent', attachScreenshotOnce: boolean) {
+function asAgentRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function truncateAgentText(value: unknown, maxLength = 120) {
+  const text = String(value ?? '').trim();
+  if (!text) return '-';
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+const AGENT_SLOT_LABELS: Record<string, string> = {
+  playbook_id: '任务模板',
+  turbine_ref: '风机',
+  turbine_id: '风机ID',
+  workorder_ref: '工单',
+  workorder_id: '工单ID',
+  fault_id: '故障ID',
+  fault_keyword: '故障词',
+  fault_type: '故障类型',
+  component: '部件',
+  assignee_name: '负责人',
+  priority: '优先级',
+  target_workorder_status: '工单目标状态',
+  target_processing_status: '故障目标状态',
+  record_content: '记录内容',
+  reason: '原因',
+  provider: '供应商',
+  scope: '范围',
+  cost_actual: '成本',
+  downtime_hours: '停机小时',
+  personnel_name: '维护人员',
+  email: '邮箱',
+  skills: '技能',
+  region: '区域',
+  knowledge_node_ref: '知识节点',
+  review_action: '审核动作',
+  threshold_payload: '阈值配置',
+  patch_fields: '修改字段',
+  details_description: '详情描述',
+  base_url: 'API地址',
+  api_style: 'API风格',
+  default_model: '默认模型',
+  model_options: '常用模型',
+  has_api_key: '密钥状态',
+  api_key_update: '密钥更新',
+};
+
+const AGENT_FIELD_LABELS: Record<string, string> = {
+  ref: '编号',
+  id: 'ID',
+  name: '名称',
+  turbine_id: '风机ID',
+  turbine_name: '风机',
+  turbine_region: '风场',
+  detected_at: '发现时间',
+  title: '标题',
+  email: '邮箱',
+  role: '角色',
+  region: '区域',
+  skills: '技能',
+  fault_type: '故障类型',
+  category: '分类',
+  severity: '严重度',
+  priority: '优先级',
+  assignee: '负责人',
+  status: '状态',
+  processing_status: '处理状态',
+  verified: '已验证',
+  confidence: '置信度',
+  source: '来源',
+  is_active: '启用',
+  is_available: '可用',
+  active_workorder_count: '未完成工单',
+  deleted: '删除',
+  delete_reason: '删除原因',
+  review_action: '审核动作',
+  review_reason: '审核原因',
+  description: '描述',
+  details: '详情',
+  duplicate_active_fault_ids: '同类活跃故障',
+  patch_fields: '修改字段',
+  details_description: '详情描述',
+  root_causes: '可能根因',
+  solutions: '处理方案',
+  spare_parts: '备件',
+  cases: '案例',
+  extracted_from: '来源记录',
+  hi_threshold: 'HI告警阈值',
+  email_enabled: '邮件通知',
+  email_address: '通知邮箱',
+  wechat_enabled: '企业微信通知',
+  base_url: 'API地址',
+  api_style: 'API风格',
+  default_model: '默认模型',
+  model_options: '常用模型',
+  has_api_key: '密钥状态',
+  api_key_update: '密钥更新',
+  test_model: '测试模型',
+  last_test_status: '测试状态',
+  last_test_message: '测试结果',
+  sample: '返回样例',
+  component: '检测部件',
+  analysis_window_hours: '分析窗口',
+  data_source: '数据源',
+  max_days: '排程天数',
+  top_n: '排程数量',
+  create_work_orders: '创建工单',
+  turbine_count: '风机数量',
+  turbine_names: '风机列表',
+  affected_count: '影响数量',
+  source_datasets: '数据集',
+  before_items: '刷新前',
+  status_summary: '状态统计',
+  component_scores: '分项得分',
+  window_rows: '窗口行数',
+  scada_window_rows: 'SCADA窗口',
+  previous_hi_value: '刷新前HI',
+  previous_status: '刷新前状态',
+  plan_count: '计划项',
+  total_scheduled: '已排程',
+  total_overflow: '溢出项',
+  conflict_count: '冲突数',
+  urgent_count: '紧急项',
+  high_count: '高优先级项',
+  total_cost_estimate: '预估总成本',
+  work_orders_created: '新建工单数',
+  preview_items: '排程预览',
+  scheduled: '排程结果',
+  overflow: '溢出排程',
+  conflicts: '冲突',
+  created_workorders: '新建工单',
+  persist_result: '保存结果',
+  persist_requested: '请求保存',
+  persisted_fault_id: '新增故障ID',
+  persisted_fault_ids: '新增故障ID',
+  skipped_existing_faults: '跳过已有故障',
+  skipped_low_confidence: '低置信跳过',
+  group_summary: '分组统计',
+  records: '检测记录',
+  persist_note: '保存说明',
+  operation: '操作',
+  result_status: '结果状态',
+  algorithm_status: '算法状态',
+  message: '说明',
+  confidence_interval: '置信区间',
+};
+
+function formatAgentSlotValue(value: unknown) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const raw = record.value ?? record.name ?? record.id ?? value;
+    const source = record.source ? `/${record.source}` : '';
+    return `${truncateAgentText(raw, 48)}${source}`;
+  }
+  if (Array.isArray(value)) return truncateAgentText(value.join('、'), 48);
+  return truncateAgentText(value, 48);
+}
+
+function formatAgentSlots(slots?: Record<string, unknown>) {
+  if (!slots) return '';
+  const parts = Object.entries(slots)
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+    .slice(0, 8)
+    .map(([key, value]) => `${AGENT_SLOT_LABELS[key] || key}: \`${formatAgentSlotValue(value)}\``);
+  return parts.join(' · ');
+}
+
+function formatAgentSteps(steps?: AgentTaskStep[]) {
+  if (!steps?.length) return '';
+  const visible = steps.slice(0, 6).map((step) => {
+    const label = step.description || step.step;
+    return `${step.order}. ${truncateAgentText(label, 34)}`;
+  });
+  const suffix = steps.length > visible.length ? ` 等${steps.length}步` : '';
+  return `${visible.join(' -> ')}${suffix}`;
+}
+
+function pickAgentValue(snapshot: Record<string, unknown>, key: string) {
+  const workorder = asAgentRecord(snapshot.workorder);
+  const turbine = asAgentRecord(snapshot.turbine);
+  return snapshot[key] ?? workorder[key] ?? turbine[key];
+}
+
+function formatAgentValue(value: unknown, maxLength = 120): string {
+  if (value === true) return '是';
+  if (value === false) return '否';
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'number') {
+    if (value >= 0 && value <= 1) return `${Math.round(value * 100)}%`;
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return '-';
+    const text = value.map((item) => {
+      if (item && typeof item === 'object') {
+        const record = item as Record<string, unknown>;
+        return String(record.action ?? record.name ?? record.summary ?? record.title ?? record.fault_type ?? record.ref ?? record.id ?? JSON.stringify(record));
+      }
+      return String(item);
+    }).join('、');
+    return truncateAgentText(text, maxLength);
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const picked = record.ref ?? record.name ?? record.title ?? record.fault_type ?? record.summary ?? record.id;
+    if (picked !== undefined && picked !== null) return truncateAgentText(picked, maxLength);
+    try {
+      return truncateAgentText(JSON.stringify(record), maxLength);
+    } catch {
+      return truncateAgentText(String(value), maxLength);
+    }
+  }
+  return truncateAgentText(value, maxLength);
+}
+
+function formatFaultContext(snapshot: Record<string, unknown>) {
+  const context = asAgentRecord(snapshot.fault_context);
+  if (!Object.keys(context).length) return null;
+  const latest = asAgentRecord(context.latest);
+  const total = context.total ?? 0;
+  const active = context.active ?? 0;
+  const latestType = latest.fault_type ? `，最新：${latest.fault_type}` : '';
+  const confidence = typeof latest.confidence === 'number' ? ` ${Math.round(latest.confidence * 100)}%` : '';
+  return `总计 ${total}，活跃 ${active}${latestType}${confidence}`;
+}
+
+function buildAgentSnapshotRows(snapshot: Record<string, unknown>) {
+  const faultContext = formatFaultContext(snapshot);
+  const orderedKeys = [
+    'ref',
+    'id',
+    'name',
+    'turbine_id',
+    'turbine_name',
+    'turbine_region',
+    'detected_at',
+    'title',
+    'email',
+    'role',
+    'region',
+    'skills',
+    'fault_type',
+    'category',
+    'severity',
+    'priority',
+    'assignee',
+    'status',
+    'processing_status',
+    'verified',
+    'confidence',
+    'source',
+    'is_active',
+    'is_available',
+    'active_workorder_count',
+    'deleted',
+    'delete_reason',
+    'review_action',
+    'review_reason',
+    'description',
+    'details',
+    'duplicate_active_fault_ids',
+    'root_causes',
+    'solutions',
+    'spare_parts',
+    'cases',
+    'extracted_from',
+    'hi_threshold',
+    'email_enabled',
+    'email_address',
+    'wechat_enabled',
+    'base_url',
+    'api_style',
+    'default_model',
+    'model_options',
+    'has_api_key',
+    'api_key_update',
+    'test_model',
+    'last_test_status',
+    'last_test_message',
+    'sample',
+    'component',
+    'analysis_window_hours',
+    'data_source',
+    'max_days',
+    'top_n',
+    'create_work_orders',
+    'turbine_count',
+    'turbine_names',
+    'affected_count',
+    'source_datasets',
+    'before_items',
+    'status_summary',
+    'component_scores',
+    'window_rows',
+    'scada_window_rows',
+    'previous_hi_value',
+    'previous_status',
+    'plan_count',
+    'total_scheduled',
+    'total_overflow',
+    'conflict_count',
+    'urgent_count',
+    'high_count',
+    'total_cost_estimate',
+    'work_orders_created',
+    'preview_items',
+    'scheduled',
+    'overflow',
+    'conflicts',
+    'created_workorders',
+    'persist_result',
+    'persist_requested',
+    'persisted_fault_id',
+    'persisted_fault_ids',
+    'skipped_existing_faults',
+    'skipped_low_confidence',
+    'group_summary',
+    'records',
+    'persist_note',
+    'operation',
+    'result_status',
+    'algorithm_status',
+    'message',
+    'confidence_interval',
+  ];
+  const rows = orderedKeys
+    .map((key) => ({ label: AGENT_FIELD_LABELS[key] || key, value: pickAgentValue(snapshot, key) }))
+    .filter((row) => row.value !== undefined && row.value !== null && String(row.value).trim() !== '')
+    .map((row) => ({ label: row.label, value: formatAgentValue(row.value) }));
+  if (faultContext) rows.push({ label: '故障上下文', value: faultContext });
+  return rows;
+}
+
+function buildAgentActionResultMessage(data: AgentActionConfirmResponse) {
+  const result = asAgentRecord(data.result);
+  const rows = buildAgentSnapshotRows(result).slice(0, 10);
+  return [
+    '**Agent动作已执行**',
+    `动作: \`${data.action}\``,
+    ...rows.map((row) => `${row.label}: \`${row.value}\``),
+  ].join('\n');
+}
+
+function shouldAttachScreenshot(mode: AssistantMode, attachScreenshotOnce: boolean) {
   return mode === 'agent' || attachScreenshotOnce;
 }
 
@@ -151,6 +588,8 @@ function fallbackProviderModels(provider?: AIProviderConfig | null) {
 }
 
 const DATA_CONTEXT_STORAGE_KEY = 'copilot.selectedDataContexts.v1';
+const ASSISTANT_MODE_STORAGE_KEY = 'copilot.assistantMode.v1';
+type AssistantMode = 'chat' | 'agent';
 
 const DATA_CONTEXT_OPTIONS = [
   { id: 'dashboard', label: '风场监控', hint: '总览 / 区域 / 风机' },
@@ -170,6 +609,15 @@ function loadSelectedDataContexts() {
     return valid;
   } catch {
     return ['dashboard'];
+  }
+}
+
+function loadAssistantMode(): AssistantMode {
+  try {
+    const raw = localStorage.getItem(ASSISTANT_MODE_STORAGE_KEY);
+    return raw === 'agent' ? 'agent' : 'chat';
+  } catch {
+    return 'chat';
   }
 }
 
@@ -250,31 +698,6 @@ export default function CopilotFAB({ initialMessage = '', pageContext }: { initi
   const fabDragging = useRef(false);
   const fabDragOffset = useRef({ x: 0, y: 0 });
 
-  // Agent executor — runs atomic skill steps in browser
-  const executor = useMemo(() => {
-    const shot = async () => {
-      try {
-        const main = document.querySelector('main') || document.body;
-        const canvas = await Promise.race([
-          html2canvas(main as HTMLElement, { scale: 0.4, logging: false, useCORS: false }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('screenshot timeout')), 6000)),
-        ]);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-        return dataUrl.split(',')[1] || null;
-      } catch { return null; }
-    };
-    const registry = new SkillRegistry(
-      (path: string) => navigate(path),
-      async () => shot(),
-    );
-    return new AgentExecutor(registry, (p: ExecutionProgress) => {
-      const icon = p.status === 'running' ? '⏳' : p.status === 'done' ? '✅' : '❌';
-      const progressId = `step-${p.stepIndex}`;
-      useCopilotStore.getState().removeMessage(progressId);
-      addMessage({ role: 'assistant', content: `${icon} ${p.message}`, _progress: p.status === 'running', _progressId: progressId });
-    });
-  }, [navigate]);
-
 function renderMessageContent(text: string, isProgress?: boolean) {
   if (isProgress) return <span>{text}</span>;
   // Simple markdown: **bold**, `code`, > quote, - list, \n breaks
@@ -303,12 +726,14 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   const fabHasMoved = useRef(false);
   const fabDragStart = useRef({ x: 0, y: 0 });
   const fabPosRef = useRef({ x: 0, y: 0 });
-  const [mode, setMode] = useState<'chat' | 'agent'>('chat');
+  const [mode, setMode] = useState<AssistantMode>(loadAssistantMode);
   const [attachScreenshotOnce, setAttachScreenshotOnce] = useState(false);
   const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
   const [modelDraft, setModelDraft] = useState('');
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null);
   const [selectedContextIds, setSelectedContextIds] = useState<string[]>(loadSelectedDataContexts);
+  const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction | null>(null);
+  const [pendingAgentPlanId, setPendingAgentPlanId] = useState<string | null>(null);
   const [panelSize, setPanelSize] = useState(loadPanelSize);
   const panelSizeRef = useRef(panelSize);
   const currentSession = sessions.find((session) => session.id === currentSessionId) || sessions[0];
@@ -326,6 +751,15 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   const selectedModelOptions = selectedProvider?.model_options?.length
     ? selectedProvider.model_options
     : fallbackProviderModels(selectedProvider);
+
+  const switchMode = useCallback((nextMode: AssistantMode) => {
+    setMode(nextMode);
+    try {
+      localStorage.setItem(ASSISTANT_MODE_STORAGE_KEY, nextMode);
+    } catch {
+      // Ignore storage failures; in-memory state still updates.
+    }
+  }, []);
 
   const applySessionModel = useCallback((provider: AIProviderConfig, model: string) => {
     updateCurrentSessionMeta({
@@ -378,6 +812,51 @@ function renderMessageContent(text: string, isProgress?: boolean) {
     deleteSession(pendingDeleteSessionId);
     setPendingDeleteSessionId(null);
   }, [deleteSession, pendingDeleteSessionId]);
+
+  const confirmPendingAgentAction = useCallback(async () => {
+    if (!pendingAgentAction) return;
+    setLoading(true);
+    try {
+      const { data } = await api.post<AgentActionConfirmResponse>(`/agent-actions/${pendingAgentAction.requestId}/confirm`, {}, { timeout: 30000 });
+      if (data.status === 'success') {
+        setPendingAgentAction(null);
+        if (data.display?.navigate_to) navigate(data.display.navigate_to);
+        addMessage({
+          role: 'assistant',
+          content: buildAgentActionResultMessage(data),
+        });
+      } else {
+        addMessage({
+          role: 'error',
+          content: [
+            '**Agent动作执行失败**',
+            data.error_message || '后端未返回具体错误。',
+            '',
+            `- 错误码: \`${data.error_code || 'execution_failed'}\``,
+          ].join('\n'),
+        });
+      }
+    } catch (error: any) {
+      addMessage({
+        role: 'error',
+        content: formatCopilotError(error?.response?.data, 'Agent动作确认失败，请检查后端服务和登录状态。'),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [addMessage, navigate, pendingAgentAction, setLoading]);
+
+  const cancelPendingAgentAction = useCallback(async () => {
+    if (!pendingAgentAction) return;
+    const requestId = pendingAgentAction.requestId;
+    setPendingAgentAction(null);
+    try {
+      await api.post(`/agent-actions/${requestId}/cancel`, {}, { timeout: 10000 });
+    } catch {
+      // Local cancellation is enough for the user experience; the pending action expires server-side.
+    }
+    addMessage({ role: 'assistant', content: '已取消本次 Agent 动作。' });
+  }, [addMessage, pendingAgentAction]);
 
   // Keep fabPosRef in sync with store
   useEffect(() => { fabPosRef.current = fabPos; }, [fabPos]);
@@ -637,6 +1116,19 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       });
       return;
     }
+    if (mode === 'agent' && pendingAgentPlanId && /^(取消|算了|不用了|停止|终止)$/i.test(text)) {
+      const planId = pendingAgentPlanId;
+      addMessage({ role: 'user', content: text });
+      if (!textOverride) setInput('');
+      setPendingAgentPlanId(null);
+      try {
+        await api.post(`/agent-tasks/${planId}/cancel`, {}, { timeout: 10000 });
+      } catch {
+        // The local state is already cleared; stale server plans expire automatically.
+      }
+      addMessage({ role: 'assistant', content: '已取消本次 Agent 追问计划。' });
+      return;
+    }
     const userMsg: Message = { role: 'user', content: text };
     addMessage(userMsg);
     if (!textOverride) setInput('');
@@ -673,69 +1165,119 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       let reply: string | null = null;
 
       if (mode === 'agent') {
-        // Step 1: intent classify + plan
         const progressId = Date.now().toString();
-        addMessage({ role: 'assistant', content: `分析意图中...`, _progress: true, _progressId: progressId });
+        addMessage({ role: 'assistant', content: `分析任务中...`, _progress: true, _progressId: progressId });
 
-        const execPayload: Record<string, unknown> = {
-          command: text,
-          current_page: baseContext.page_type || 'dashboard',
-        };
-        const { data: plan } = await api.post('/agent/execute', execPayload, { timeout: 30000 });
-        useCopilotStore.getState().removeMessage(progressId);
+        try {
+          const { data: taskPlan } = await api.post<AgentTaskPlanResponse>('/agent-tasks/plan', {
+            message: text,
+            page_context: baseContext,
+            plan_id: pendingAgentPlanId,
+            provider_config_id: session?.providerConfigId,
+            model: session?.model,
+          }, { timeout: 120000 });
 
-        const intentType = plan.intent_type || 'qa';
-        const planSteps: string[] = [];
-        planSteps.push(`意图分析: ${intentType} (${((plan.confidence || 0) * 100).toFixed(0)}%)`);
-        if (plan.explanation) planSteps.push(plan.explanation);
-
-        if ((intentType === 'action' || intentType === 'mixed') && plan.atomic_steps?.length > 0) {
-          planSteps.push(`执行 ${plan.atomic_steps.length} 个操作步骤...`);
-          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
-
-          const execResult = await executor.executeSteps(plan.atomic_steps);
           useCopilotStore.getState().removeMessage(progressId);
-
-          if (!execResult.success) {
-            reply = `> ${planSteps.join('\n> ')}\n\n${execResult.message}`;
-          } else if (intentType === 'mixed' && plan.follow_up_analysis) {
-            addMessage({ role: 'assistant', content: '分析执行结果...', _progress: true, _progressId: progressId });
-            const diagPayload: Record<string, unknown> = {
-              messages: [...allMsgs, { role: 'system', content: plan.follow_up_analysis }],
-              page_context: baseContext,
-            };
-            try {
-              const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 60000 });
-              useCopilotStore.getState().removeMessage(progressId);
-              const diagParts = planSteps.slice();
-              if (diag.report) diagParts.push(diag.report);
-              else if (diag.message) diagParts.push(diag.message);
-              reply = diagParts.join('\n\n');
-            } catch {
-              useCopilotStore.getState().removeMessage(progressId);
-              reply = `${planSteps.join('\n')}\n\n操作已完成`;
-            }
-          } else {
-            reply = `${planSteps.join('\n')}\n\n操作已完成`;
+          const display = taskPlan.display || {};
+          const slotSummary = formatAgentSlots(taskPlan.slots);
+          const stepSummary = formatAgentSteps(taskPlan.steps);
+          if (display.navigate_to && typeof display.navigate_to === 'string') {
+            navigate(display.navigate_to);
           }
-        } else {
-          planSteps.push('查询知识库与分析...');
-          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
 
-          const diagPayload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
-          if (screenshot) diagPayload.screenshot = screenshot;
-          try {
-            const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 120000 });
-            useCopilotStore.getState().removeMessage(progressId);
-            const parts = planSteps.slice();
-            if (diag.report) parts.push(diag.report);
-            else if (diag.message) parts.push(diag.message);
-            else parts.push(JSON.stringify(diag));
-            reply = parts.join('\n\n');
-          } catch {
-            useCopilotStore.getState().removeMessage(progressId);
-            reply = `${planSteps.join('\n')}\n\n抱歉，AI分析服务暂不可用。`;
+          if (taskPlan.status === 'pending_confirmation' && taskPlan.request_id && taskPlan.action && taskPlan.confirmation) {
+            setPendingAgentPlanId(null);
+            setPendingAgentAction({
+              requestId: taskPlan.request_id,
+              action: taskPlan.action,
+              taskType: taskPlan.task_type,
+              workflow: taskPlan.workflow,
+              confidence: taskPlan.confidence || 0,
+              confirmation: taskPlan.confirmation,
+            });
+            addMessage({
+              role: 'assistant',
+              content: [
+                '**Agent已识别到数据变更动作，等待确认。**',
+                taskPlan.confirmation.summary,
+                taskPlan.playbook_id ? `任务模板: \`${taskPlan.playbook_id}\`` : '',
+                taskPlan.task_kind ? `任务类型: \`${taskPlan.task_kind}\`` : '',
+                taskPlan.planner_source ? `规划来源: \`${taskPlan.planner_source}\`` : '',
+                slotSummary ? `槽位: ${slotSummary}` : '',
+                stepSummary ? `任务步骤: ${stepSummary}` : '',
+                `解析置信度: ${Math.round((taskPlan.confidence || 0) * 100)}%`,
+              ].filter(Boolean).join('\n'),
+            });
+            return;
           }
+
+          if (taskPlan.status === 'needs_clarification') {
+            setPendingAgentPlanId(taskPlan.plan_id || null);
+            addMessage({
+              role: 'assistant',
+              content: [
+                taskPlan.clarification_question || '请补充必要信息后再执行。',
+                taskPlan.playbook_id ? `\n> 任务模板：${taskPlan.playbook_id}` : '',
+                taskPlan.task_kind ? `\n> 任务类型：${taskPlan.task_kind}` : '',
+                taskPlan.planner_source ? `\n> 规划来源：${taskPlan.planner_source}` : '',
+                slotSummary ? `\n> 已识别槽位：${slotSummary}` : '',
+                stepSummary ? `\n> 任务步骤：${stepSummary}` : '',
+              ].filter(Boolean).join(''),
+            });
+            return;
+          }
+
+          if (taskPlan.status === 'error') {
+            setPendingAgentPlanId(null);
+            addMessage({
+              role: 'error',
+              content: [
+                '**Agent任务无法处理**',
+                taskPlan.error_message || taskPlan.answer || '请求未通过后端校验。',
+                '',
+                `- 错误码: \`${taskPlan.error_code || 'agent_task_failed'}\``,
+                taskPlan.playbook_id ? `- 任务模板: \`${taskPlan.playbook_id}\`` : '',
+                taskPlan.task_kind ? `- 任务类型: \`${taskPlan.task_kind}\`` : '',
+                taskPlan.planner_source ? `- 规划来源: \`${taskPlan.planner_source}\`` : '',
+                slotSummary ? `- 已识别槽位: ${slotSummary}` : '',
+                stepSummary ? `- 任务步骤: ${stepSummary}` : '',
+              ].join('\n'),
+            });
+            return;
+          }
+
+          const meta = [
+            taskPlan.playbook_id ? `任务模板: \`${taskPlan.playbook_id}\`` : '',
+            taskPlan.task_kind ? `任务类型: \`${taskPlan.task_kind}\`` : '',
+            taskPlan.planner_source ? `规划来源: \`${taskPlan.planner_source}\`` : '',
+            taskPlan.workflow ? `流程: \`${taskPlan.workflow}\`` : '',
+            `置信度: ${Math.round((taskPlan.confidence || 0) * 100)}%`,
+          ].filter(Boolean);
+          const candidates = (taskPlan.candidates || [])
+            .slice(0, 3)
+            .map((item) => `\`${item.id}\``)
+            .join('、');
+          const body = taskPlan.answer || taskPlan.error_message || 'Agent已完成任务识别，但未生成额外文本。';
+          addMessage({
+            role: taskPlan.status === 'unsupported' ? 'assistant' : 'assistant',
+            content: [
+              body,
+              '',
+              `> ${meta.join(' · ')}`,
+              slotSummary ? `> 已识别槽位：${slotSummary}` : '',
+              stepSummary ? `> 任务步骤：${stepSummary}` : '',
+              candidates ? `> 候选任务：${candidates}` : '',
+            ].filter(Boolean).join('\n'),
+          });
+          setPendingAgentPlanId(null);
+          return;
+        } catch (error: any) {
+          useCopilotStore.getState().removeMessage(progressId);
+          addMessage({
+            role: 'error',
+            content: formatCopilotError(error?.response?.data, 'Agent任务规划失败，请确认后端服务、登录状态和网络连接正常。'),
+          });
+          return;
         }
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
@@ -853,17 +1395,17 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           {/* Mode Toggle — AI对话 / Agent诊断 */}
           <div className="flex gap-1 px-4 py-2 border-b border-border-default bg-bg-panel/90">
             <button
-              onClick={() => setMode('chat')}
-                className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
-                  mode === 'chat'
-                    ? 'bg-accent-blue text-white'
-                    : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
-                }`}
+              onClick={() => switchMode('chat')}
+              className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
+                mode === 'chat'
+                  ? 'bg-accent-blue text-white'
+                  : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+              }`}
             >
               AI 对话
             </button>
             <button
-              onClick={() => setMode('agent')}
+              onClick={() => switchMode('agent')}
               className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
                 mode === 'agent'
                   ? 'bg-accent-blue text-white'
@@ -1019,6 +1561,68 @@ function renderMessageContent(text: string, isProgress?: boolean) {
 
           {/* Input */}
           <div className="p-3 border-t border-border-default">
+            {pendingAgentAction && (
+              <div className="mb-3 rounded-lg border border-accent-blue/40 bg-accent-blue/10 p-3 text-xs">
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-text-primary">{pendingAgentAction.confirmation.title}</p>
+                    <p className="mt-1 text-text-secondary">{pendingAgentAction.confirmation.summary}</p>
+                    {(pendingAgentAction.workflow || pendingAgentAction.taskType) && (
+                      <p className="mt-1 text-[10px] text-text-muted">
+                        {pendingAgentAction.workflow || pendingAgentAction.taskType}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 rounded border border-accent-blue/30 px-2 py-0.5 text-[10px] text-accent-blue">
+                    {Math.round(pendingAgentAction.confidence * 100)}%
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                  {[
+                    { title: '执行前', rows: buildAgentSnapshotRows(pendingAgentAction.confirmation.before) },
+                    { title: '执行后', rows: buildAgentSnapshotRows(pendingAgentAction.confirmation.after) },
+                  ].map((group) => (
+                    <div key={group.title} className="rounded border border-border-default bg-bg-card p-2">
+                      <p className="mb-1 text-text-muted">{group.title}</p>
+                      {group.rows.length > 0 ? (
+                        <div className="space-y-1">
+                          {group.rows.map((row) => (
+                            <p key={`${group.title}-${row.label}`} className="break-words">
+                              <span className="text-text-muted">{row.label}: </span>{row.value}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-text-muted">无现有记录</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {pendingAgentAction.confirmation.warnings.length > 0 && (
+                  <div className="mt-2 rounded border border-accent-yellow/30 bg-accent-yellow/10 p-2 text-[10px] text-accent-yellow">
+                    {pendingAgentAction.confirmation.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+                  </div>
+                )}
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelPendingAgentAction}
+                    disabled={loading}
+                    className="rounded border border-border-default px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary disabled:opacity-40"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmPendingAgentAction}
+                    disabled={loading}
+                    className="rounded border border-accent-blue/40 bg-accent-blue px-3 py-1.5 text-[11px] text-white hover:opacity-90 disabled:opacity-40"
+                  >
+                    确认执行
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-2">
               <input
                 value={input}
@@ -1029,7 +1633,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                     ? '输入任务指令，如：查看故障诊断页面'
                     : '输入问题, 如: 当前风场运行状态如何?'
                 }
-                className="flex-1 bg-bg-panel border border-border-default rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent-blue"
+                className="flex-1 rounded-lg border border-accent-blue/25 bg-bg-deep px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent-cyan focus:outline-none focus:ring-2 focus:ring-accent-cyan/15"
               />
               {mode === 'chat' && (
                 <button
@@ -1062,7 +1666,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 <button
                   key={q}
                   onClick={() => { setInput(q); }}
-                  className="text-[10px] px-2 py-1 rounded border border-border-default text-text-muted hover:text-accent-blue hover:border-accent-blue transition-colors"
+                  className="rounded border border-accent-blue/25 bg-bg-card px-2 py-1 text-[10px] text-text-secondary transition-colors hover:border-accent-cyan hover:bg-accent-cyan/10 hover:text-accent-cyan"
                 >
                   {q}
                 </button>

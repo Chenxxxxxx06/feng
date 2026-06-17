@@ -10,7 +10,10 @@ import type { Point, VrpResult, TspResult } from './dronePathPlanner';
 // Re-export haversine for DroneMap
 export { haversine } from './dronePathPlanner';
 
-export const DRONE_COLORS = ['#f0883e', '#388bfd', '#a371f7', '#39d2c0', '#f85149', '#d29922', '#3fb950'];
+export const DRONE_COLORS = [
+  '#f0883e', '#388bfd', '#a371f7', '#39d2c0', '#f85149', '#d29922', '#3fb950',
+  '#ff69b4', '#00d4aa', '#ff6b6b', '#48dbfb', '#feca57',
+];
 
 export function createDefaultConfig(): DroneFleetConfig {
   return { count: 3, range: 30_000, speed: 15 };

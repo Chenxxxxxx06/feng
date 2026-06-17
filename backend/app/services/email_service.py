@@ -1,7 +1,6 @@
 """Email sending helpers."""
 
 from email.message import EmailMessage
-from email.header import Header
 from email.utils import parseaddr
 
 import aiosmtplib
@@ -51,7 +50,10 @@ async def send_email(to_email: str, subject: str, body: str, html_body: str | No
     message = EmailMessage()
     message["From"] = from_email
     message["To"] = recipient
-    message["Subject"] = Header(subject, "utf-8").encode()
+    # Use plain string — EmailMessage auto-encodes non-ASCII per RFC 2047.
+    # Do NOT wrap in Header(...).encode() — for long CJK subjects that
+    # produces folded header strings containing \r\n, which are rejected.
+    message["Subject"] = subject
     message.set_content(body, charset="utf-8")
     if html_body:
         message.add_alternative(html_body, subtype="html", charset="utf-8")

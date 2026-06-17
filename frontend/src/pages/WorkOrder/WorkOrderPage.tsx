@@ -4,13 +4,65 @@ import type { WorkOrder, Turbine } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 
 const STATUS_FLOW = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'closed'];
-const STATUS_LABEL: Record<string, string> = { pending: '待分配', assigned: '已分配', in_progress: '执行中', review: '待验收', completed: '已完成', closed: '已关闭', cancelled: '已取消' };
-const STATUS_COLOR: Record<string, string> = { pending: 'bg-accent-red/20 text-accent-red', assigned: 'bg-accent-yellow/20 text-accent-yellow', in_progress: 'bg-accent-blue/20 text-accent-blue', review: 'bg-accent-yellow/20 text-accent-yellow', completed: 'bg-accent-green/20 text-accent-green', closed: 'bg-text-muted/20 text-text-muted', cancelled: 'bg-text-muted/20 text-text-muted' };
+const STATUS_FILTERS = [...STATUS_FLOW, 'cancelled'];
+const STATUS_LABEL: Record<string, string> = {
+  pending: '待分配',
+  assigned: '已分配',
+  in_progress: '执行中',
+  review: '待验收',
+  completed: '已完成',
+  closed: '已关闭',
+  cancelled: '已取消',
+};
+const STATUS_COLOR: Record<string, string> = {
+  pending: 'bg-accent-red/15 text-accent-red border-accent-red/25',
+  assigned: 'bg-accent-yellow/15 text-accent-yellow border-accent-yellow/25',
+  in_progress: 'bg-accent-blue/15 text-accent-blue border-accent-blue/25',
+  review: 'bg-accent-yellow/15 text-accent-yellow border-accent-yellow/25',
+  completed: 'bg-accent-green/15 text-accent-green border-accent-green/25',
+  closed: 'bg-text-muted/15 text-text-muted border-text-muted/25',
+  cancelled: 'bg-text-muted/15 text-text-muted border-text-muted/25',
+};
 const PRIORITY_LABEL: Record<string, string> = { low: '低', medium: '中', high: '高', urgent: '紧急' };
-const PRIORITY_COLOR: Record<string, string> = { low: 'text-accent-green', medium: 'text-accent-blue', high: 'text-accent-yellow', urgent: 'text-accent-red' };
+const PRIORITY_COLOR: Record<string, string> = {
+  low: 'text-accent-green',
+  medium: 'text-accent-blue',
+  high: 'text-accent-yellow',
+  urgent: 'text-accent-red',
+};
+const PRIORITY_BORDER: Record<string, string> = {
+  low: 'border-l-accent-green',
+  medium: 'border-l-accent-blue',
+  high: 'border-l-accent-yellow',
+  urgent: 'border-l-accent-red',
+};
 
-interface Personnel { id: number; name: string; skills: string[]; region: string; load: number; email: string }
-interface AIAnalysis { diagnosis: string; anomalies: { indicator: string; value: string; normal: string; deviation: string; level: string }[]; turbine_name: string; fault_type: string }
+interface Personnel {
+  id: number;
+  name: string;
+  skills: string[];
+  region: string;
+  load: number;
+  email: string;
+}
+
+interface AIAnalysis {
+  diagnosis: string;
+  anomalies: { indicator: string; value: string; normal: string; deviation: string; level: string }[];
+  turbine_name: string;
+  fault_type: string;
+}
+
+const FAULT_TYPES = [
+  '轴承磨损',
+  '齿轮箱点蚀',
+  '发电机过热',
+  '叶片裂纹',
+  '变桨系统故障',
+  '冷却系统故障',
+  '主轴不对中',
+  '电气故障',
+];
 
 const emptyForm = {
   turbine_id: '',
@@ -25,18 +77,75 @@ const emptyForm = {
   due_date: '',
 };
 
+function isTerminal(status: string) {
+  return ['completed', 'closed', 'cancelled'].includes(status);
+}
+
+function dateOnly(value?: string | null) {
+  return value ? new Date(value).toLocaleDateString('zh-CN') : '未设置';
+}
+
+function isDueToday(value?: string | null) {
+  if (!value) return false;
+  const due = new Date(value);
+  const now = new Date();
+  return due.toDateString() === now.toDateString();
+}
+
+function isOverdue(wo: WorkOrder) {
+  if (!wo.due_date || isTerminal(wo.status)) return false;
+  const due = new Date(wo.due_date);
+  due.setHours(23, 59, 59, 999);
+  return due.getTime() < Date.now();
+}
+
+function dueTone(wo: WorkOrder) {
+  if (isOverdue(wo)) return 'text-accent-red';
+  if (isDueToday(wo.due_date)) return 'text-accent-yellow';
+  return 'text-text-secondary';
+}
+
+function WorkOrderStepper({ status }: { status: string }) {
+  const activeIndex = STATUS_FLOW.indexOf(status);
+  if (status === 'cancelled') {
+    return <span className="text-[11px] text-accent-red">工单已取消</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {STATUS_FLOW.map((s, idx) => {
+        const done = activeIndex >= idx;
+        const current = activeIndex === idx;
+        return (
+          <span key={s} className="flex items-center gap-1.5">
+            <span
+              className={`h-1.5 w-8 rounded-full transition-colors ${
+                done ? (current ? 'bg-accent-blue' : 'bg-accent-green/70') : 'bg-border-default'
+              }`}
+              title={STATUS_LABEL[s]}
+            />
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function WorkOrderPage() {
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [turbines, setTurbines] = useState<Turbine[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
   const [previewWO, setPreviewWO] = useState<WorkOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WorkOrder | null>(null);
   const [deletingOrder, setDeletingOrder] = useState(false);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [aiError, setAiError] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -47,18 +156,29 @@ export default function WorkOrderPage() {
     title: '',
     description: '',
     status: 'pending',
+    priority: 'medium',
     assignee: '',
     fault_type: '',
+    due_date: '',
     cost_estimate: '0',
   });
   const [form, setForm] = useState(emptyForm);
 
   const fetchOrders = async () => {
     setLoading(true);
-    const params = statusFilter ? `?status=${statusFilter}` : '';
-    const { data } = await api.get(`/workorders/${params}`);
-    setOrders(data);
-    setLoading(false);
+    setLoadError('');
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      if (priorityFilter) params.set('priority', priorityFilter);
+      const query = params.toString();
+      const { data } = await api.get(`/workorders/${query ? `?${query}` : ''}`);
+      setOrders(data);
+    } catch (err: any) {
+      setLoadError(err.response?.data?.detail || '工单加载失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -142,6 +262,7 @@ export default function WorkOrderPage() {
     if (previewWO?.id === deleteTarget.id) {
       setPreviewWO(null);
       setAiAnalysis(null);
+      setAiError('');
       setEditingWO(false);
     }
     setDeleteTarget(null);
@@ -153,8 +274,10 @@ export default function WorkOrderPage() {
       title: wo.title,
       description: wo.description || '',
       status: wo.status,
+      priority: wo.priority || 'medium',
       assignee: wo.assignee || '',
       fault_type: wo.fault_type || '',
+      due_date: wo.due_date ? wo.due_date.slice(0, 10) : '',
       cost_estimate: String(wo.cost_estimate || 0),
     });
     setEditingWO(true);
@@ -180,6 +303,18 @@ export default function WorkOrderPage() {
     setEditingWO(false);
   };
 
+  const translateEmailError = (detail: string): string => {
+    const map: Record<string, string> = {
+      'Email notification is disabled in settings': '邮件通知未开启，请前往「设置 → 告警规则」开启邮件通知',
+      'No recipient email found for work order assignee': '该工单未指定责任人邮箱，请先为工单分配责任人',
+      'WorkOrder not found': '工单不存在，请刷新页面后重试',
+    };
+    if (map[detail]) return map[detail];
+    if (detail.startsWith('Missing SMTP settings')) return 'SMTP 邮件配置不完整，请联系管理员检查 .env 文件';
+    if (detail) return `邮件发送失败：${detail}`;
+    return '发送失败，请确认后端服务已启动且通知配置正确';
+  };
+
   const sendEmail = async (wo: WorkOrder) => {
     setSendingEmail(true);
     setEmailResult(null);
@@ -189,15 +324,20 @@ export default function WorkOrderPage() {
         recipient_emails: recipients,
         subject: `[风调预顺] WO-${String(wo.id).padStart(4, '0')} ${wo.title}`,
         use_preview_template: true,
-      });
+      }, { timeout: 60000 });
       if ((data.sent || 0) === 0) {
         const failedLog = data.logs?.find((log: any) => log.status === 'failed');
-        setEmailResult({ type: 'error', message: failedLog?.error_message || '未实际发送：未找到负责人邮箱或后端仍未重启' });
+        if (failedLog?.error_message) {
+          setEmailResult({ type: 'error', message: `邮件发送失败：${failedLog.error_message}` });
+        } else {
+          setEmailResult({ type: 'error', message: '未找到有效收件人，请为该工单分配责任人并确保其账号已绑定邮箱' });
+        }
       } else {
-        setEmailResult({ type: 'success', message: `邮件已成功发送给负责人，共 ${data.sent} 封。` });
+        setEmailResult({ type: 'success', message: `邮件已发送给责任人，共 ${data.sent} 封。` });
       }
     } catch (err: any) {
-      setEmailResult({ type: 'error', message: err.response?.data?.detail || '发送失败，请检查通知配置' });
+      const detail: string | undefined = err.response?.data?.detail;
+      setEmailResult({ type: 'error', message: translateEmailError(detail || '') });
     }
     setSendingEmail(false);
   };
@@ -206,18 +346,40 @@ export default function WorkOrderPage() {
     setPreviewWO(wo);
     setEditingWO(false);
     setAnalyzing(true);
+    setAiError('');
+    setAiAnalysis(null);
     try {
       const { data } = await api.post('/ai/analyze-fault', {
         turbine_id: wo.turbine_id,
-        fault_type: wo.title || '未知故障',
-      });
+        fault_type: wo.fault_type || wo.title || '未知故障',
+      }, { timeout: 60000 });
       setAiAnalysis(data);
-    } catch { setAiAnalysis(null); }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || '';
+      const axiosCode = err?.code || '';
+      if (status === 404) {
+        setAiError(`风机 #${wo.turbine_id} 不存在或已删除，无法获取SCADA数据进行AI分析。`);
+      } else if (status === 503) {
+        setAiError('AI诊断服务当前不可用，请检查系统AI配置或稍后重试。');
+      } else if (status === 401 || status === 403) {
+        setAiError('AI服务鉴权失败，请在系统设置中配置有效的API KEY。');
+      } else if (status === 500) {
+        setAiError(detail ? `服务器内部错误：${detail}` : '服务器内部错误，请查看后端日志。');
+      } else if (status) {
+        setAiError(detail || `请求失败 (HTTP ${status})，请检查后端服务。`);
+      } else if (axiosCode === 'ECONNABORTED') {
+        setAiError('AI分析请求超时（>15秒），AI供应商响应过慢或网络不稳，请稍后重试。');
+      } else if (axiosCode === 'ERR_NETWORK' || axiosCode === 'ERR_CONNECTION_REFUSED') {
+        setAiError('无法连接后端服务（端口8000），请确认后端已启动：cd feng/backend && python -m app.main');
+      } else {
+        setAiError(`请求失败 (${axiosCode || '未知错误'})：${err?.message || ''}。请检查后端服务是否运行、AI配置是否正确。`);
+      }
+      setAiAnalysis(null);
+    }
     setAnalyzing(false);
   };
 
-  const FAULT_TYPES = ['轴承磨损', '齿轮箱点蚀', '发电机过热', '叶片裂纹', '变桨系统故障', '冷却系统故障', '主轴不对中', '电气故障'];
-  const formatDate = (value?: string | null) => value ? new Date(value).toLocaleDateString('zh-CN') : '未设置';
   const priorityOf = (wo: WorkOrder) => wo.priority || 'medium';
   const nextStatusLabel = (status: string) => {
     const idx = STATUS_FLOW.indexOf(status);
@@ -431,12 +593,12 @@ export default function WorkOrderPage() {
                           {nextStatusLabel(o.status)}
                         </button>
                       )}
-                      {!['closed', 'completed', 'cancelled'].includes(o.status) && (
+                      <div className="relative">
                         <button
                           onClick={() => setOpenActionId(openActionId === o.id ? null : o.id)}
                           className="ops-btn h-8 px-3 text-xs"
                         >
-                          取消工单
+                          更多
                         </button>
                         {openActionId === o.id && (
                           <div className="absolute right-0 top-9 z-20 w-32 rounded border border-border-default bg-bg-card py-1 text-xs shadow-xl">
@@ -452,7 +614,7 @@ export default function WorkOrderPage() {
                               删除
                             </button>
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
                   </div>
@@ -483,7 +645,7 @@ export default function WorkOrderPage() {
         )}
 
         {previewWO && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); }}>
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => { setPreviewWO(null); setAiAnalysis(null); setAiError(''); }}>
             <div className="ops-drawer h-full w-full max-w-[720px] overflow-auto" onClick={e => e.stopPropagation()}>
               <div className="sticky top-0 z-10 border-b border-border-default bg-bg-panel/95 px-6 py-4 backdrop-blur">
                 <div className="flex items-start justify-between gap-4">
@@ -492,7 +654,7 @@ export default function WorkOrderPage() {
                     <h3 className="mt-1 text-lg font-semibold">{editingWO ? '编辑工单' : previewWO.title}</h3>
                     <p className="mt-1 text-xs text-text-muted">状态：{STATUS_LABEL[previewWO.status] || previewWO.status}</p>
                   </div>
-                  <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); }} className="ops-btn px-3 py-1.5 text-sm">关闭</button>
+                  <button onClick={() => { setPreviewWO(null); setAiAnalysis(null); setAiError(''); }} className="ops-btn px-3 py-1.5 text-sm">关闭</button>
                 </div>
               </div>
 
@@ -577,8 +739,12 @@ export default function WorkOrderPage() {
                         </div>
                       ))}
                     </div>
+                  ) : aiError ? (
+                    <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 px-3 py-2">
+                      <p className="text-xs text-accent-red leading-5">{aiError}</p>
+                    </div>
                   ) : (
-                    <p className="text-text-muted">AI分析加载失败</p>
+                    <p className="text-text-muted">暂无分析结果。</p>
                   )}
                 </div>
 
@@ -592,7 +758,6 @@ export default function WorkOrderPage() {
                   </div>
                 </div>
               </div>
-            </div>
 
               <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border-default bg-bg-secondary px-6 py-4">
                 {editingWO ? (
@@ -611,8 +776,7 @@ export default function WorkOrderPage() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {emailResult && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setEmailResult(null)}>
@@ -626,8 +790,7 @@ export default function WorkOrderPage() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {deleteTarget && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4" onClick={() => !deletingOrder && setDeleteTarget(null)}>

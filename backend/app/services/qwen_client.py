@@ -456,10 +456,11 @@ def diagnose_fault(
     system_prompt = _build_system_prompt(
         "根据风机数据给出故障诊断建议。\n"
         "要求:\n"
-        "1. 分析可能的根因\n"
-        "2. 评估风险等级\n"
-        "3. 给出具体维修建议\n"
-        "4. 回复简洁专业, 200字以内"
+        "1. 分析可能的根因（2-3条）\n"
+        "2. 评估风险等级并说明理由\n"
+        "3. 给出具体维修建议（3-4条可执行步骤）\n"
+        "4. 提及需要关注的备件或工具\n"
+        "回复专业简洁，控制在200-300字。"
     )
 
     user_prompt = f"""风机信息: {json.dumps(turbine_data, ensure_ascii=False)}
@@ -471,7 +472,7 @@ def diagnose_fault(
         return chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ], model=model, api_key=effective_key,
+        ], model="qwen-plus", api_key=effective_key,
            api_provider=effective_provider if not base_url else None,
            base_url=base_url, temperature=0.5, max_tokens=512)
     except Exception as e:
@@ -697,9 +698,19 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
         avg_rul = data.get("avgRulDays")
         critical = data.get("criticalCount", 0)
         imminent = data.get("imminentCount", 0)
+        maintenance_plan = data.get("maintenance_plan") or {}
+        plan_total = maintenance_plan.get("total", 0) if isinstance(maintenance_plan, dict) else 0
+        urgent_count = maintenance_plan.get("urgent_count", 0) if isinstance(maintenance_plan, dict) else 0
+        high_count = maintenance_plan.get("high_count", 0) if isinstance(maintenance_plan, dict) else 0
+        total_cost = maintenance_plan.get("total_cost_estimate", 0) if isinstance(maintenance_plan, dict) else 0
+        plan_items = maintenance_plan.get("items", []) if isinstance(maintenance_plan, dict) else []
         conclusions = []
         if avg_rul:
             conclusions.append(f"全场风机平均剩余寿命约{avg_rul:.0f}天")
+        if plan_total:
+            conclusions.append(f"当前维修计划共{plan_total}项，其中{urgent_count}项紧急、{high_count}项高优先级")
+        if total_cost:
+            conclusions.append(f"维修计划预估总费用约{total_cost:,.0f}元")
         if critical:
             conclusions.append(f"{critical}台风机RUL不足90天，处于关键风险区")
         if imminent:
@@ -707,9 +718,17 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
         suggestions = []
         if imminent:
             suggestions.append("紧急安排RUL<30天的风机维修，避免非计划停机")
+        if urgent_count:
+            suggestions.append("优先锁定紧急维修项的人力、备件和停机窗口")
+        if plan_items:
+            top = plan_items[0]
+            if isinstance(top, dict):
+                suggestions.append(f"优先复核{top.get('turbine_name', '高风险风机')}{top.get('component', '')}，建议动作：{top.get('action', '安排检修')}")
+        if high_count and not urgent_count:
+            suggestions.append("将高优先级任务纳入近期滚动排程，避免演变为紧急维修")
         if not conclusions:
-            conclusions.append("RUL预测数据待刷新，请点击刷新按钮更新")
-            suggestions.append("刷新RUL预测以获取最新剩余寿命评估")
+            conclusions.append("当前未获取到可用于维护决策的RUL预测数据")
+            suggestions.append("请检查预测数据导入、模型任务状态或后端预测服务配置")
         return {"conclusions": conclusions, "suggestions": suggestions}
 
     return {
