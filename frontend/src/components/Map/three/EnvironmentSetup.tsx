@@ -1,49 +1,45 @@
-/**
- * 3D 场景环境: 光照 / 雾 / 天空
- * 陕北黄土高原色调 — 暖黄土雾 + 下午太阳光
- */
-
 import { useThree } from '@react-three/fiber';
 import { useEffect } from 'react';
 import * as THREE from 'three';
 
 export default function EnvironmentSetup() {
-  const { scene } = useThree();
+  const { scene, gl } = useThree();
 
   useEffect(() => {
-    scene.background = new THREE.Color('#7ec8e3');
-    scene.fog = new THREE.Fog('#d4c48c', 3000, 12000);
-  }, [scene]);
+    scene.background = new THREE.Color('#b8d7e8');
+    scene.fog = new THREE.FogExp2('#c9d5c2', 0.00042);
+    gl.toneMapping = THREE.ACESFilmicToneMapping;
+    gl.toneMappingExposure = 1.08;
+  }, [gl, scene]);
 
   return (
     <>
-      {/* 太阳光 + 阴影 */}
       <directionalLight
-        position={[200, 350, 100]}
-        color="#fff8e7"
-        intensity={1.5}
+        position={[260, 420, 180]}
+        color="#fff3d0"
+        intensity={2.15}
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-far={800}
-        shadow-camera-left={-400}
-        shadow-camera-right={400}
-        shadow-camera-top={400}
-        shadow-camera-bottom={-400}
+        shadow-mapSize-width={4096}
+        shadow-mapSize-height={4096}
+        shadow-camera-far={1400}
+        shadow-camera-left={-700}
+        shadow-camera-right={700}
+        shadow-camera-top={700}
+        shadow-camera-bottom={-700}
       />
 
-      {/* 环境光 — 提高确保场景永远可见 */}
-      <ambientLight color="#ffffff" intensity={0.9} />
+      <ambientLight color="#e8f3ff" intensity={0.55} />
 
-      {/* 半球光 */}
       <hemisphereLight
-        color="#b1e1ff"
-        groundColor="#8B7355"
-        intensity={0.7}
+        color="#c9e8ff"
+        groundColor="#7a6d4f"
+        intensity={1.1}
       />
 
-      {/* 调试辅助网格 (2000m × 2000m, 100m 间距) */}
-      <gridHelper args={[2000, 20, '#888888', '#444444']} position={[0, 0.5, 0]} />
+      <mesh position={[0, -18, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[9000, 96]} />
+        <meshBasicMaterial color="#9fad86" transparent opacity={0.28} depthWrite={false} />
+      </mesh>
     </>
   );
 }
