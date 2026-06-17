@@ -111,29 +111,29 @@ const COMPONENT_LABELS: Record<TurbineComponentKey, string> = {
 };
 
 const COMPONENT_POINTS: Record<TurbineComponentKey, { x: number; y: number }> = {
-  blade_root: { x: 340, y: 210 },
-  pitch: { x: 340, y: 168 },
-  main_bearing: { x: 410, y: 210 },
-  main_shaft: { x: 475, y: 210 },
-  gearbox: { x: 550, y: 210 },
-  brake: { x: 620, y: 210 },
-  generator: { x: 690, y: 210 },
-  cooling: { x: 690, y: 128 },
-  electrical: { x: 610, y: 298 },
-  sensor: { x: 744, y: 82 },
+  blade_root: { x: 360, y: 174 },
+  pitch: { x: 360, y: 150 },
+  main_bearing: { x: 396, y: 174 },
+  main_shaft: { x: 426, y: 174 },
+  gearbox: { x: 477, y: 174 },
+  brake: { x: 523, y: 174 },
+  generator: { x: 567, y: 174 },
+  cooling: { x: 566, y: 119 },
+  electrical: { x: 546, y: 230 },
+  sensor: { x: 584, y: 86 },
 };
 
 const COMPONENT_LABEL_OFFSETS: Record<TurbineComponentKey, { x: number; y: number; anchor?: 'start' | 'middle' | 'end' }> = {
-  blade_root: { x: -42, y: 36, anchor: 'middle' },
-  pitch: { x: -40, y: -22, anchor: 'middle' },
-  main_bearing: { x: -12, y: 38, anchor: 'middle' },
-  main_shaft: { x: 0, y: -30, anchor: 'middle' },
+  blade_root: { x: -38, y: 42, anchor: 'middle' },
+  pitch: { x: -42, y: -24, anchor: 'middle' },
+  main_bearing: { x: -10, y: 40, anchor: 'middle' },
+  main_shaft: { x: 0, y: -28, anchor: 'middle' },
   gearbox: { x: 0, y: 48, anchor: 'middle' },
-  brake: { x: 0, y: -30, anchor: 'middle' },
-  generator: { x: 34, y: 44, anchor: 'middle' },
-  cooling: { x: -2, y: -28, anchor: 'middle' },
-  electrical: { x: 6, y: 38, anchor: 'middle' },
-  sensor: { x: 36, y: -8, anchor: 'start' },
+  brake: { x: 0, y: -28, anchor: 'middle' },
+  generator: { x: 38, y: 42, anchor: 'middle' },
+  cooling: { x: 0, y: -28, anchor: 'middle' },
+  electrical: { x: 0, y: 42, anchor: 'middle' },
+  sensor: { x: 34, y: -6, anchor: 'start' },
 };
 
 const COMPONENT_ORDER: TurbineComponentKey[] = [
@@ -293,6 +293,128 @@ function bboxToStyle(bbox: { x: number; y: number; w: number; h: number }) {
   return { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` };
 }
 
+function turbineStatusClass(status: string) {
+  if (status === 'fault') return 'text-accent-red';
+  if (status === 'warning') return 'text-accent-yellow';
+  return 'text-accent-green';
+}
+
+function TurbinePicker({
+  value,
+  rows,
+  onChange,
+  align = 'right',
+}: {
+  value: number | null;
+  rows: TurbineOptionRow[];
+  onChange: (id: number) => void;
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = rows.find((row) => row.turbine.id === value);
+
+  return (
+    <div className="relative min-w-[260px]">
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        className="w-full rounded border border-border-default bg-bg-secondary px-3 py-2 text-left text-xs text-text-primary hover:border-accent-blue focus:outline-none focus:border-accent-blue"
+      >
+        <span className="block truncate">{selected ? `${selected.turbine.name} · ${selected.turbine.region || '未分组'}` : '选择风机...'}</span>
+        {selected && (
+          <span className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-text-muted">
+            <span>故障 {selected.faultCount}</span>
+            <span>疑似 {selected.suspectedCount}</span>
+            <span>置信 {confidenceText(selected.avgConfidence)}</span>
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className={`absolute z-40 mt-1 w-[560px] max-w-[calc(100vw-56px)] overflow-hidden rounded-lg border border-border-default bg-bg-card shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}>
+          <div className="grid grid-cols-[1.5fr_0.7fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default bg-bg-secondary px-3 py-2 text-[10px] text-text-muted">
+            <span>风机</span>
+            <span>状态</span>
+            <span>故障</span>
+            <span>疑似</span>
+            <span>置信度</span>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            {rows.map((row) => (
+              <button
+                key={row.turbine.id}
+                type="button"
+                onClick={() => {
+                  onChange(row.turbine.id);
+                  setOpen(false);
+                }}
+                className={`grid w-full grid-cols-[1.5fr_0.7fr_0.55fr_0.55fr_0.7fr] gap-2 border-b border-border-default px-3 py-2 text-left text-xs hover:bg-bg-hover ${
+                  row.turbine.id === value ? 'bg-accent-blue/10' : ''
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-text-primary">{row.turbine.name}</span>
+                  <span className="block truncate text-[10px] text-text-muted">{row.turbine.region || '未分组'} · HI {row.turbine.hi_value?.toFixed?.(1) ?? '--'}</span>
+                </span>
+                <span className={turbineStatusClass(row.turbine.status)}>{turbineStatusLabel(row.turbine.status)}</span>
+                <span className="font-mono text-text-secondary">{row.faultCount}</span>
+                <span className="font-mono text-accent-yellow">{row.suspectedCount}</span>
+                <span className="font-mono text-accent-cyan">{confidenceText(row.avgConfidence)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignalEvidencePanel({ insights }: { insights: DiagnosisSignalInsight[] }) {
+  const rows = insights.slice(0, 4);
+  return (
+    <section className="bg-bg-card border border-border-default rounded-lg overflow-hidden">
+      <div className="border-b border-border-default px-4 py-3">
+        <h3 className="text-sm font-medium">诊断依据</h3>
+        <p className="mt-1 text-[10px] text-text-muted">信号特征、当前值和模型贡献度</p>
+      </div>
+      <div className="space-y-3 p-4">
+        {rows.map((signal) => {
+          const score = Math.max(0, Math.min(1, signal.contribution_score || 0));
+          const component = componentForSignal(signal.sensor_name);
+          const tone = signal.priority === 'high'
+            ? 'bg-accent-red'
+            : signal.priority === 'medium'
+              ? 'bg-accent-yellow'
+              : 'bg-accent-cyan';
+          return (
+            <div key={`${signal.sensor_name}-${signal.value}`} className="rounded border border-border-default bg-bg-secondary px-3 py-3">
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-text-primary">{signal.sensor_name}</p>
+                  <p className="mt-1 truncate text-[10px] text-text-muted">{COMPONENT_LABELS[component]} · {priorityLabel(signal.priority)}</p>
+                </div>
+                <span className="shrink-0 font-mono text-xs text-accent-cyan">{(score * 100).toFixed(0)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded bg-bg-hover">
+                <div className={`h-full rounded ${tone}`} style={{ width: `${Math.max(4, score * 100)}%` }} />
+              </div>
+              <div className="mt-2 grid grid-cols-[0.8fr_1.2fr] gap-2 text-[10px] text-text-muted">
+                <span className="truncate">当前值 <b className="font-normal text-text-secondary">{signal.value}</b></span>
+                <span className="truncate">参考 <b className="font-normal text-text-secondary">{signal.normal_range}</b></span>
+              </div>
+              <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-text-secondary">{signal.finding}</p>
+            </div>
+          );
+        })}
+        {rows.length === 0 && (
+          <div className="rounded border border-border-default bg-bg-secondary px-3 py-8 text-center text-xs text-text-muted">
+            暂无诊断依据
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 const DiagnosisTopology = memo(function DiagnosisTopology({
   turbine,
   turbineRows,
@@ -309,6 +431,7 @@ const DiagnosisTopology = memo(function DiagnosisTopology({
   onTurbineChange: (id: number) => void;
 }) {
   const [hoveredFaultId, setHoveredFaultId] = useState<number | null>(null);
+  const [hoveredCauseId, setHoveredCauseId] = useState<string | null>(null);
   const [hoveredComponent, setHoveredComponent] = useState<TurbineComponentKey | null>(null);
   const activeComponents = useMemo(
     () => new Set<TurbineComponentKey>([
@@ -351,6 +474,7 @@ const DiagnosisTopology = memo(function DiagnosisTopology({
     return component === focusedComponent ? 0.86 : 0.13;
   };
   const componentStrokeWidth = (component: TurbineComponentKey) => (focusedComponent === component ? 2.6 : 1.4);
+  const leftRows = causes;
   const rightRows = faults;
 
   return (
@@ -412,7 +536,7 @@ const DiagnosisTopology = memo(function DiagnosisTopology({
             return (
               <g key={fault.id}>
                 <path
-                  d={`M ${point.x} ${point.y} C ${point.x + 76} ${point.y}, 704 ${y + 26}, 740 ${y + 26}`}
+                  d={`M ${point.x} ${point.y} C ${point.x + 72} ${point.y}, 616 ${y + 26}, 648 ${y + 26}`}
                   fill="none"
                   stroke={componentTone(fault.component, activeComponents, selectedComponent)}
                   strokeOpacity={connectionOpacity(fault.component, fault.selected || hoveredFaultId === fault.id)}
@@ -425,14 +549,14 @@ const DiagnosisTopology = memo(function DiagnosisTopology({
 
           <g opacity="0.92">
             <path
-              d="M372 132 C440 96, 640 98, 740 132 C762 148, 762 274, 734 292 C632 326, 446 316, 374 282 C352 262, 350 154, 372 132 Z"
+              d="M372 136 C426 102, 558 102, 612 136 C626 145, 628 206, 614 216 C560 238, 438 238, 380 216 C366 206, 366 145, 372 136 Z"
               fill="url(#nacelleShell)"
               stroke="#c7d7e8"
               strokeOpacity="0.44"
               strokeWidth="1.4"
             />
-            <path d="M382 152 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
-            <path d="M382 199 H608" stroke="#c7d7e8" strokeOpacity="0.12" />
+            <path d="M384 152 H604" stroke="#c7d7e8" strokeOpacity="0.12" />
+            <path d="M384 184 H604" stroke="#c7d7e8" strokeOpacity="0.12" />
 
             <circle cx="360" cy="174" r="27" fill={modelTone} fillOpacity={componentOpacity('blade_root', 0.2)} stroke={componentTone('blade_root', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('blade_root', 0.9)} strokeWidth={componentStrokeWidth('blade_root')} />
             <circle cx="360" cy="174" r="15" fill="#111923" stroke={componentTone('pitch', activeComponents, selectedComponent)} strokeOpacity={componentOpacity('pitch', 0.78)} strokeWidth={componentStrokeWidth('pitch')} />
@@ -1008,6 +1132,13 @@ export default function DiagnosisPage() {
     { key: 'high-priority', label: '高优先级', value: String(highPriorityCount), unit: '条', color: highPriorityCount ? 'text-accent-red' : 'text-accent-green', rows: highPriorityFaultRows },
     { key: 'high-signal', label: '高优先级信号', value: String(highRiskSignals), unit: '项', color: highRiskSignals ? 'text-accent-red' : 'text-accent-green' },
   ];
+
+  function handleTurbineChange(id: number) {
+    setSelectedTurbineId(id);
+    setSelected(null);
+    setAutoResult(null);
+    setBladeResult(null);
+  }
 
   async function runAutoDetect() {
     if (!selectedTurbineId) return;
