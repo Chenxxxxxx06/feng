@@ -85,10 +85,11 @@ export default function DroneMap({
       zoomControl: false, attributionControl: false,
       fadeAnimation: true, zoomAnimation: true, markerZoomAnimation: true,
     });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxNativeZoom: 19,
+    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+      minZoom: MIN_ZOOM, maxZoom: Math.min(MAX_ZOOM, 18), maxNativeZoom: 18,
       noWrap: true, keepBuffer: 16, updateWhenIdle: false, updateWhenZooming: true,
-      attribution: '&copy; OpenStreetMap contributors',
+      subdomains: '1234',
+      attribution: '&copy; 高德地图',
     }).addTo(map);
     staticLayerRef.current = L.layerGroup().addTo(map);
     droneLayerRef.current = L.layerGroup().addTo(map);
