@@ -815,7 +815,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           data-copilot-ignore
           onMouseDown={onFabMouseDown}
           onClick={() => { if (!fabHasMoved.current) setOpen(true); }}
-          className="fixed z-50 w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
+          className="fixed z-[850] w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
           style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(59,130,246,0.4)' }}
         >
           <span className="text-lg font-bold">AI</span>
@@ -828,7 +828,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         <div
           ref={panelRef}
           data-copilot-ignore
-          className="fixed z-50 shadow-2xl flex flex-col overflow-hidden ops-panel rounded-2xl"
+          className="fixed z-[850] shadow-2xl flex flex-col overflow-hidden ops-panel rounded-2xl"
           style={{ left: panelPos.x, top: panelPos.y, width: panelSize.width, height: panelSize.height }}
         >
           {/* Header — drag handle */}

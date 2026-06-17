@@ -1,0 +1,80 @@
+<h2>路径规划算法设计</h2>
+<p class="subtitle">单机 TSP + 多机 VRP，纯前端 JS 计算</p>
+
+<div class="section">
+  <h3>📐 算法选型</h3>
+  <div class="options">
+    <div class="option" data-choice="nearest-neighbor" onclick="toggleSelect(this)">
+      <div class="letter">T</div>
+      <div class="content">
+        <h3>单机模式：2-opt 改进的最近邻 TSP</h3>
+        <p>从起飞点出发，贪心选择最近未访问风机，构建初始路径。再用 <strong>2-opt 局部优化</strong>（交换两条边消除交叉），反复迭代至收敛。</p>
+        <p style="margin-top:6px;font-size:12px;color:var(--text-muted);">计算量：N≤50 → &lt;10ms &nbsp;|&nbsp; 路径质量：最优解的 95-98%</p>
+      </div>
+    </div>
+    <div class="option" data-choice="kmeans-vrp" onclick="toggleSelect(this)">
+      <div class="letter">V</div>
+      <div class="content">
+        <h3>多机模式：K-Means 分区 + 各片区 TSP</h3>
+        <p><strong>步骤 1</strong>：用 K-Means (K=无人机数) 按地理位置聚类风机。<strong>步骤 2</strong>：每架无人机在自己片区内跑 TSP。<strong>步骤 3</strong>：负载均衡 — 如果某片区风机过多，迁移边界点到相邻片区。</p>
+        <p style="margin-top:6px;font-size:12px;color:var(--text-muted);">计算量：K×N≤50 → &lt;30ms &nbsp;|&nbsp; 分区可视化 + 手动调整</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:20px;">
+  <h3>🛫 交互流程</h3>
+  <div style="background:rgba(8,12,24,0.7);border:1px solid rgba(56,139,253,0.15);border-radius:8px;padding:16px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="background:rgba(56,139,253,0.1);border:1px solid rgba(56,139,253,0.3);border-radius:6px;padding:10px 14px;text-align:center;">
+        <div style="font-size:20px;">🗺️</div>
+        <div style="font-size:11px;color:var(--text-primary);margin-top:4px;">1. 总览地图</div>
+        <div style="font-size:10px;color:var(--text-muted);">3个风场 + 所有风机</div>
+      </div>
+      <div style="color:var(--accent-blue);font-size:18px;">→</div>
+      <div style="background:rgba(56,139,253,0.1);border:1px solid rgba(56,139,253,0.3);border-radius:6px;padding:10px 14px;text-align:center;">
+        <div style="font-size:20px;">👆</div>
+        <div style="font-size:11px;color:var(--text-primary);margin-top:4px;">2. 点击风场</div>
+        <div style="font-size:10px;color:var(--text-muted);地图自动 zoom</div>
+      </div>
+      <div style="color:var(--accent-blue);font-size:18px;">→</div>
+      <div style="background:rgba(57,210,192,0.1);border:1px solid rgba(57,210,192,0.3);border-radius:6px;padding:10px 14px;text-align:center;">
+        <div style="font-size:20px;">🧮</div>
+        <div style="font-size:11px;color:var(--text-primary);margin-top:4px;">3. 自动规划</div>
+        <div style="font-size:10px;color:var(--text-muted);TSP/VRP 计算</div>
+      </div>
+      <div style="color:var(--accent-blue);font-size:18px;">→</div>
+      <div style="background:rgba(57,210,192,0.1);border:1px solid rgba(57,210,192,0.3);border-radius:6px;padding:10px 14px;text-align:center;">
+        <div style="font-size:20px;">🛸</div>
+        <div style="font-size:11px;color:var(--text-primary);margin-top:4px;">4. 路径渲染</div>
+        <div style="font-size:10px;color:var(--text-muted);飞线 + 颜色区分</div>
+      </div>
+      <div style="color:var(--accent-blue);font-size:18px;">→</div>
+      <div style="background:rgba(57,210,192,0.1);border:1px solid rgba(57,210,192,0.3);border-radius:6px;padding:10px 14px;text-align:center;">
+        <div style="font-size:20px;">▶️</div>
+        <div style="font-size:11px;color:var(--text-primary);margin-top:4px;">5. 执行模拟</div>
+        <div style="font-size:10px;color:var(--text-muted);可暂停/调速/重置</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:20px;">
+  <h3>🎨 路径可视化规格</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div style="border:1px solid rgba(56,139,253,0.2);border-radius:6px;padding:10px;">
+      <h4 style="font-size:12px;color:var(--accent-cyan);margin-bottom:6px;">规划态（执行前）</h4>
+      <p style="font-size:11px;color:var(--text-muted);">• 每架无人机不同颜色飞线（Drone-1 橙 / Drone-2 蓝 / Drone-3 紫）</p>
+      <p style="font-size:11px;color:var(--text-muted);">• 虚线连接未访问风机，箭头指示方向</p>
+      <p style="font-size:11px;color:var(--text-muted);">• 起飞点标记 🚁 图标</p>
+    </div>
+    <div style="border:1px solid rgba(56,139,253,0.2);border-radius:6px;padding:10px;">
+      <h4 style="font-size:12px;color:var(--accent-cyan);margin-bottom:6px;">执行态（模拟中）</h4>
+      <p style="font-size:11px;color:var(--text-muted);">• 无人机图标沿路径移动（动画）</p>
+      <p style="font-size:11px;color:var(--text-muted);">• 已拍摄：🟢 绿点 + 照片角标</p>
+      <p style="font-size:11px;color:var(--text-muted);">• 当前目标：🔵 脉冲蓝圈</p>
+      <p style="font-size:11px;color:var(--text-muted);">• 未拍摄：⚪ 灰点</p>
+    </div>
+  </div>
+</div>

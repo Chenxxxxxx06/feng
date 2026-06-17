@@ -13,6 +13,7 @@ const PredictionPage = lazy(() => import('./pages/Prediction/PredictionPage'));
 const WorkOrderPage = lazy(() => import('./pages/WorkOrder/WorkOrderPage'));
 const SettingsPage = lazy(() => import('./pages/Settings/SettingsPage'));
 const KnowledgeBasePage = lazy(() => import('./pages/Knowledge/KnowledgeBasePage'));
+const DroneSchedulerPage = lazy(() => import('./pages/DroneScheduler/DroneSchedulerPage'));
 
 function PageLoader() {
   return (
@@ -45,6 +46,7 @@ export default function App() {
       >
         <Route index element={<Navigate to={`/${landing}`} replace />} />
         <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
+        <Route path="drone-scheduler" element={<Suspense fallback={<PageLoader />}><DroneSchedulerPage /></Suspense>} />
         <Route path="turbine/:id" element={<Suspense fallback={<PageLoader />}><TurbineDetailPage /></Suspense>} />
         <Route path="diagnosis" element={<Suspense fallback={<PageLoader />}><DiagnosisPage /></Suspense>} />
         <Route path="prediction" element={<Suspense fallback={<PageLoader />}><PredictionPage /></Suspense>} />

@@ -58,6 +58,19 @@ def _filter_model_data(data: dict) -> dict:
     return {key: val for key, val in data.items() if key in fields}
 
 
+def _fmt_item(item) -> str:
+    """Format a knowledge item that may be a str or dict."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("action") or item.get("name") or item.get("title") or str(item)
+    return str(item)
+
+
+def _fmt_items(items: list) -> list[str]:
+    return [_fmt_item(item) for item in items]
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -126,11 +139,11 @@ def _workorder_plain_body(
     if knowledge:
         lines.append("【知识库参考】")
         if knowledge.get("root_causes"):
-            lines.append(f"  可能根因: {'; '.join(knowledge['root_causes'][:3])}")
+            lines.append(f"  可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:3]))}")
         if knowledge.get("solutions"):
-            lines.append(f"  建议方案: {'; '.join(knowledge['solutions'][:3])}")
+            lines.append(f"  建议方案: {'; '.join(_fmt_items(knowledge['solutions'][:3]))}")
         if knowledge.get("spare_parts"):
-            lines.append(f"  相关备件: {', '.join(knowledge['spare_parts'][:5])}")
+            lines.append(f"  相关备件: {', '.join(_fmt_items(knowledge['spare_parts'][:5]))}")
         lines.append("")
 
     lines += [
@@ -246,11 +259,11 @@ def _workorder_html_body(
     <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 知识库参考</h3>
     <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">"""
         if knowledge.get("root_causes"):
-            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(knowledge['root_causes'][:3])}</td></tr>"""
+            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:3]))}</td></tr>"""
         if knowledge.get("solutions"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(knowledge['solutions'][:3])}</td></tr>"""
+            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(_fmt_items(knowledge['solutions'][:3]))}</td></tr>"""
         if knowledge.get("spare_parts"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(knowledge['spare_parts'][:5])}</td></tr>"""
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(_fmt_items(knowledge['spare_parts'][:5]))}</td></tr>"""
         html += """
     </table>
   </td></tr>"""
@@ -648,14 +661,25 @@ async def send_workorder_email(
 
     config_result = await db.execute(select(NotificationConfig).where(NotificationConfig.user_id == user.id))
     config = config_result.scalar_one_or_none()
+    if not config:
+        config = NotificationConfig(
+            user_id=user.id,
+            hi_threshold=70.0,
+            email_enabled=True,
+            email_address=user.email,
+            wechat_enabled=False,
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
     logger.info(
         "Workorder email setting: user_id=%s username=%s config_id=%s email_enabled=%s",
         user.id,
         user.username,
-        getattr(config, "id", None),
-        getattr(config, "email_enabled", None),
+        config.id,
+        config.email_enabled,
     )
-    if not config or not config.email_enabled:
+    if not config.email_enabled:
         raise HTTPException(status_code=400, detail="Email notification is disabled in settings")
 
     recipients = await _recipient_emails(data, wo, db)
