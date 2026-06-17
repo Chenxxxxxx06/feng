@@ -224,4 +224,15 @@ export interface WorkOrder {
 export interface AISummary {
   conclusions: string[];
   suggestions: string[];
+  status?: 'success' | 'error';
+  error_code?: string | null;
+  error_message?: string | null;
+  model_status?: {
+    provider?: string;
+    api_provider?: string;
+    model?: string;
+    mode?: string;
+    has_api_key?: boolean;
+  } | null;
+  warnings?: string[];
 }

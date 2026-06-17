@@ -268,7 +268,7 @@ async def get_knowledge_graph(
     result = await db.execute(stmt)
     all_faults = result.scalars().all()
 
-    stmt = select(WorkOrder)
+    stmt = select(WorkOrder).where(WorkOrder.deleted_at.is_(None))
     if active_only:
         stmt = stmt.where(WorkOrder.status.in_(["pending", "in_progress"]))
     result = await db.execute(stmt)
@@ -464,15 +464,24 @@ async def get_graph_stats(include_unverified: bool = Query(False), db: AsyncSess
     fault_count = result.scalar() or 0
     result = await db.execute(select(func.count(Fault.id)).where(Fault.status.in_(["open", "diagnosing", "confirmed"])))
     active_fault_count = result.scalar() or 0
-    result = await db.execute(select(func.count(WorkOrder.id)))
+    result = await db.execute(select(func.count(WorkOrder.id)).where(WorkOrder.deleted_at.is_(None)))
     wo_count = result.scalar() or 0
-    result = await db.execute(select(func.count(WorkOrder.id)).where(WorkOrder.status.in_(["pending", "in_progress"])))
+    result = await db.execute(
+        select(func.count(WorkOrder.id)).where(
+            WorkOrder.status.in_(["pending", "in_progress"]),
+            WorkOrder.deleted_at.is_(None),
+        )
+    )
     pending_wo_count = result.scalar() or 0
     result = await db.execute(select(Turbine).where(Turbine.status.in_(["warning", "fault"])))
     warning_count = len(result.scalars().all())
     result = await db.execute(select(Turbine.region).where(Turbine.region.isnot(None)).distinct())
     regions = [r[0] for r in result.all() if r[0]]
-    result = await db.execute(select(WorkOrder.assignee).where(WorkOrder.assignee.isnot(None)).distinct())
+    result = await db.execute(
+        select(WorkOrder.assignee)
+        .where(WorkOrder.assignee.isnot(None), WorkOrder.deleted_at.is_(None))
+        .distinct()
+    )
     personnel = [p[0] for p in result.all() if p[0]]
 
     return {

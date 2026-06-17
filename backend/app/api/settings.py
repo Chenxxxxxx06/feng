@@ -1,20 +1,290 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import NotificationConfig, DataSource, User
+from app.models import NotificationConfig, DataSource, User, AIProviderConfig
 from app.schemas import (
     ThresholdConfigRequest, ThresholdConfigResponse,
     DataSourceResponse, DataSourceTestRequest,
     ProfileUpdateRequest, UserResponse,
+    AIProviderConfigCreate, AIProviderConfigResponse, AIProviderTestRequest,
 )
 from app.services.data_pipeline import get_pipeline_state, set_source_status, SourceStatus
 from app.services.data_pipeline.era5_loader import era5_loader
 from app.services.data_pipeline.scada_loader import scada_loader
+from app.services.qwen_client import get_client
 from app.api.auth import get_current_user
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+AI_PROVIDER_TEMPLATES: dict[str, dict] = {
+    "dashscope": {
+        "display_name": "通义千问 DashScope",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "default_model": "qwen-plus",
+        "model_options": ["qwen-plus", "qwen-turbo", "qwen3.6-flash"],
+    },
+    "deepseek": {
+        "display_name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "default_model": "deepseek-chat",
+        "model_options": ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"],
+    },
+    "glm": {
+        "display_name": "智谱GLM",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "default_model": "glm-5-flash",
+        "model_options": ["glm-5-flash"],
+    },
+    "kimi": {
+        "display_name": "Kimi Moonshot",
+        "base_url": "https://api.moonshot.cn/v1",
+        "default_model": "kimi-k2.6",
+        "model_options": ["kimi-k2.6"],
+    },
+    "openai": {
+        "display_name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-4o-mini",
+        "model_options": ["gpt-4o-mini", "gpt-4.1", "gpt-4", "gpt-3.5-turbo"],
+    },
+    "gemini": {
+        "display_name": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "default_model": "gemini-2.5-flash",
+        "model_options": ["gemini-2.5-flash", "gemini-3.5-flash"],
+    },
+    "ollama": {
+        "display_name": "Ollama本地模型",
+        "base_url": "http://localhost:11434/v1",
+        "default_model": "qwen2.5",
+        "model_options": ["qwen2.5", "llama3.1", "deepseek-r1"],
+    },
+}
+
+
+def _provider_template_key(provider: str | None) -> str:
+    key = (provider or "").strip().lower()
+    aliases = {
+        "qwen": "dashscope",
+        "tongyi": "dashscope",
+        "aliyun": "dashscope",
+    }
+    return aliases.get(key, key)
+
+
+def _provider_template(provider: str | None) -> dict:
+    return AI_PROVIDER_TEMPLATES.get(_provider_template_key(provider), {})
+
+
+def _serialize_ai_provider(config: AIProviderConfig) -> AIProviderConfigResponse:
+    return AIProviderConfigResponse(
+        id=config.id,
+        provider=config.provider,
+        display_name=config.display_name,
+        base_url=config.base_url,
+        api_style=config.api_style or "openai",
+        default_model=config.default_model,
+        model_options=config.model_options or _provider_template(config.provider).get("model_options", []),
+        enabled=bool(config.enabled),
+        has_api_key=bool(config.api_key),
+        last_test_status=config.last_test_status,
+        last_test_message=config.last_test_message,
+        last_test_at=config.last_test_at,
+    )
+
+
+def _provider_key_from_legacy(user: User) -> str:
+    text = f"{user.api_provider or ''} {user.model_preference or ''}".lower()
+    if "deepseek" in text:
+        return "deepseek"
+    if "glm" in text or "智谱" in text:
+        return "glm"
+    if "kimi" in text or "moonshot" in text:
+        return "kimi"
+    if "gpt" in text or "openai" in text:
+        return "openai"
+    if "gemini" in text:
+        return "gemini"
+    if "ollama" in text:
+        return "ollama"
+    return "dashscope"
+
+
+def _format_ai_provider_error(config: AIProviderConfig, exc: Exception) -> str:
+    raw = str(exc)
+    lowered = raw.lower()
+    if config.provider == "kimi" and ("401" in raw or "invalid authentication" in lowered):
+        return (
+            "Kimi认证失败：请确认使用的是 Kimi 开放平台控制台创建的 API Key，"
+            "Base URL 为 https://api.moonshot.cn/v1，且密钥未过期、未禁用、未误用 Kimi 网页端登录凭证。"
+            f"原始错误：{raw}"
+        )
+    return raw
+
+
+async def _ensure_legacy_ai_provider(db: AsyncSession, user: User) -> None:
+    result = await db.execute(select(AIProviderConfig).where(AIProviderConfig.user_id == user.id).limit(1))
+    if result.scalar_one_or_none():
+        return
+    if not (user.api_key or user.api_base_url or user.api_provider or user.model_preference):
+        return
+    provider = _provider_key_from_legacy(user)
+    template = _provider_template(provider) or AI_PROVIDER_TEMPLATES["dashscope"]
+    config = AIProviderConfig(
+        user_id=user.id,
+        provider=provider,
+        display_name=user.api_provider or template["display_name"],
+        api_key=user.api_key,
+        base_url=user.api_base_url or template["base_url"],
+        api_style="openai",
+        default_model=user.model_preference or template["default_model"],
+        model_options=template["model_options"],
+        enabled=True,
+    )
+    db.add(config)
+    await db.commit()
+
+
+@router.get("/ai-provider-templates")
+async def list_ai_provider_templates():
+    return [
+        {"provider": provider, **template, "api_style": "openai", "requires_api_key": provider != "ollama"}
+        for provider, template in AI_PROVIDER_TEMPLATES.items()
+    ]
+
+
+@router.get("/ai-providers", response_model=list[AIProviderConfigResponse])
+async def list_ai_providers(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _ensure_legacy_ai_provider(db, user)
+    result = await db.execute(
+        select(AIProviderConfig)
+        .where(AIProviderConfig.user_id == user.id)
+        .order_by(AIProviderConfig.created_at.asc(), AIProviderConfig.id.asc())
+    )
+    return [_serialize_ai_provider(config) for config in result.scalars().all()]
+
+
+@router.post("/ai-providers", response_model=AIProviderConfigResponse)
+async def create_ai_provider(
+    data: AIProviderConfigCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    provider = data.provider.strip().lower()
+    result = await db.execute(
+        select(AIProviderConfig).where(
+            AIProviderConfig.user_id == user.id,
+            AIProviderConfig.provider == provider,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        config = AIProviderConfig(user_id=user.id, provider=provider)
+        db.add(config)
+    template = _provider_template(provider)
+    config.display_name = data.display_name or template.get("display_name") or provider
+    if data.api_key and data.api_key.strip():
+        config.api_key = data.api_key.strip()
+        config.last_test_status = "untested"
+        config.last_test_message = None
+        config.last_test_at = None
+    config.base_url = data.base_url.strip()
+    config.api_style = data.api_style or "openai"
+    config.default_model = data.default_model.strip() if data.default_model else None
+    raw_options = data.model_options or template.get("model_options", [])
+    clean_options = []
+    for option in raw_options:
+        value = option.strip()
+        if value and value not in clean_options:
+            clean_options.append(value)
+    if config.default_model and config.default_model not in clean_options:
+        clean_options.insert(0, config.default_model)
+    config.model_options = clean_options
+    config.enabled = data.enabled
+    config.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(config)
+    return _serialize_ai_provider(config)
+
+
+@router.post("/ai-providers/{provider_id}/test")
+async def test_ai_provider(
+    provider_id: int,
+    data: AIProviderTestRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(AIProviderConfig).where(
+            AIProviderConfig.id == provider_id,
+            AIProviderConfig.user_id == user.id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="AI供应商配置不存在")
+
+    model = data.model or config.default_model or _provider_template(config.provider).get("default_model") or "qwen-plus"
+    if not config.api_key and config.provider != "ollama":
+        config.last_test_status = "error"
+        config.last_test_message = "未配置API Key"
+        config.last_test_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"status": "error", "message": config.last_test_message, "model": model}
+
+    try:
+        client = get_client(config.api_key, config.base_url)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=8,
+            temperature=0,
+        )
+        config.last_test_status = "success"
+        config.last_test_message = "连接正常"
+        config.last_test_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {
+            "status": "success",
+            "message": "连接正常",
+            "model": model,
+            "sample": response.choices[0].message.content,
+        }
+    except Exception as exc:
+        config.last_test_status = "error"
+        config.last_test_message = _format_ai_provider_error(config, exc)
+        config.last_test_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"status": "error", "message": config.last_test_message, "model": model}
+
+
+@router.delete("/ai-providers/{provider_id}")
+async def delete_ai_provider(
+    provider_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(AIProviderConfig).where(
+            AIProviderConfig.id == provider_id,
+            AIProviderConfig.user_id == user.id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="AI供应商配置不存在")
+
+    label = config.display_name or config.provider
+    await db.delete(config)
+    await db.commit()
+    return {"success": True, "deleted_id": provider_id, "message": f"{label} 已删除"}
 
 
 @router.get("/thresholds", response_model=list[ThresholdConfigResponse])

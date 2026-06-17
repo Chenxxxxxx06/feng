@@ -140,6 +140,8 @@ export default function WorkOrderPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [previewWO, setPreviewWO] = useState<WorkOrder | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkOrder | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState(false);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -218,10 +220,29 @@ export default function WorkOrderPage() {
   };
 
   const cancelOrder = async (id: number) => {
-    const { data } = await api.delete(`/workorders/${id}`);
+    const { data } = await api.put(`/workorders/${id}`, { status: 'cancelled' });
     setOrders((prev) => prev.map((o) => (o.id === id ? data : o)));
     setOpenActionId(null);
     fetchOrders();
+  };
+
+  const requestDeleteOrder = (wo: WorkOrder) => {
+    setDeleteTarget(wo);
+    setOpenActionId(null);
+  };
+
+  const confirmDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    setDeletingOrder(true);
+    await api.delete(`/workorders/${deleteTarget.id}`);
+    setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+    if (previewWO?.id === deleteTarget.id) {
+      setPreviewWO(null);
+      setAiAnalysis(null);
+      setEditingWO(false);
+    }
+    setDeleteTarget(null);
+    setDeletingOrder(false);
   };
 
   const startEdit = (wo: WorkOrder) => {
@@ -513,6 +534,9 @@ export default function WorkOrderPage() {
                             <button onClick={() => { setPreviewWO(o); startEdit(o); setOpenActionId(null); }} className="block w-full px-3 py-2 text-left text-text-secondary hover:bg-bg-hover hover:text-text-primary">
                               编辑
                             </button>
+                            <button onClick={() => requestDeleteOrder(o)} className="block w-full px-3 py-2 text-left text-accent-red hover:bg-accent-red/10">
+                              删除
+                            </button>
                           </div>
                         )}
                       </div>
@@ -683,6 +707,44 @@ export default function WorkOrderPage() {
               <p className="break-words text-xs leading-6 text-text-secondary">{emailResult.message}</p>
               <div className="mt-4 flex justify-end">
                 <button onClick={() => setEmailResult(null)} className="rounded bg-accent-blue px-4 py-2 text-sm text-white">知道了</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deleteTarget && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4" onClick={() => !deletingOrder && setDeleteTarget(null)}>
+            <div
+              className="w-full max-w-[420px] rounded-lg border border-accent-red/25 bg-bg-card shadow-2xl shadow-black/40"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="border-b border-border-default bg-bg-secondary px-5 py-4">
+                <p className="text-xs font-medium text-accent-red">删除确认</p>
+                <h3 className="mt-1 truncate text-base font-semibold text-text-primary">{deleteTarget.title}</h3>
+              </div>
+              <div className="space-y-3 px-5 py-4">
+                <div className="rounded border border-accent-red/20 bg-accent-red/10 px-3 py-2">
+                  <p className="text-sm leading-6 text-text-primary">删除后，这条工单将从默认列表、人员负载、诊断关联和知识图谱中隐藏。</p>
+                </div>
+                <p className="text-xs leading-5 text-text-muted">
+                  工单编号 WO-{String(deleteTarget.id).padStart(4, '0')} 的维护记录和通知日志会继续保留，便于后续审计。
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border-default bg-bg-secondary px-5 py-4">
+                <button
+                  disabled={deletingOrder}
+                  onClick={() => setDeleteTarget(null)}
+                  className="rounded border border-border-default px-4 py-2 text-sm text-text-secondary hover:border-border-active hover:text-text-primary disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  disabled={deletingOrder}
+                  onClick={confirmDeleteOrder}
+                  className="rounded bg-accent-red px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+                >
+                  {deletingOrder ? '删除中...' : '确认删除'}
+                </button>
               </div>
             </div>
           </div>
