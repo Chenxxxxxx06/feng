@@ -15,6 +15,7 @@ export default function DetailScene() {
   const drones = useDrone3DStore((s) => s.drones);
   const focusedTurbineId = useDrone3DStore((s) => s.focusedTurbineId);
   const focusTurbine = useDrone3DStore((s) => s.focusTurbine);
+  const cruiseAltitude = useDrone3DStore((s) => s.cruiseAltitude);
 
   const focused = turbines.find((t) => t.id === focusedTurbineId);
 
@@ -53,7 +54,7 @@ export default function DetailScene() {
       {relatedDrones.map((drone) => (
         <group key={drone.id}>
           <DroneInstance drone={drone} />
-          <FlightPathLines drone={drone} />
+          <FlightPathLines drone={drone} cruiseAltitude={cruiseAltitude} />
         </group>
       ))}
     </>
