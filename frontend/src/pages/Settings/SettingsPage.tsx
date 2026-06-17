@@ -225,6 +225,7 @@ const sections: { key: SectionKey; label: string; desc: string }[] = [
   { key: 'alerts', label: '告警规则', desc: 'HI阈值和通知方式' },
   { key: 'pipeline', label: '数据源管理', desc: 'SCADA/振动/图像/气象' },
   { key: 'personnel', label: '人员管理', desc: '维护人员和负载' },
+  { key: 'logs', label: '操作日志', desc: '设置变更和接口结果' },
 ];
 
 const sourceIcons: Record<string, string> = {
@@ -761,6 +762,9 @@ export default function SettingsPage() {
                 onRemove={removePerson}
               />
             )}
+            {activeSection === 'logs' && (
+              <LogsSection logs={logs} />
+            )}
           </main>
         </div>
       </div>
@@ -879,6 +883,20 @@ function OverviewTile({ label, value, hint, tone }: { label: string; value: stri
       <p className="mt-3 text-xl font-semibold">{value}</p>
       <p className="mt-1 text-[10px] text-text-muted">{hint}</p>
     </div>
+  );
+}
+
+function LogsSection({ logs }: { logs: ActivityLog[] }) {
+  return (
+    <SectionShell title="操作日志" description="查看当前会话内的配置加载、保存、测试和人员维护操作。">
+      <div className="rounded-lg border border-border-default bg-navy-900/60">
+        {logs.length > 0 ? (
+          logs.map((log) => <LogRow key={log.id} log={log} />)
+        ) : (
+          <div className="px-4 py-8 text-center text-xs text-text-muted">暂无操作记录</div>
+        )}
+      </div>
+    </SectionShell>
   );
 }
 

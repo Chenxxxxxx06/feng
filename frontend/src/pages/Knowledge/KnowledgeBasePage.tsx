@@ -388,6 +388,7 @@ export default function KnowledgeBasePage() {
 
       return {
         ...n,
+        draggable: true,
         symbol: graphNodeSymbol(graphView, n.category),
         itemStyle: { color, borderColor, borderWidth: borderW, shadowBlur: shadow, shadowColor: color },
         symbolSize: isRoot ? Math.max(n.symbolSize, 62) : n.symbolSize,
@@ -433,7 +434,8 @@ export default function KnowledgeBasePage() {
         type: 'graph',
         layout: 'force',
         roam: true,
-        draggable: false,
+        draggable: true,
+        cursor: 'grab',
         force: {
           repulsion: isTopo ? 350 : 260,
           edgeLength: isTopo ? [120, 400] : [90, 220],
@@ -797,7 +799,11 @@ export default function KnowledgeBasePage() {
             <>
               <div className="relative flex-1 overflow-hidden bg-[radial-gradient(circle_at_50%_35%,rgba(56,139,253,0.12),transparent_34%),linear-gradient(180deg,rgba(13,19,30,0.7),rgba(8,12,18,0.92))]">
                 <div className="pointer-events-none absolute inset-0 opacity-[0.14] [background-image:linear-gradient(rgba(233,237,245,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(233,237,245,0.08)_1px,transparent_1px)] [background-size:32px_32px]" />
-                <div ref={chartRef} className="relative h-full w-full" />
+                <div
+                  ref={chartRef}
+                  className="relative h-full w-full"
+                  style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
+                />
               </div>
               {graphNode && <NodeInfoPanel node={graphNode} view={graphView} onViewKnowledge={switchToKnowledge} onClose={() => setGraphNode(null)} />}
             </>

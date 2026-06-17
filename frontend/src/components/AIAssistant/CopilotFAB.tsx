@@ -617,23 +617,59 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         const { data: plan } = await api.post('/agent/execute', execPayload, { timeout: 30000 });
         useCopilotStore.getState().removeMessage(progressId);
 
-        const parts: string[] = [];
-        const trace = data.trace || {};
-        // Step trace
-        const steps: string[] = [];
-        if (trace.orchestrator_ms != null) steps.push(`意图分析 (${trace.orchestrator_ms}ms)`);
-        if (trace.data_agent_ms != null) steps.push(`数据查询 (${trace.data_agent_ms}ms)`);
-        if (trace.knowledge_agent_ms != null) steps.push(`知识检索 (${trace.knowledge_agent_ms}ms)`);
-        if (trace.synthesizer_ms != null) steps.push(`汇总报告 (${trace.synthesizer_ms}ms)`);
-        if (steps.length > 0) parts.push(`> ${steps.join(' → ')}`);
+        const intentType = plan.intent_type || 'qa';
+        const planSteps: string[] = [];
+        planSteps.push(`意图分析: ${intentType} (${((plan.confidence || 0) * 100).toFixed(0)}%)`);
+        if (plan.explanation) planSteps.push(plan.explanation);
 
-        if (data.intent && data.intent.intent_type) {
-          parts.push(`**意图**: ${data.intent.intent_type} (置信度${(data.intent.confidence*100).toFixed(0)}%)`);
+        if ((intentType === 'action' || intentType === 'mixed') && plan.atomic_steps?.length > 0) {
+          planSteps.push(`执行 ${plan.atomic_steps.length} 个操作步骤...`);
+          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
+
+          const execResult = await executor.executeSteps(plan.atomic_steps);
+          useCopilotStore.getState().removeMessage(progressId);
+
+          if (!execResult.success) {
+            reply = `> ${planSteps.join('\n> ')}\n\n${execResult.message}`;
+          } else if (intentType === 'mixed' && plan.follow_up_analysis) {
+            addMessage({ role: 'assistant', content: '分析执行结果...', _progress: true, _progressId: progressId });
+            const diagPayload: Record<string, unknown> = {
+              messages: [...allMsgs, { role: 'system', content: plan.follow_up_analysis }],
+              page_context: baseContext,
+            };
+            try {
+              const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 60000 });
+              useCopilotStore.getState().removeMessage(progressId);
+              const diagParts = planSteps.slice();
+              if (diag.report) diagParts.push(diag.report);
+              else if (diag.message) diagParts.push(diag.message);
+              reply = diagParts.join('\n\n');
+            } catch {
+              useCopilotStore.getState().removeMessage(progressId);
+              reply = `${planSteps.join('\n')}\n\n操作已完成`;
+            }
+          } else {
+            reply = `${planSteps.join('\n')}\n\n操作已完成`;
+          }
+        } else {
+          planSteps.push('查询知识库与分析...');
+          addMessage({ role: 'assistant', content: planSteps.join('\n'), _progress: true, _progressId: progressId });
+
+          const diagPayload: Record<string, unknown> = { messages: allMsgs, page_context: baseContext };
+          if (screenshot) diagPayload.screenshot = screenshot;
+          try {
+            const { data: diag } = await api.post('/agent/diagnose', diagPayload, { timeout: 120000 });
+            useCopilotStore.getState().removeMessage(progressId);
+            const parts = planSteps.slice();
+            if (diag.report) parts.push(diag.report);
+            else if (diag.message) parts.push(diag.message);
+            else parts.push(JSON.stringify(diag));
+            reply = parts.join('\n\n');
+          } catch {
+            useCopilotStore.getState().removeMessage(progressId);
+            reply = `${planSteps.join('\n')}\n\n抱歉，AI分析服务暂不可用。`;
+          }
         }
-        if (data.data_summary) parts.push(`**数据摘要**:\n${data.data_summary}`);
-        if (data.knowledge_matches) parts.push(`**知识匹配**:\n${data.knowledge_matches}`);
-        if (data.report) parts.push(data.report);
-        reply = parts.join('\n\n') || JSON.stringify(data);
       } else {
         // AI 对话模式 — 走 Copilot 对话链路
         const payload: Record<string, unknown> = {
