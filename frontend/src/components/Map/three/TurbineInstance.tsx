@@ -109,6 +109,11 @@ export default function TurbineInstance({ turbine, isFocused, onFocus }: Props) 
 
   return (
     <group ref={groupRef} position={[posX, 0, posZ]} scale={scl}>
+      {/* 风机顶部黄色标记球 — 验证位置正确 */}
+      <mesh position={[0, 85, 0]}>
+        <sphereGeometry args={[4, 8, 8]} />
+        <meshBasicMaterial color="yellow" />
+      </mesh>
       <group
         ref={setModelRef}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}

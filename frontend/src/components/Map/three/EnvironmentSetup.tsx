@@ -12,7 +12,7 @@ export default function EnvironmentSetup() {
 
   useEffect(() => {
     scene.background = new THREE.Color('#7ec8e3');
-    scene.fog = new THREE.Fog('#d4c48c', 600, 1400);
+    scene.fog = new THREE.Fog('#d4c48c', 3000, 12000);
   }, [scene]);
 
   return (

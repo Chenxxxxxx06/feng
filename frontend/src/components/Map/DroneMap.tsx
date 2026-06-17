@@ -97,6 +97,11 @@ export default function DroneMap({
     return () => { ro.disconnect(); map.remove(); mapRef.current = null; };
   }, []);
 
+  // Track previous activeFarm to avoid fitBounds on completedIds change
+  const prevActiveFarmRef = useRef(activeFarm);
+  const farmChanged = prevActiveFarmRef.current !== activeFarm;
+  prevActiveFarmRef.current = activeFarm;
+
   // Render static: farm zones + turbine markers
   useEffect(() => {
     const map = mapRef.current;
@@ -106,10 +111,12 @@ export default function DroneMap({
 
     if (!activeFarm) {
       // ── Overview: show farm rectangles ──
-      map.fitBounds(SHAANXI_WIND_BOUNDS, {
-        paddingTopLeft: [56, 56], paddingBottomRight: [420, 56],
-        maxZoom: OVERVIEW_ZOOM, animate: false,
-      });
+      if (farmChanged) {
+        map.fitBounds(SHAANXI_WIND_BOUNDS, {
+          paddingTopLeft: [56, 56], paddingBottomRight: [420, 56],
+          maxZoom: OVERVIEW_ZOOM, animate: false,
+        });
+      }
       farms.forEach(([region, items]) => {
         const bounds = paddedBounds(items, 0.5);
         const center = bounds.getCenter();
@@ -141,11 +148,13 @@ export default function DroneMap({
     // ── Farm detail: show turbines ──
     const farmItems = farms.find(([, items]) => items[0]?.region === activeFarm)?.[1] || [];
     if (!farmItems.length) return;
-    const bounds = paddedBounds(farmItems, 0.34);
-    map.fitBounds(bounds, {
-      paddingTopLeft: [64, 64], paddingBottomRight: [420, 96],
-      maxZoom: 14, animate: true, duration: 0.6, easeLinearity: 0.25,
-    });
+    if (farmChanged) {
+      const bounds = paddedBounds(farmItems, 0.34);
+      map.fitBounds(bounds, {
+        paddingTopLeft: [64, 64], paddingBottomRight: [420, 96],
+        maxZoom: 14, animate: true, duration: 0.6, easeLinearity: 0.25,
+      });
+    }
 
     farmItems.forEach((t) => {
       const shot = completedIds.has(t.id);

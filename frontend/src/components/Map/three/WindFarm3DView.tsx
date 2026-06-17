@@ -18,7 +18,7 @@ export default function WindFarm3DView() {
     <div style={{ position: 'absolute', inset: 0, background: '#071A35' }}>
       <Canvas
         style={{ position: 'absolute', inset: 0 }}
-        camera={{ position: [0, 400, 300], fov: 50, near: 1, far: 50000 }}
+        camera={{ position: [0, 250, 300], fov: 55, near: 1, far: 50000 }}
         shadows
         gl={{
           antialias: true,
