@@ -151,12 +151,13 @@ export default function DroneMap({
       const shot = completedIds.has(t.id);
       const assigned = assignedIds.has(t.id);
       const borderColor = t.status === 'fault' ? '#f85149' : t.status === 'warning' ? '#d29922' : shot ? '#3fb950' : assigned ? '#388bfd' : '#54657e';
-      const size = 80;
+      const sizeW = 90;
+      const sizeH = 80;
 
       const icon = L.icon({
         iconUrl: '/turbine-marker.png',
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
+        iconSize: [sizeW, sizeH],
+        iconAnchor: [sizeW / 2, sizeH / 2],
         className: 'drone-turbine-icon',
       });
 
@@ -211,8 +212,8 @@ export default function DroneMap({
         L.marker([takeoff.lat, takeoff.lng], {
           icon: L.icon({
             iconUrl: '/takeoff.png',
-            iconSize: [70, 70],
-            iconAnchor: [35, 70],
+            iconSize: [80, 70],
+            iconAnchor: [40, 70],
             className: '',
           }), zIndexOffset: 500,
         }).bindTooltip(`<div style="font-size:10px"><b>${drone.name} 起飞点</b></div>`, { direction: 'top' }).addTo(layer);
