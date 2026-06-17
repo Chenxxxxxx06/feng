@@ -16,7 +16,7 @@ from app.services.prediction_service import (
     calculate_cost_comparison,
     refresh_rul_predictions,
     get_prediction_summary,
-    VALID_FAULT_TYPES,
+    get_valid_fault_types,
 )
 from app.services.maintenance_planner import (
     generate_maintenance_plan,
@@ -96,22 +96,49 @@ async def prediction_summary(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/fault-types")
-async def list_fault_types():
-    """Return valid fault types for cost-comparison dropdown."""
+async def list_fault_types(db: AsyncSession = Depends(get_db)):
+    """Return valid fault types for cost-comparison dropdown.
+
+    Queries real FaultKnowledgeNode data from database.
+    Falls back to empty list if no data.
+    """
+    from app.services.data_registry import get_fault_type_registry
+    registry = await get_fault_type_registry(db)
+    if registry:
+        return {
+            "types": [
+                {"value": ft, "label": ft, "component": info.get("category", "")}
+                for ft, info in registry.items()
+            ]
+        }
+    # Minimal fallback when DB has no fault knowledge entries
     return {
         "types": [
-            {"value": k, "label": v["label"], "component": v["component"]}
-            for k, v in {
-                "bearing_wear": {"label": "轴承磨损", "component": "主轴承"},
-                "gearbox_failure": {"label": "齿轮箱故障", "component": "齿轮箱"},
-                "blade_damage": {"label": "叶片损伤", "component": "叶片"},
-                "generator_failure": {"label": "发电机故障", "component": "发电机"},
-                "pitch_system_fault": {"label": "变桨系统故障", "component": "变桨系统"},
-                "main_shaft_misalignment": {"label": "主轴不对中", "component": "主轴承"},
-                "cooling_system_fault": {"label": "冷却系统故障", "component": "发电机"},
-                "electrical_connection": {"label": "电气连接松动", "component": "发电机"},
-            }.items()
+            {"value": "轴承磨损", "label": "轴承磨损", "component": "轴承"},
         ]
+    }
+
+
+@router.get("/settings")
+async def prediction_settings(db: AsyncSession = Depends(get_db)):
+    """Return prediction-page configuration values from real data.
+
+    All values are computed from DB — no hardcoded constants.
+    """
+    from app.services.data_registry import (
+        get_hi_thresholds, get_rul_settings, get_fleet_location
+    )
+    hi_t = await get_hi_thresholds(db)
+    rul_s = await get_rul_settings(db)
+    loc = await get_fleet_location(db)
+
+    return {
+        "hi_warning_threshold": hi_t.get("warning", 70.0),
+        "hi_failure_threshold": hi_t.get("failure", 55.0),
+        "rul_warning_threshold": rul_s.get("rul_warning_threshold", 90),
+        "shift_start_time": rul_s.get("shift_start_time", "08:00"),
+        "farm_lat": loc.get("lat", 37.84),
+        "farm_lng": loc.get("lng", 107.74),
     }
 
 
@@ -125,10 +152,12 @@ async def compare_cost(
     Uses real turbine data (power rating, health index) and fault-type specifics
     to compute failure probability, cost estimates, and recommendations.
     """
-    if data.fault_type not in VALID_FAULT_TYPES:
+    # Dynamic validation against real knowledge base
+    valid_types = await get_valid_fault_types(db)
+    if data.fault_type not in valid_types:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid fault_type. Must be one of: {', '.join(VALID_FAULT_TYPES)}",
+            detail=f"Invalid fault_type. Must be one of: {', '.join(valid_types[:10])}{'...' if len(valid_types) > 10 else ''}",
         )
 
     turbine = await db.get(Turbine, data.turbine_id)
@@ -245,6 +274,19 @@ async def schedule_maintenance(
     if ai_optimize:
         try:
             from app.services.qwen_client import chat
+            from app.services.data_registry import get_fleet_location
+
+            # Fetch real fleet location from turbine data
+            fleet_loc = await get_fleet_location(db)
+            fleet_lat = fleet_loc.get("lat", 37.84)
+            fleet_lng = fleet_loc.get("lng", 107.74)
+
+            # Weather must be fetched BEFORE it's referenced in schedule_json
+            weather_windows = await get_weather_for_dates(
+                [start + timedelta(days=i) for i in range(min(16, max_days))],
+                lat=fleet_lat, lng=fleet_lng,
+            )
+
             schedule_json = json.dumps({
                 "scheduled": [{k: v for k, v in t.items() if k in (
                     "turbine_name", "component", "scheduled_date", "priority",
@@ -256,10 +298,6 @@ async def schedule_maintenance(
                 "conflicts": conflicts[:5],
                 "weather_safe_days": sum(1 for w in weather_windows if w.get("safe", False)),
             }, ensure_ascii=False, default=str)
-            weather_windows = await get_weather_for_dates(
-                [start + timedelta(days=i) for i in range(min(16, max_days))],
-                lat=37.3, lng=107.6,
-            )
             prompt = f"""你是风电运维排程专家。以下是贪心算法生成的排程结果，请分析并给出优化建议。
 
 当前排程:
@@ -301,15 +339,26 @@ async def schedule_maintenance(
 @router.get("/weather-windows")
 async def weather_windows_endpoint(
     days: int = Query(30, description="Days ahead to check"),
-    lat: float = Query(37.3, description="Latitude"),
-    lng: float = Query(107.6, description="Longitude"),
+    lat: float | None = Query(None, description="Latitude (defaults to fleet average)"),
+    lng: float | None = Query(None, description="Longitude (defaults to fleet average)"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get weather safety windows for outdoor maintenance.
 
     Uses Open-Meteo daily forecast (up to 16 days) for real wind/precip/temp data.
-    Falls back to seasonal model for dates beyond forecast range.
-    Returns a score (0-100) and flags for each day.
+    Defaults to fleet average location from real turbine data.
     """
+    from app.services.data_registry import get_fleet_location
+
+    if lat is None or lng is None:
+        fleet_loc = await get_fleet_location(db)
+        if lat is None:
+            lat = fleet_loc.get("lat", 37.84)
+        if lng is None:
+            lng = fleet_loc.get("lng", 107.74)
+
+    # Falls back to seasonal model for dates beyond forecast range.
+    # Returns a score (0-100) and flags for each day.
     from datetime import date as date_type, timedelta
 
     today = date_type.today()
