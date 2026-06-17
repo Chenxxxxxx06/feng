@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import type { Turbine, Drone, NoFlyZone } from '../types';
+import type { Turbine, Drone, NoFlyZone, InspectionWaypoint, InspectionTargetPart } from '../types';
 
 export interface Drone3DState {
   // ── 数据 ──
@@ -14,6 +14,9 @@ export interface Drone3DState {
   hasPlan: boolean;
   isRunning: boolean;
   speedMultiplier: number;
+  inspectionWaypoints: InspectionWaypoint[];
+  selectedInspectionTurbineId: number | null;
+  inspectionTargetPart: InspectionTargetPart;
 
   // ── 禁飞区 ──
   noFlyZones: NoFlyZone[];
@@ -23,7 +26,8 @@ export interface Drone3DState {
   viewMode: 'overview' | 'detail';
   focusedTurbineId: number | null;
   cruiseAltitude: number;
-  cameraMode: 'follow' | 'overview' | 'free';
+  cameraMode: 'overview' | 'follow' | 'fpv';
+  selectedDroneId: number | null;
 
   // ── Actions ──
   setTurbines: (t: Turbine[]) => void;
@@ -32,6 +36,9 @@ export interface Drone3DState {
   setHasPlan: (v: boolean) => void;
   setIsRunning: (v: boolean) => void;
   setSpeedMultiplier: (v: number) => void;
+  setInspectionWaypoints: (waypoints: InspectionWaypoint[]) => void;
+  setSelectedInspectionTurbine: (id: number | null) => void;
+  setInspectionTargetPart: (part: InspectionTargetPart) => void;
   setViewMode: (m: 'overview' | 'detail') => void;
   focusTurbine: (id: number | null) => void;
   setNoFlyZones: (zones: NoFlyZone[]) => void;
@@ -39,7 +46,8 @@ export interface Drone3DState {
   removeNoFlyZone: (index: number) => void;
   toggleNoFlyZones: () => void;
   setCruiseAltitude: (alt: number) => void;
-  setCameraMode: (mode: 'follow' | 'overview' | 'free') => void;
+  setCameraMode: (mode: 'overview' | 'follow' | 'fpv') => void;
+  setSelectedDroneId: (id: number | null) => void;
 }
 
 export const useDrone3DStore = create<Drone3DState>((set) => ({
@@ -49,6 +57,9 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   hasPlan: false,
   isRunning: false,
   speedMultiplier: 1,
+  inspectionWaypoints: [],
+  selectedInspectionTurbineId: null,
+  inspectionTargetPart: 'blade_tip',
 
   noFlyZones: [],
   showNoFlyZones: true,
@@ -57,6 +68,7 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   focusedTurbineId: null,
   cruiseAltitude: 50,
   cameraMode: 'overview',
+  selectedDroneId: null,
 
   setTurbines: (turbines) => set({ turbines }),
   setDrones: (drones) => set({ drones }),
@@ -64,6 +76,9 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   setHasPlan: (hasPlan) => set({ hasPlan }),
   setIsRunning: (isRunning) => set({ isRunning }),
   setSpeedMultiplier: (speedMultiplier) => set({ speedMultiplier }),
+  setInspectionWaypoints: (inspectionWaypoints) => set({ inspectionWaypoints }),
+  setSelectedInspectionTurbine: (selectedInspectionTurbineId) => set({ selectedInspectionTurbineId }),
+  setInspectionTargetPart: (inspectionTargetPart) => set({ inspectionTargetPart }),
   setViewMode: (viewMode) => set({ viewMode }),
   focusTurbine: (id) =>
     set({ focusedTurbineId: id, viewMode: id ? 'detail' : 'overview' }),
@@ -76,4 +91,5 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   toggleNoFlyZones: () => set((s) => ({ showNoFlyZones: !s.showNoFlyZones })),
   setCruiseAltitude: (cruiseAltitude) => set({ cruiseAltitude }),
   setCameraMode: (cameraMode) => set({ cameraMode }),
+  setSelectedDroneId: (selectedDroneId) => set({ selectedDroneId }),
 }));
