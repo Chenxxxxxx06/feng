@@ -289,16 +289,188 @@ async def _fetch_turbine_info(wo: WorkOrder, db: AsyncSession) -> Turbine | None
     return await db.get(Turbine, wo.turbine_id)
 
 
+# ── Fault-type → Knowledge-node fuzzy matching helpers ──────
+
+# English internal fault_type codes → Chinese labels.
+# Work orders store English codes (e.g. "generator_overheat") but the
+# knowledge base uses Chinese names (e.g. "发电机过热").  This mapping
+# bridges the two so _fetch_fault_knowledge can match correctly.
+_EN_TO_CN_FAULT: dict[str, str] = {
+    "bearing_inner_race_wear": "轴承内圈磨损",
+    "bearing_outer_race": "轴承外圈故障",
+    "bearing_ball": "轴承滚动体故障",
+    "bearing_wear": "轴承磨损",
+    "bearing_fault": "轴承磨损",
+    "bearing_cage_failure": "轴承保持架故障",
+    "gearbox_tooth_pitting": "齿轮箱点蚀",
+    "gearbox_tooth_wear": "齿轮箱齿面磨损",
+    "gearbox_fault": "齿轮箱点蚀",
+    "generator_overheat": "发电机过热",
+    "generator_fault": "发电机过热",
+    "blade_leading_edge_erosion": "叶片前缘侵蚀",
+    "blade_damage": "叶片裂纹",
+    "blade_crack": "叶片裂纹",
+    "blade_ice": "叶片结冰",
+    "pitch_system_fault": "变桨系统故障",
+    "main_shaft_misalignment": "轴对中不良",
+    "shaft_misalignment": "轴对中不良",
+    "cooling_system_fault": "冷却系统故障",
+    "electrical_connection": "电气连接异常",
+    "electrical_fault": "变频器故障",
+    "unbalance": "转子不平衡",
+    "misalignment": "轴对中不良",
+    "looseness": "轴承磨损",
+    "resonance": "齿轮箱点蚀",
+    "yaw_failure": "偏航系统故障",
+    "yaw_sensor_fault": "风向传感器故障",
+    "coupling_wear": "联轴器磨损",
+    "converter_fault": "变频器故障",
+    "transformer_overheat": "变压器过热",
+    "tower_weld_crack": "塔筒焊缝裂纹",
+    "tower_foundation": "基础沉降",
+    "no_fault_detected": "未识别到明确故障",
+}
+
+# Keywords extracted from fault_type / work order title used as
+# search anchors when an exact fault_type match is not found.
+_KNOWLEDGE_KEYWORD_MAP: dict[str, list[str]] = {
+    "齿轮": ["齿轮箱点蚀", "齿轮断齿", "齿轮箱漏油"],
+    "齿轮箱": ["齿轮箱点蚀", "齿轮断齿", "齿轮箱漏油"],
+    "轴承": ["轴承磨损", "轴承保持架故障", "轴承电蚀"],
+    "叶片": ["叶片前缘侵蚀", "叶片裂纹", "叶片结冰"],
+    "发电机": ["发电机过热", "发电机绝缘老化"],
+    "偏航": ["偏航系统故障", "风向传感器故障"],
+    "传动": ["轴对中不良", "联轴器磨损"],
+    "主轴": ["轴对中不良", "联轴器磨损"],
+    "电气": ["变频器故障", "变压器过热"],
+    "塔筒": ["塔筒焊缝裂纹", "基础沉降"],
+    "变桨": ["变桨系统故障"],
+    "冷却": ["发电机过热"],
+    "振动": ["轴承磨损", "齿轮箱点蚀", "转子不平衡"],
+    "温度": ["发电机过热", "变压器过热"],
+    "漏油": ["齿轮箱漏油"],
+    "断齿": ["齿轮断齿"],
+    "点蚀": ["齿轮箱点蚀"],
+    "裂纹": ["叶片裂纹", "塔筒焊缝裂纹"],
+    "不平衡": ["转子不平衡"],
+    "对中": ["轴对中不良"],
+    "不对中": ["轴对中不良"],
+    "过热": ["发电机过热", "变压器过热"],
+    "电蚀": ["轴承电蚀"],
+    "绝缘": ["发电机绝缘老化"],
+    "变频": ["变频器故障"],
+    "变压器": ["变压器过热"],
+}
+
+
+def _extract_keywords(text: str) -> list[str]:
+    """Extract Chinese technical keywords from fault_type / title text."""
+    found: list[str] = []
+    for keyword in _KNOWLEDGE_KEYWORD_MAP:
+        if keyword in text:
+            found.append(keyword)
+    return found
+
+
 async def _fetch_fault_knowledge(wo: WorkOrder, db: AsyncSession) -> dict | None:
-    """Match fault_type against FaultKnowledgeNode table."""
-    if not wo.fault_type:
+    """Match fault_type against FaultKnowledgeNode with fuzzy fallback.
+
+    Strategy (best-effort, ordered):
+      0. Translate English fault_type code → Chinese label
+      1. Exact match on wo.fault_type
+      2. Keyword match via _KNOWLEDGE_KEYWORD_MAP → exact match on
+         candidate fault_type names
+      3. ILIKE fuzzy match on fault_knowledge.fault_type
+      4. Category ILIKE match on fault_knowledge.category
+    """
+    search_text = (wo.fault_type or "").strip()
+    if not search_text:
         return None
-    result = await db.execute(
-        select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == wo.fault_type)
-    )
-    node = result.scalar_one_or_none()
-    if not node:
-        return None
+
+    # ── 0. Translate English code → Chinese label ──
+    # Work orders store internal English codes (e.g. "generator_overheat")
+    # but knowledge base uses Chinese names (e.g. "发电机过热").
+    cn_label = _EN_TO_CN_FAULT.get(search_text, "")
+    search_texts: list[str] = [search_text]
+    if cn_label and cn_label != search_text:
+        search_texts.append(cn_label)
+
+    # ── 1. Exact match (try both EN code and CN label) ──
+    for text in search_texts:
+        result = await db.execute(
+            select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == text)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    # ── 2. Keyword → candidate fault_type names ──
+    # Extract keywords from BOTH the original text and the CN translation
+    keywords: list[str] = []
+    seen_kw: set[str] = set()
+    for text in search_texts:
+        for kw in _extract_keywords(text):
+            if kw not in seen_kw:
+                seen_kw.add(kw)
+                keywords.append(kw)
+
+    if keywords:
+        # Collect unique candidate names
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for kw in keywords:
+            for name in _KNOWLEDGE_KEYWORD_MAP.get(kw, []):
+                if name not in seen:
+                    seen.add(name)
+                    candidates.append(name)
+
+        if candidates:
+            result = await db.execute(
+                select(FaultKnowledgeNode).where(
+                    FaultKnowledgeNode.fault_type.in_(candidates)
+                ).limit(1)
+            )
+            node = result.scalar_one_or_none()
+            if node:
+                return _knowledge_node_to_dict(node)
+
+    # ── 3. ILIKE fuzzy match on fault_type (try all search texts) ──
+    for text in search_texts:
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.fault_type.ilike(f"%{text}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    # ── 4. ILIKE fuzzy match with each keyword ──
+    for kw in keywords[:3]:
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.fault_type.ilike(f"%{kw}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    # ── 5. Category ILIKE match ──
+    for kw in keywords[:3]:
+        result = await db.execute(
+            select(FaultKnowledgeNode)
+            .where(FaultKnowledgeNode.category.ilike(f"%{kw}%"))
+            .limit(1)
+        )
+        node = result.scalar_one_or_none()
+        if node:
+            return _knowledge_node_to_dict(node)
+
+    return None
+
+
+def _knowledge_node_to_dict(node: FaultKnowledgeNode) -> dict:
     return {
         "root_causes": node.root_causes or [],
         "solutions": node.solutions or [],
