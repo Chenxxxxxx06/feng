@@ -731,6 +731,22 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
             suggestions.append("请检查预测数据导入、模型任务状态或后端预测服务配置")
         return {"conclusions": conclusions, "suggestions": suggestions}
 
+    if page_type == "turbine_detail":
+        name = data.get("turbineName", "该风机")
+        hi = data.get("hiValue", "--")
+        status = data.get("status", "unknown")
+        records = data.get("scadaRecords", 0)
+        conclusions = [f"{name} 当前健康指数 {hi}，运行状态 {status}。"]
+        if records == 0:
+            conclusions.append("近24小时无SCADA数据记录，建议检查传感器及数据采集链路。")
+        else:
+            conclusions.append(f"近24小时共 {records} 条SCADA记录可用。")
+        suggestions = [
+            "核查SCADA采集状态与传感器通信。",
+            "基于最近维修历史评估是否需要安排现场巡检。",
+        ]
+        return {"conclusions": conclusions, "suggestions": suggestions}
+
     return {
         "conclusions": ["AI服务暂不可用，请检查API密钥配置"],
         "suggestions": ["前往设置页面配置AI模型密钥以启用智能总结"],
