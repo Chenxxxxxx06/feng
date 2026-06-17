@@ -221,6 +221,7 @@ async def schedule_maintenance(
                     WorkOrderModel.turbine_id == item["turbine_id"],
                     WorkOrderModel.fault_type == item.get("fault_type", ""),
                     WorkOrderModel.status.in_(["pending", "assigned", "in_progress"]),
+                    WorkOrderModel.deleted_at.is_(None),
                 )
             )).scalars().first()
             if existing:

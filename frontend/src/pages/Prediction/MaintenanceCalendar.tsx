@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { rulColor } from '../../hooks/useECharts';
 import api from '../../services/api';
 import type { RULPrediction, WorkOrder } from '../../types';
@@ -30,8 +31,38 @@ const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8�
 function dateKey(d: Date) { const m = d.getMonth() + 1; return `${d.getFullYear()}-${m < 10 ? '0' + m : m}-${d.getDate() < 10 ? '0' + d.getDate() : d.getDate()}`; }
 function sameDay(a: Date, b: Date) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 
-function weatherEmoji(score: number) { return score >= 80 ? '☀️' : score >= 50 ? '⛅' : score >= 30 ? '🌧️' : '⛈️'; }
 function weatherBg(score: number) { return score < 30 ? 'bg-accent-red/5' : score < 50 ? 'bg-accent-yellow/5' : ''; }
+function weatherTextTone(score: number) {
+  if (score >= 80) return 'text-accent-green border-accent-green/25 bg-accent-green/10';
+  if (score >= 50) return 'text-accent-blue border-accent-blue/25 bg-accent-blue/10';
+  if (score >= 30) return 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10';
+  return 'text-accent-red border-accent-red/25 bg-accent-red/10';
+}
+function weatherLabel(day: WeatherDay) {
+  if (!day.safe) return day.score < 30 ? '高风险' : '需关注';
+  if (day.score >= 80) return '适宜';
+  return '可作业';
+}
+function weatherEmoji(day: WeatherDay) {
+  const flags = (day.flags || []).join(' ').toLowerCase();
+  if (/雷|thunder|storm/.test(flags)) return '⛈️';
+  if (/雨|rain|shower|precip/.test(flags)) return '🌧️';
+  if (/雪|snow/.test(flags)) return '❄️';
+  if (/雾|霾|fog|mist|haze/.test(flags)) return '🌫️';
+  if (/风|wind|gust/.test(flags)) return '🌬️';
+  if (!day.safe || day.score < 30) return '⛈️';
+  if (day.score < 50) return '🌧️';
+  if (day.score < 80) return '⛅';
+  return '☀️';
+}
+function tooltipStyle(x: number, y: number) {
+  const width = typeof window === 'undefined' ? 9999 : window.innerWidth;
+  const height = typeof window === 'undefined' ? 9999 : window.innerHeight;
+  return {
+    left: Math.max(8, Math.min(x + 12, width - 320)),
+    top: Math.max(8, Math.min(y + 12, height - 240)),
+  };
+}
 
 // ── Props ──
 interface Props {
@@ -139,7 +170,7 @@ export default function MaintenanceCalendar({
 
   // ── Render ──
   return (
-    <div className="bg-bg-card border border-border-default rounded-lg p-4 flex flex-col">
+    <div className="ops-panel relative p-4 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -155,24 +186,24 @@ export default function MaintenanceCalendar({
           </div>
         </div>
         <div className="flex items-center gap-1 text-xs">
-          <button onClick={() => nav(-1)} className="px-1.5 py-0.5 hover:text-accent-blue">◀</button>
+          <button onClick={() => nav(-1)} className="px-1.5 py-0.5 hover:text-accent-blue" aria-label="上一页">‹</button>
           <span className="font-medium min-w-[80px] text-center">{title}</span>
-          <button onClick={() => nav(1)} className="px-1.5 py-0.5 hover:text-accent-blue">▶</button>
-          <button onClick={() => setCursor(new Date())} className="ml-2 px-2 py-0.5 border border-border-default rounded text-[9px] hover:border-accent-blue">今天</button>
+          <button onClick={() => nav(1)} className="px-1.5 py-0.5 hover:text-accent-blue" aria-label="下一页">›</button>
+          <button onClick={() => setCursor(new Date())} className="ops-btn ml-2 px-2 py-0.5 text-[9px]">今天</button>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={onAutoSchedule} disabled={scheduling}
             className="px-2 py-0.5 bg-accent-blue/20 border border-accent-blue/30 rounded text-[9px] text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50">
-            {scheduling ? '排程中...' : '🤖 自动排程'}
+            {scheduling ? '排程中...' : '自动排程'}
           </button>
-          <button onClick={handleExport} className="px-2 py-0.5 border border-border-default rounded text-[9px] text-text-muted hover:text-accent-blue">📅 导出ICS</button>
+          <button onClick={handleExport} className="ops-btn px-2 py-0.5 text-[9px]">导出 ICS</button>
         </div>
       </div>
 
       {/* Conflict summary */}
       {conflicts.length > 0 && (
         <div className="mb-2 p-1.5 bg-accent-red/5 border border-accent-red/20 rounded text-[9px]">
-          {conflicts.filter(c => c.severity === 'error').map(c => <p key={c.message} className="text-accent-red">⚠ {c.message} — {c.suggestion}</p>)}
+          {conflicts.filter(c => c.severity === 'error').map(c => <p key={c.message} className="text-accent-red">{c.message} — {c.suggestion}</p>)}
         </div>
       )}
 
@@ -182,7 +213,7 @@ export default function MaintenanceCalendar({
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-blue mr-1"/>工单</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-green mr-1"/>RUL计划</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-accent-purple mr-1"/>已排程</span>
-        <span><span title="天气风险">☀️/⛈️ 天气</span></span>
+        <span><span className="mr-1">☀️/⛈️</span>天气</span>
       </div>
 
       {/* ── Month View ── */}
@@ -195,16 +226,30 @@ export default function MaintenanceCalendar({
       {viewMode === 'day' && selectedDate && <DayView date={selectedDate} events={getEvents(selectedDate)} weather={getWeather(selectedDate)} turbines={turbines} />}
 
       {/* Hover tooltip */}
-      {tooltip && viewMode === 'month' && (
-        <div className="fixed z-[999] bg-bg-card border border-border-default rounded-lg shadow-xl p-2 min-w-[220px] max-w-[300px] pointer-events-none"
-          style={{ left: tooltip.x + 8, top: tooltip.y }}>
+      {tooltip && viewMode === 'month' && createPortal((
+        <div className="fixed z-[9999] premium-card rounded-2xl shadow-xl p-2 min-w-[220px] max-w-[300px] pointer-events-none"
+          style={tooltipStyle(tooltip.x, tooltip.y)}>
           <p className="text-[10px] font-medium mb-1 border-b pb-1">{tooltip.date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p>
-          {getEvents(tooltip.date).conflicts.map(c => <p key={c.message} className="text-[9px] text-accent-red">⚠ {c.message}</p>)}
-          {getEvents(tooltip.date).tasks.map(t => <p key={`t-${t.turbine_id}-${t.component}`} className="text-[9px] text-accent-purple">🔧 {t.time_slot} {t.turbine_name} {t.component} {t.action}</p>)}
-          {getEvents(tooltip.date).wos.map(w => <p key={`w-${w.id}`} className="text-[9px]">📋 WO-{String(w.id).padStart(4, '0')} {w.title}</p>)}
-          {getEvents(tooltip.date).ruls.filter(r => r.remaining_life_days < 90).map(r => <p key={`r-${r.turbine_id}-${r.component}`} className="text-[9px] text-accent-yellow">⏰ {r.turbine_name} {r.component} RUL{r.remaining_life_days.toFixed(0)}天</p>)}
+          {getWeather(tooltip.date) && (
+            <div className={`mb-1 rounded border px-2 py-1 text-[9px] ${weatherTextTone(getWeather(tooltip.date)!.score)}`}>
+              <span className="mr-1">{weatherEmoji(getWeather(tooltip.date)!)}</span>
+              天气窗口：{weatherLabel(getWeather(tooltip.date)!)} · {getWeather(tooltip.date)!.score}分
+              {getWeather(tooltip.date)!.flags.length > 0 && <span className="text-text-muted"> · {getWeather(tooltip.date)!.flags.join('、')}</span>}
+            </div>
+          )}
+          {getEvents(tooltip.date).conflicts.map(c => <p key={c.message} className="text-[9px] text-accent-red">{c.message}</p>)}
+          {getEvents(tooltip.date).tasks.map(t => <p key={`t-${t.turbine_id}-${t.component}`} className="text-[9px] text-accent-purple">{t.time_slot} {t.turbine_name} {t.component} {t.action}</p>)}
+          {getEvents(tooltip.date).wos.map(w => <p key={`w-${w.id}`} className="text-[9px]">WO-{String(w.id).padStart(4, '0')} {w.title}</p>)}
+          {getEvents(tooltip.date).ruls.filter(r => r.remaining_life_days < 90).map(r => <p key={`r-${r.turbine_id}-${r.component}`} className="text-[9px] text-accent-yellow">{r.turbine_name} {r.component} RUL{r.remaining_life_days.toFixed(0)}天</p>)}
+          {(() => {
+            const ev = getEvents(tooltip.date);
+            const w = getWeather(tooltip.date);
+            return !w && ev.conflicts.length + ev.tasks.length + ev.wos.length + ev.ruls.length === 0
+              ? <p className="text-[9px] text-text-muted">暂无排程信息</p>
+              : null;
+          })()}
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }
@@ -226,12 +271,25 @@ function MonthGrid({ cursor, today, selectedDate, getEvents, getWeather, dayCell
           const isToday = sameDay(d, today);
           return (
             <div key={i} className={dayCellClass(d, ev)}
-              onMouseEnter={e => { if (ev.wos.length + ev.ruls.length + ev.tasks.length > 0) { const r = (e.target as HTMLElement).getBoundingClientRect(); onHover({ x: r.right, y: r.top, date: d }); }}}
+              onMouseEnter={e => {
+                if (ev.wos.length + ev.ruls.length + ev.tasks.length + ev.conflicts.length > 0 || w) {
+                  onHover({ x: e.clientX, y: e.clientY, date: d });
+                }
+              }}
+              onMouseMove={e => {
+                if (ev.wos.length + ev.ruls.length + ev.tasks.length + ev.conflicts.length > 0 || w) {
+                  onHover({ x: e.clientX, y: e.clientY, date: d });
+                }
+              }}
               onMouseLeave={() => onHover(null)}
               onClick={() => onClick(d)}>
               <div className="flex items-center justify-between">
                 <span className={`text-[10px] ${isToday ? 'text-accent-blue font-bold' : 'text-text-secondary'}`}>{i + 1}</span>
-                {w && <span className="text-[8px]" title={`${w.score}分 ${w.flags.join(',')}`}>{weatherEmoji(w.score)}</span>}
+                {w && (
+                  <span className={`rounded border px-1 text-[10px] leading-4 ${weatherTextTone(w.score)}`} title={`${weatherLabel(w)} ${w.score}分 ${w.flags.join(',')}`}>
+                    {weatherEmoji(w)}
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-0.5 mt-0.5">
                 {ev.conflicts.filter((c: Conflict) => c.severity === 'error').length > 0 && <span className="w-2 h-2 rounded-sm bg-accent-red"/>}
@@ -272,7 +330,7 @@ function WeekGrid({ cursor, today, selectedDate, getEvents, getWeather, onSelect
             <div key={d.toISOString()} onClick={() => onSelect(d)} className={`bg-bg-secondary p-1 text-center cursor-pointer hover:bg-bg-hover ${isToday ? 'ring-1 ring-accent-blue' : ''} ${isSel ? 'ring-1 ring-accent-purple' : ''}`}>
               <p className="text-[10px] font-medium">{DAY_NAMES[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
               <p className={`text-[11px] ${isToday ? 'text-accent-blue font-bold' : ''}`}>{d.getDate()}</p>
-              {w && <span className="text-[8px]">{weatherEmoji(w.score)}</span>}
+              {w && <span className={`mx-auto mt-0.5 block rounded border px-1 text-[10px] leading-4 ${weatherTextTone(w.score)}`} title={`${weatherLabel(w)} ${w.score}分 ${w.flags.join(',')}`}>{weatherEmoji(w)}</span>}
             </div>
           );
         })}
@@ -308,12 +366,12 @@ function DayView({ date, events, weather, turbines }: {
     <div className="flex-1 overflow-auto">
       <div className="p-2 bg-bg-hover rounded mb-2 text-xs">
         <span className="font-medium">{date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</span>
-        {weather && <span className="ml-2 text-text-muted">{weatherEmoji(weather.score)} {weather.score}分 {weather.flags.length > 0 ? `· ${weather.flags.join(', ')}` : ''}</span>}
+        {weather && <span className="ml-2 text-text-muted">{weather.score}分 {weather.flags.length > 0 ? `· ${weather.flags.join(', ')}` : ''}</span>}
       </div>
       {/* Conflicts */}
       {events.conflicts.length > 0 && (
         <div className="mb-2 p-2 bg-accent-red/5 border border-accent-red/20 rounded text-[9px]">
-          {events.conflicts.map(c => <p key={c.message} className="text-accent-red">⚠ {c.message} — {c.suggestion}</p>)}
+          {events.conflicts.map(c => <p key={c.message} className="text-accent-red">{c.message} — {c.suggestion}</p>)}
         </div>
       )}
       {/* Timeline */}
@@ -338,7 +396,7 @@ function DayView({ date, events, weather, turbines }: {
                 ))}
                 {slotWos.map((w: any) => (
                   <div key={`wo-${w.id}`} className="px-2 py-1 bg-accent-blue/10 border border-accent-blue/20 rounded text-[9px]">
-                    📋 WO-{String(w.id).padStart(4, '0')} {w.title}
+                    WO-{String(w.id).padStart(4, '0')} {w.title}
                   </div>
                 ))}
               </div>

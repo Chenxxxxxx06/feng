@@ -5,6 +5,7 @@ See .env.example for required variables.
 """
 
 from pathlib import Path
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -68,6 +69,19 @@ class Settings(BaseSettings):
 
     # Notifications (optional)
     WEIXIN_WEBHOOK_URL: str = ""
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "t", "yes", "y", "on", "debug"}:
+                return True
+            if normalized in {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}:
+                return False
+        return value
 
     class Config:
         env_file = (ROOT_DIR / ".env", BACKEND_DIR / ".env")

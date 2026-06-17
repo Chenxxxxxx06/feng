@@ -1,6 +1,20 @@
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
+
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def validate_email_format(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return value
+    cleaned = value.strip()
+    if not cleaned or not EMAIL_PATTERN.fullmatch(cleaned):
+        raise ValueError("Invalid email format")
+    return cleaned
 
 
 # --- Auth ---
@@ -9,6 +23,11 @@ class UserRegister(BaseModel):
     email: str
     password: str = Field(min_length=6)
     role: str = "viewer"
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return validate_email_format(value) or value
 
 class UserLogin(BaseModel):
     username: str
@@ -351,6 +370,11 @@ class ThresholdConfigRequest(BaseModel):
     email_address: Optional[str] = None
     wechat_enabled: bool = False
 
+    @field_validator("email_address")
+    @classmethod
+    def validate_email_address(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_format(value) if value else None
+
 class ThresholdConfigResponse(BaseModel):
     id: int
     hi_threshold: float
@@ -503,11 +527,21 @@ class PersonnelCreate(BaseModel):
     skills: list[str] = Field(default_factory=list)
     region: str = Field(default="陕北", max_length=32)
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return validate_email_format(value) or value
+
 class PersonnelUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=64)
     email: Optional[str] = Field(default=None, min_length=3, max_length=128)
     skills: Optional[list[str]] = None
     region: Optional[str] = Field(default=None, max_length=32)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_format(value) if value else None
 
 class PersonnelResponse(BaseModel):
     id: int
