@@ -136,16 +136,71 @@ def _workorder_plain_body(
                 )
         lines.append("")
 
-    # fault knowledge section
+    # fault knowledge / encyclopedia section
     if knowledge:
-        lines.append("【知识库参考】")
-        if knowledge.get("root_causes"):
-            lines.append(f"  可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:3]))}")
-        if knowledge.get("solutions"):
-            lines.append(f"  建议方案: {'; '.join(_fmt_items(knowledge['solutions'][:3]))}")
-        if knowledge.get("spare_parts"):
-            lines.append(f"  相关备件: {', '.join(_fmt_items(knowledge['spare_parts'][:5]))}")
+        sev_label = {"low": "低", "medium": "中", "high": "高", "critical": "紧急"}.get(
+            knowledge.get("severity", ""), knowledge.get("severity", "")
+        )
+        lines.append("【📚 故障百科 · 知识库参考】")
+        lines.append(f"  故障类型: {knowledge.get('fault_type', '')}  |  分类: {knowledge.get('category', '')}  |  严重度: {sev_label}")
         lines.append("")
+        # Symptoms
+        symptoms = knowledge.get("symptoms") or []
+        if symptoms:
+            lines.append("  ▸ 故障症状/指标:")
+            for s in symptoms[:5]:
+                if isinstance(s, dict):
+                    lines.append(f"    · {s.get('indicator', '')} 阈值: {s.get('threshold', '')} {s.get('unit', '')}")
+                else:
+                    lines.append(f"    · {_fmt_item(s)}")
+            lines.append("")
+        # Root causes
+        if knowledge.get("root_causes"):
+            lines.append(f"  ▸ 可能根因: {'; '.join(_fmt_items(knowledge['root_causes'][:5]))}")
+            lines.append("")
+        # Solutions
+        if knowledge.get("solutions"):
+            lines.append("  ▸ 建议方案:")
+            for sol in knowledge["solutions"][:4]:
+                if isinstance(sol, dict):
+                    diff = sol.get("difficulty", "")
+                    diff_label = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(diff, diff)
+                    lines.append(f"    · {sol.get('action', '')} (难度: {diff_label}, 停机: {sol.get('downtime_hours', '?')}h)")
+                else:
+                    lines.append(f"    · {_fmt_item(sol)}")
+            lines.append("")
+        # Spare parts
+        if knowledge.get("spare_parts"):
+            lines.append("  ▸ 相关备件:")
+            for sp in knowledge["spare_parts"][:5]:
+                if isinstance(sp, dict):
+                    cost = f"约¥{sp.get('est_cost', 0):,.0f}" if sp.get('est_cost') else ""
+                    lines.append(f"    · {sp.get('name', '')} x{sp.get('quantity', 1)} {cost}")
+                else:
+                    lines.append(f"    · {_fmt_item(sp)}")
+            lines.append("")
+        # Related faults
+        related = knowledge.get("related_faults") or []
+        if related:
+            lines.append("  ▸ 关联故障:")
+            for rf in related[:3]:
+                if isinstance(rf, dict):
+                    prob = rf.get("probability", 0)
+                    lines.append(f"    · {rf.get('name', '')} (伴生概率: {int(prob * 100)}%)")
+                else:
+                    lines.append(f"    · {_fmt_item(rf)}")
+            lines.append("")
+        # Historical cases
+        cases = knowledge.get("cases") or []
+        if cases:
+            lines.append("  ▸ 历史案例:")
+            for c in cases[:2]:
+                if isinstance(c, dict):
+                    lines.append(f"    · {c.get('turbine', '')} ({c.get('date', '')})")
+                    lines.append(f"      处置: {c.get('resolution', '')}  |  费用: ¥{c.get('total_cost', 0):,}  |  停机: {c.get('downtime_days', 0)}天")
+                else:
+                    lines.append(f"    · {_fmt_item(c)}")
+            lines.append("")
 
     lines += [
         "【操作指引】",
@@ -253,18 +308,77 @@ def _workorder_html_body(
             html += "</table>"
         html += "\n  </td></tr>"
 
-    # fault knowledge section
+    # fault knowledge / encyclopedia section
     if knowledge:
-        html += """
+        sev_label = {"low": "低", "medium": "中", "high": "高", "critical": "紧急"}.get(
+            knowledge.get("severity", ""), knowledge.get("severity", "")
+        )
+        _SEV_COLOR = {"low": "#2da44e", "medium": "#d29922", "high": "#cf222e", "critical": "#cf222e"}
+        sev_color = _SEV_COLOR.get(knowledge.get("severity", ""), "#6e7681")
+        html += f"""
   <tr><td style="padding:20px 24px;border-bottom:1px solid #e1e4e8;">
-    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 知识库参考</h3>
+    <h3 style="margin:0 0 12px;font-size:15px;color:#24292f;">📚 故障百科 · 知识库参考</h3>
+    <p style="margin:0 0 12px;font-size:13px;color:#57606a;">
+      {knowledge.get('icon', '')} <b>{knowledge.get('fault_type', '')}</b>
+      &nbsp;|&nbsp; 分类: {knowledge.get('category', '')}
+      &nbsp;|&nbsp; 严重度: <span style="color:{sev_color};font-weight:600;">{sev_label}</span>
+    </p>
     <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;color:#57606a;">"""
+        # Symptoms
+        symptoms = knowledge.get("symptoms") or []
+        if symptoms:
+            sym_text = "<br>".join(
+                f"· {s.get('indicator','')} 阈值: {s.get('threshold','')} {s.get('unit','')}"
+                if isinstance(s, dict) else f"· {_fmt_item(s)}"
+                for s in symptoms[:5]
+            )
+            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;vertical-align:top;">故障症状</td><td>{sym_text}</td></tr>"""
         if knowledge.get("root_causes"):
-            html += f"""<tr><td width="80" style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:3]))}</td></tr>"""
+            html += f"""<tr><td style="color:#24292f;font-weight:600;">可能根因</td><td>{'; '.join(_fmt_items(knowledge['root_causes'][:5]))}</td></tr>"""
         if knowledge.get("solutions"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;">建议方案</td><td>{'; '.join(_fmt_items(knowledge['solutions'][:3]))}</td></tr>"""
+            sol_lines = []
+            for sol in knowledge["solutions"][:4]:
+                if isinstance(sol, dict):
+                    diff = sol.get("difficulty", "")
+                    diff_label = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(diff, diff)
+                    sol_lines.append(f"· {sol.get('action','')} (难度:{diff_label}, 停机:{sol.get('downtime_hours','?')}h)")
+                else:
+                    sol_lines.append(f"· {_fmt_item(sol)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">建议方案</td><td>{"<br>".join(sol_lines)}</td></tr>"""
         if knowledge.get("spare_parts"):
-            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{', '.join(_fmt_items(knowledge['spare_parts'][:5]))}</td></tr>"""
+            sp_lines = []
+            for sp in knowledge["spare_parts"][:5]:
+                if isinstance(sp, dict):
+                    cost = f"约¥{sp.get('est_cost', 0):,.0f}" if sp.get('est_cost') else ""
+                    sp_lines.append(f"· {sp.get('name','')} x{sp.get('quantity',1)} {cost}")
+                else:
+                    sp_lines.append(f"· {_fmt_item(sp)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">相关备件</td><td>{"<br>".join(sp_lines)}</td></tr>"""
+        # Related faults
+        related = knowledge.get("related_faults") or []
+        if related:
+            rel_lines = []
+            for rf in related[:3]:
+                if isinstance(rf, dict):
+                    prob = rf.get("probability", 0)
+                    rel_lines.append(f"· {rf.get('name','')} (伴生概率: {int(prob*100)}%)")
+                else:
+                    rel_lines.append(f"· {_fmt_item(rf)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">关联故障</td><td>{"<br>".join(rel_lines)}</td></tr>"""
+        # Historical cases
+        cases = knowledge.get("cases") or []
+        if cases:
+            case_lines = []
+            for c in cases[:2]:
+                if isinstance(c, dict):
+                    case_lines.append(
+                        f"· {c.get('turbine','')} ({c.get('date','')}) — "
+                        f"处置: {c.get('resolution','')} | "
+                        f"费用: ¥{c.get('total_cost',0):,} | 停机: {c.get('downtime_days',0)}天"
+                    )
+                else:
+                    case_lines.append(f"· {_fmt_item(c)}")
+            html += f"""<tr><td style="color:#24292f;font-weight:600;vertical-align:top;">历史案例</td><td>{"<br>".join(case_lines)}</td></tr>"""
         html += """
     </table>
   </td></tr>"""
@@ -472,11 +586,16 @@ async def _fetch_fault_knowledge(wo: WorkOrder, db: AsyncSession) -> dict | None
 
 def _knowledge_node_to_dict(node: FaultKnowledgeNode) -> dict:
     return {
+        "fault_type": node.fault_type,
+        "category": node.category,
+        "severity": node.severity,
+        "icon": node.icon or "",
+        "symptoms": node.symptoms or [],
         "root_causes": node.root_causes or [],
         "solutions": node.solutions or [],
         "spare_parts": node.spare_parts or [],
-        "category": node.category,
-        "severity": node.severity,
+        "related_faults": node.related_faults or [],
+        "cases": node.cases or [],
     }
 
 
