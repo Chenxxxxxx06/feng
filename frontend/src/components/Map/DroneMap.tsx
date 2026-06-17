@@ -85,11 +85,9 @@ export default function DroneMap({
       zoomControl: false, attributionControl: false,
       fadeAnimation: true, zoomAnimation: true, markerZoomAnimation: true,
     });
-    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
-      minZoom: MIN_ZOOM, maxZoom: Math.min(MAX_ZOOM, 18), maxNativeZoom: 18,
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxNativeZoom: 20,
       noWrap: true, keepBuffer: 16, updateWhenIdle: false, updateWhenZooming: true,
-      subdomains: '1234',
-      attribution: '&copy; 高德地图',
     }).addTo(map);
     staticLayerRef.current = L.layerGroup().addTo(map);
     droneLayerRef.current = L.layerGroup().addTo(map);
