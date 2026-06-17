@@ -72,7 +72,7 @@ export default function AppLayout() {
   return (
     <div className="flex h-screen w-screen" style={{ background: '#071A35' }}>
       <aside
-        className="w-[240px] flex-shrink-0 flex flex-col border-r"
+        className="w-[200px] flex-shrink-0 flex flex-col border-r"
         style={{ background: 'linear-gradient(180deg, #0A1F3F 0%, #071A35 100%)', borderColor: 'rgba(59,130,246,0.10)' }}
       >
         <div className="h-16 flex items-center gap-3 px-5 border-b" style={{ borderColor: 'rgba(59,130,246,0.08)' }}>
