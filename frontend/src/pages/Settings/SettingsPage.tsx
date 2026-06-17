@@ -473,14 +473,19 @@ export default function SettingsPage() {
       setProviderMessage('请填写供应商、API地址和默认模型');
       return;
     }
+    const customModel = providerForm.default_model.trim();
+    let modelOptions = providerForm.model_options.map((item) => item.trim()).filter(Boolean);
+    if (customModel && !modelOptions.includes(customModel)) {
+      modelOptions = [...modelOptions, customModel];
+    }
     const payload = {
       provider: providerForm.provider.trim().toLowerCase(),
       display_name: providerForm.display_name.trim() || providerForm.provider.trim(),
       api_key: providerForm.api_key.trim() || undefined,
       base_url: providerForm.base_url.trim(),
       api_style: providerForm.api_style || 'openai',
-      default_model: providerForm.default_model.trim(),
-      model_options: providerForm.model_options.map((item) => item.trim()).filter(Boolean),
+      default_model: customModel,
+      model_options: modelOptions,
       enabled: providerForm.enabled,
     };
     try {
@@ -1154,13 +1159,21 @@ function AISettingsSection({
               </label>
               <label className="block">
                 <span className="text-xs text-text-muted">默认模型</span>
-                <select
+                <input
+                  list="default-model-options"
                   value={form.default_model}
                   onChange={(e) => onFormChange({ ...form, default_model: e.target.value })}
+                  placeholder="输入模型名或从列表选择"
                   className="industrial-input mt-1 w-full"
-                >
-                  {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
+                />
+                <datalist id="default-model-options">
+                  {modelOptions.map((option) => <option key={option} value={option} />)}
+                </datalist>
+                {!modelOptions.includes(form.default_model) && form.default_model.trim() && (
+                  <p className="mt-1 text-[10px] text-accent-yellow">
+                    该模型不在当前供应商常用模型中，保存后自动加入列表。
+                  </p>
+                )}
               </label>
               <label className="block lg:col-span-2">
                 <span className="text-xs text-text-muted">API地址</span>
