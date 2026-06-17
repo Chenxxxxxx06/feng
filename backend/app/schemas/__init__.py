@@ -452,7 +452,8 @@ class AIProviderTestRequest(BaseModel):
 # --- AI ---
 class AISummaryRequest(BaseModel):
     page_type: str = Field(min_length=1, max_length=64)
-    page_data: dict
+    page_data: dict = Field(default_factory=dict)
+    turbine_id: Optional[int] = Field(default=None, gt=0)
     provider_config_id: Optional[int] = Field(default=None, gt=0)
     model: Optional[str] = Field(default=None, max_length=128)
 

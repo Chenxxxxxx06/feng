@@ -309,6 +309,7 @@ export default function TurbineDetailPage() {
   const [scada, setScada] = useState<SCADAPoint[]>([]);
   const [scadaMissing, setScadaMissing] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
+  const [aiSummaryError, setAiSummaryError] = useState("");
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [wind, setWind] = useState<WeatherReplayPoint | null>(null);
   const [windMissing, setWindMissing] = useState(false);
@@ -367,9 +368,32 @@ export default function TurbineDetailPage() {
         setScadaMissing(true);
       });
     setAiSummaryLoading(true);
-    api.post('/ai/summary', { turbine_id: Number(id), page_type: 'turbine_detail' })
-      .then(({ data }) => { setAiSummary(data?.summary || data?.reply || ''); })
-      .catch(() => { setAiSummary(''); })
+    setAiSummaryError('');
+    api.post('/ai/summary', { turbine_id: Number(id), page_type: 'turbine_detail' }, { timeout: 60000 })
+      .then(({ data }) => {
+        if (data?.status === 'error') {
+          setAiSummaryError(data?.error_message || 'AI分析失败');
+          setAiSummary('');
+        } else {
+          const parts: string[] = [];
+          if (data?.conclusions?.length) {
+            parts.push('【关键结论】', ...data.conclusions.map((c: string) => `  • ${c}`));
+          }
+          if (data?.suggestions?.length) {
+            parts.push('', '【建议措施】', ...data.suggestions.map((s: string) => `  • ${s}`));
+          }
+          setAiSummary(parts.length > 0 ? parts.join('\n') : '');
+        }
+      })
+      .catch((err: any) => {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          setAiSummaryError('AI服务鉴权失败，请在系统设置中配置API KEY。');
+        } else {
+          setAiSummaryError(err?.response?.data?.detail || 'AI总结请求失败，请检查后端服务。');
+        }
+        setAiSummary('');
+      })
       .finally(() => setAiSummaryLoading(false));
     api.get(`/diagnosis/faults?turbine_id=${id}`).then(({ data }) => setFaults(data));
     api.get(`/diagnosis/vibration?turbine_id=${id}&component=blade`)
@@ -1155,12 +1179,20 @@ export default function TurbineDetailPage() {
             )}
           </div>
           {aiSummary ? (
-            <div className="text-xs text-text-secondary leading-relaxed space-y-2 copilot-markdown max-h-[400px] overflow-y-auto whitespace-pre-wrap">
+            <div className="text-xs text-text-secondary leading-relaxed space-y-2 max-h-[400px] overflow-y-auto whitespace-pre-wrap">
               {aiSummary}
+            </div>
+          ) : aiSummaryError ? (
+            <div className="rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-3 text-xs text-accent-red">
+              {aiSummaryError}
+            </div>
+          ) : aiSummaryLoading ? (
+            <div className="h-[160px] flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-4 text-xs text-text-muted">
+              AI 正在分析该风机数据...
             </div>
           ) : (
             <div className="h-[160px] flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-4 text-xs text-text-muted">
-              {aiSummaryLoading ? 'AI 正在分析该风机数据...' : 'AI 诊断总结加载中，请稍候'}
+              暂无分析结果，请检查 AI 配置或稍后重试。
             </div>
           )}
         </div>
