@@ -156,10 +156,16 @@ export default function DroneSchedulerPage() {
   }, [turbines, cruiseAltitude, noFlyZones]);
 
   useEffect(() => {
-    if (activeFarm) planPath(activeFarm, mode, config);
-    else { setHasPlan(false); setDrones([]); setIsRunning(false); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFarm]);
+    if (!activeFarm) { setHasPlan(false); setDrones([]); setIsRunning(false); return; }
+    if (isRunning) {
+      // ── 运行中不重置仿真，只在线更新速度和续航 ──
+      setDrones((prev) => prev.map((d) => ({ ...d, speed: config.speed, range: config.range, _altitude: cruiseAltitude })));
+      useDrone3DStore.getState().setCruiseAltitude(cruiseAltitude);
+      useDrone3DStore.getState().setNoFlyZones(noFlyZones);
+      return;
+    }
+    planPath(activeFarm, mode, config);
+  }, [activeFarm, mode, config, cruiseAltitude, noFlyZones]);
 
   const handleReplan = () => { if (activeFarm) planPath(activeFarm, mode, config); };
 

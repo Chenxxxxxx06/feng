@@ -8,6 +8,7 @@ import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { gpsToScene } from '../../../utils/coordinateTransform';
+import { useDrone3DStore } from '../../../services/drone3dStore';
 import type { Drone } from '../../../types';
 
 interface Props {
@@ -193,6 +194,7 @@ export default function DroneInstance({ drone, showLabel = true }: Props) {
   const groupRef = useRef<THREE.Group>(null);
   const propRefs = useRef<THREE.Object3D[]>([]);
   const ledRefs = useRef<{ front?: THREE.Mesh; rear?: THREE.Mesh }>({});
+  const speedMultiplier = useDrone3DStore((s) => s.speedMultiplier);
 
   const model = useMemo(() => createDetailedDrone(drone.color), [drone.color]);
 
@@ -247,8 +249,9 @@ export default function DroneInstance({ drone, showLabel = true }: Props) {
     }
 
     // ── 旋翼旋转 ──
-    const rpm = drone.status === 'flying' ? 600 + Math.random() * 50 :
+    const baseRPM = drone.status === 'flying' ? 600 :
                 drone.status === 'returning' ? 500 : 0;
+    const rpm = baseRPM * Math.max(speedMultiplier, 0.5);
     propRefs.current.forEach((p, i) => {
       // 相邻旋翼反向旋转
       const dir = i % 2 === 0 ? 1 : -1;
