@@ -1,7 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../services/authStore';
-import coverImage from '../../../../../fengmian.png';
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -31,7 +30,7 @@ export default function LoginPage() {
     <div
       className="h-screen flex items-center justify-center bg-bg-primary"
       style={{
-        backgroundImage: `linear-gradient(120deg, rgba(7, 26, 53, 0.82), rgba(7, 26, 53, 0.52)), url(${coverImage})`,
+        backgroundImage: `linear-gradient(120deg, rgba(7, 26, 53, 0.78), rgba(7, 26, 53, 0.45)), url(/login-bg.jpg)`,
         backgroundPosition: 'center',
         backgroundSize: 'cover',
       }}
