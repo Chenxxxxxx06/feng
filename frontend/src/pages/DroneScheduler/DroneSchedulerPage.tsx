@@ -7,6 +7,7 @@ import type { Turbine, Drone, DroneFleetConfig } from '../../types';
 import type { TspResult, VrpResult } from '../../utils/dronePathPlanner';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 import WindFarm3DView from '../../components/Map/three/WindFarm3DView';
+import ErrorBoundary from '../../components/Common/ErrorBoundary';
 import { useDrone3DStore } from '../../services/drone3dStore';
 
 type Mode = 'tsp' | 'vrp';
@@ -266,21 +267,32 @@ export default function DroneSchedulerPage() {
       <div className="flex-1 mx-6 mb-3 flex gap-2 min-h-0">
         {/* 左: 2D Leaflet 地图 */}
         <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle relative" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
-          <DroneMap
-            turbines={turbines}
-            drones={drones}
-            activeFarm={activeFarm}
-            onFarmSelect={setActiveFarm}
-            onTurbineClick={handleTurbineClick}
-            showPaths={hasPlan}
-            manualMode={assignmentMode === 'manual'}
-            selectedDroneId={selectedDroneId}
-          />
+          <div style={{ position: 'absolute', inset: 0 }}>
+            <DroneMap
+              turbines={turbines}
+              drones={drones}
+              activeFarm={activeFarm}
+              onFarmSelect={setActiveFarm}
+              onTurbineClick={handleTurbineClick}
+              showPaths={hasPlan}
+              manualMode={assignmentMode === 'manual'}
+              selectedDroneId={selectedDroneId}
+            />
+          </div>
         </div>
 
         {/* 中: 3D Three.js 视图 */}
-        <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
-          <WindFarm3DView />
+        <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle relative" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
+          <ErrorBoundary fallback={
+            <div className="flex items-center justify-center h-full text-text-muted" style={{ background: '#071A35' }}>
+              <div className="text-center">
+                <p className="text-sm">3D 视图加载失败</p>
+                <p className="text-xs mt-1">请检查浏览器是否支持 WebGL</p>
+              </div>
+            </div>
+          }>
+            <WindFarm3DView />
+          </ErrorBoundary>
         </div>
 
         {/* 右: 无人机调度控制台 (始终可见) */}

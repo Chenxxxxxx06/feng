@@ -1,5 +1,6 @@
 /**
  * 3D 风场视图入口 — react-three-fiber <Canvas> + 覆盖层
+ * absolute inset-0 确保Canvas在flex子元素中正确撑满
  */
 
 import { Suspense } from 'react';
@@ -14,11 +15,15 @@ export default function WindFarm3DView() {
   const viewMode = useDrone3DStore((s) => s.viewMode);
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#071A35' }}>
+    <div style={{ position: 'absolute', inset: 0, background: '#071A35' }}>
       <Canvas
-        camera={{ position: [0, 400, 300], fov: 50, near: 1, far: 2000 }}
+        style={{ position: 'absolute', inset: 0 }}
+        camera={{ position: [0, 400, 300], fov: 50, near: 1, far: 50000 }}
         shadows
-        gl={{ antialias: true }}
+        gl={{
+          antialias: true,
+          powerPreference: 'high-performance',
+        }}
         onCreated={({ gl }) => gl.setClearColor('#7ec8e3')}
       >
         <Suspense fallback={null}>
@@ -43,7 +48,7 @@ function Overlay() {
   return (
     <div style={{
       position: 'absolute', top: 12, left: 12, zIndex: 10,
-      display: 'flex', flexDirection: 'column', gap: 8,
+      display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
       {/* 图例 */}
       <div style={{
@@ -51,6 +56,7 @@ function Overlay() {
         border: '1px solid rgba(59,130,246,0.2)',
         borderRadius: '8px', padding: '8px 12px',
         fontSize: '10px', color: '#94A3B8', fontFamily: 'sans-serif',
+        pointerEvents: 'auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#10B981' }} /> 正常
@@ -66,6 +72,7 @@ function Overlay() {
           border: '1px solid rgba(59,130,246,0.4)',
           borderRadius: '8px', padding: '8px 14px',
           fontSize: '12px', color: '#F1F5F9', fontFamily: 'sans-serif',
+          pointerEvents: 'auto',
         }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>🔍 {focused.name}</div>
           <div style={{ fontSize: '10px', color: '#94A3B8' }}>
