@@ -50,9 +50,9 @@ export function buildFleet(
       speed: config.speed,
       color: DRONE_COLORS[0],
       assignedTurbines: result.path.map((p) => p.id ?? 0).filter((id) => id > 0),
-      completedTurbines: result.path[0]?.id ? [result.path[0].id] : [],
+      completedTurbines: [],
       currentPosition: result.path[0] ? { lat: result.path[0].lat, lng: result.path[0].lng } : null,
-      path: result.path.map((p) => ({ lat: p.lat, lng: p.lng })),
+      path: result.path.map((p) => ({ lat: p.lat, lng: p.lng, turbineId: p.id, kind: 'inspect' as const })),
       progress: 0,
     };
     return [drone];
@@ -62,6 +62,7 @@ export function buildFleet(
   const vrp = result as VrpResult;
   return vrp.assignments.map((a) => {
     const firstPoint = a.path.path[0];
+    const orderedTurbines = a.path.path.map((p) => p.id ?? 0).filter((id) => id > 0);
     return {
       id: a.droneIndex + 1,
       name: `Drone-${a.droneIndex + 1}`,
@@ -70,10 +71,10 @@ export function buildFleet(
       range: config.range,
       speed: config.speed,
       color: a.color,
-      assignedTurbines: a.turbines.map((p) => p.id ?? 0).filter((id) => id > 0),
-      completedTurbines: firstPoint?.id ? [firstPoint.id] : [],
+      assignedTurbines: orderedTurbines,
+      completedTurbines: [],
       currentPosition: firstPoint ? { lat: firstPoint.lat, lng: firstPoint.lng } : null,
-      path: a.path.path.map((p) => ({ lat: p.lat, lng: p.lng })),
+      path: a.path.path.map((p) => ({ lat: p.lat, lng: p.lng, turbineId: p.id, kind: 'inspect' as const })),
       progress: 0,
     };
   });
@@ -149,7 +150,7 @@ export function tickSimulation(
     const newSeg = Math.floor(newProgress);
     const newlyCompleted: number[] = [];
     for (let s = oldSeg + 1; s <= newSeg && s < drone.path.length; s += 1) {
-      const turbineId = drone.assignedTurbines[s];
+      const turbineId = drone.path[s]?.turbineId;
       if (turbineId && !drone.completedTurbines.includes(turbineId)) {
         newlyCompleted.push(turbineId);
       }
