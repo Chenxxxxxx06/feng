@@ -308,6 +308,8 @@ export default function TurbineDetailPage() {
   const [turbine, setTurbine] = useState<TurbineDetail | null>(null);
   const [scada, setScada] = useState<SCADAPoint[]>([]);
   const [scadaMissing, setScadaMissing] = useState(false);
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [wind, setWind] = useState<WeatherReplayPoint | null>(null);
   const [windMissing, setWindMissing] = useState(false);
   const [faults, setFaults] = useState<Fault[]>([]);
@@ -364,6 +366,11 @@ export default function TurbineDetailPage() {
         setScada([]);
         setScadaMissing(true);
       });
+    setAiSummaryLoading(true);
+    api.post('/ai/summary', { turbine_id: Number(id), page_type: 'turbine_detail' })
+      .then(({ data }) => { setAiSummary(data?.summary || data?.reply || ''); })
+      .catch(() => { setAiSummary(''); })
+      .finally(() => setAiSummaryLoading(false));
     api.get(`/diagnosis/faults?turbine_id=${id}`).then(({ data }) => setFaults(data));
     api.get(`/diagnosis/vibration?turbine_id=${id}&component=blade`)
       .then(({ data }) => {
@@ -1138,6 +1145,24 @@ export default function TurbineDetailPage() {
               </button>
             </div>
           </div>
+        </div>
+
+        <div className="premium-card rounded-2xl p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium">🤖 AI 智能诊断总结</h3>
+            {aiSummaryLoading && (
+              <span className="text-[10px] text-accent-blue animate-pulse">分析中...</span>
+            )}
+          </div>
+          {aiSummary ? (
+            <div className="text-xs text-text-secondary leading-relaxed space-y-2 copilot-markdown max-h-[400px] overflow-y-auto whitespace-pre-wrap">
+              {aiSummary}
+            </div>
+          ) : (
+            <div className="h-[160px] flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-4 text-xs text-text-muted">
+              {aiSummaryLoading ? 'AI 正在分析该风机数据...' : 'AI 诊断总结加载中，请稍候'}
+            </div>
+          )}
         </div>
 
         <div className="premium-card rounded-2xl p-4">
