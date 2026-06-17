@@ -206,7 +206,7 @@ export default function DashboardPage() {
   }, [riskFirst, summary.turbines]);
   const stats = useMemo(() => scopedStats(scopedTurbines), [scopedTurbines]);
 
-  const fmtMtbf = (h: number | null) => { if (h == null) return '--'; if (h >= 8760) return `${(h / 8760).toFixed(1)} 年`; if (h >= 720) return `${(h / 720).toFixed(0)} 月`; if (h >= 24) return `${(h / 24).toFixed(0)} 天`; return h.toFixed(0); };
+  const fmtMtbf = (h: number | null) => { if (h == null) return '--'; if (h >= 24) return `${(h / 24).toFixed(0)} 天`; return `${h.toFixed(0)} 小时`; };
 
   const windSpeedData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 4 + Math.sin(i / 4) * 3 + Math.random() * 4 })), []);
   const powerData = useMemo(() => Array.from({ length: 24 }, (_, i) => ({ time: `${i}:00`, value: 800 + Math.sin(i / 4) * 600 + Math.random() * 400 })), []);

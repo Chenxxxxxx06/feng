@@ -1,3 +1,0 @@
-﻿dataset_id,source_root,image_files,label_files,paired_image_label_count,unpaired_images,unpaired_labels,class_names,class_id_counts,class_name_counts,bbox_count,bbox_area_ratio_mean,bbox_area_ratio_min,bbox_area_ratio_max,invalid_label_lines,sample_dimensions,sample_open_errors
-yolo_annotated_wind_turbine_surface_damage,C:\Users\ASUS\Desktop\fengdiao-pHM\backend\data\curated_datasets\raw\blade_images\yolo_annotated_wind_turbine_surface_damage\extracted,13470,2995,2995,10475,0,"{'0': 'dirt', '1': 'damage'}","{'0': 581, '1': 8770}","{'dirt': 581, 'damage': 8770}",9351,0.0253578,0.0,0.91221095,0,{'586x371': 200},
-dtu_drone_inspection,C:\Users\ASUS\Desktop\fengdiao-pHM\backend\data\curated_datasets\raw\blade_images\dtu_drone_inspection,701,0,,,,,,,,,,,,{'5280x2970': 200},0
