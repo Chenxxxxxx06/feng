@@ -1,4 +1,5 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAuthStore } from '../../services/authStore';
 
 const navItems = [
@@ -55,15 +56,54 @@ const navItems = [
   },
 ];
 
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 340;
+const SIDEBAR_DEFAULT = 220;
+const SIDEBAR_WIDTH_KEY = 'app.sidebar.width';
+
+const clampSidebarWidth = (value: number) => Math.max(SIDEBAR_MIN, Math.min(value, SIDEBAR_MAX));
+
 export default function AppLayout() {
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : SIDEBAR_DEFAULT;
+  });
+  const resizing = useRef(false);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!resizing.current) return;
+      const next = clampSidebarWidth(event.clientX);
+      setSidebarWidth(next);
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
+    };
+    const handleUp = () => {
+      resizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  const startResize = (event: ReactMouseEvent) => {
+    resizing.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    event.preventDefault();
+  };
 
   return (
     <div className="flex h-screen w-screen" style={{ background: '#071A35' }}>
       <aside
-        className="w-[240px] flex-shrink-0 flex flex-col border-r"
-        style={{ background: 'linear-gradient(180deg, #0A1F3F 0%, #071A35 100%)', borderColor: 'rgba(59,130,246,0.10)' }}
+        className="relative flex flex-shrink-0 flex-col border-r"
+        style={{ width: sidebarWidth, background: 'linear-gradient(180deg, #0A1F3F 0%, #071A35 100%)', borderColor: 'rgba(59,130,246,0.10)' }}
       >
         <div className="h-16 flex items-center gap-3 px-5 border-b" style={{ borderColor: 'rgba(59,130,246,0.08)' }}>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -120,9 +160,18 @@ export default function AppLayout() {
             </div>
           </div>
         </div>
+        <button
+          type="button"
+          aria-label="调整侧边栏宽度"
+          title="拖动调整侧边栏宽度"
+          onMouseDown={startResize}
+          className="absolute right-[-4px] top-0 z-20 h-full w-2 cursor-col-resize bg-transparent transition-colors hover:bg-accent-blue/30"
+        >
+          <span className="absolute right-[3px] top-1/2 h-10 w-px -translate-y-1/2 rounded bg-border-active opacity-60" />
+        </button>
       </aside>
 
-      <main className="flex-1 overflow-hidden" style={{ background: '#071A35' }}>
+      <main className="min-w-0 flex-1 overflow-hidden" style={{ background: '#071A35' }}>
         <Outlet />
       </main>
     </div>
