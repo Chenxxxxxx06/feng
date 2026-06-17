@@ -6,6 +6,8 @@ import { buildFleet, tickSimulation, createDefaultConfig } from '../../utils/dro
 import type { Turbine, Drone, DroneFleetConfig } from '../../types';
 import type { TspResult, VrpResult } from '../../utils/dronePathPlanner';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import WindFarm3DView from '../../components/Map/three/WindFarm3DView';
+import { useDrone3DStore } from '../../services/drone3dStore';
 
 type Mode = 'tsp' | 'vrp';
 
@@ -56,12 +58,16 @@ export default function DroneSchedulerPage() {
   const lastTickRef = useRef<number>(0);
 
   // ── Fetch turbines ──
+  const storeSetTurbines = useDrone3DStore((s) => s.setTurbines);
   useEffect(() => {
     api.get<{ turbines: Turbine[]; total: number; healthy: number; warning: number; faulty: number }>('/turbines/')
-      .then(({ data }) => { setTurbines(data.turbines); })
+      .then(({ data }) => {
+        setTurbines(data.turbines);
+        storeSetTurbines(data.turbines);
+      })
       .catch(() => setMessage('风机数据加载失败'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [storeSetTurbines]);
 
   // ── Plan path ──
   const planPath = useCallback((farm: string, m: Mode, cfg: DroneFleetConfig) => {
@@ -78,6 +84,11 @@ export default function DroneSchedulerPage() {
     const fleet = buildFleet(result, cfg, farm);
     setDrones(fleet);
     setHasPlan(true);
+    // 🆕 同步 3D store
+    const store = useDrone3DStore.getState();
+    store.setDrones(fleet);
+    store.setHasPlan(true);
+    store.setActiveFarm(farm);
     const dist = 'assignments' in result ? result.totalDistance : result.totalDistance;
     setMessage(`${m === 'tsp' ? '单机' : `${cfg.count}机分区`} · ${dist.toLocaleString()}m · ${points.length}台风机`);
   }, [turbines]);
@@ -156,6 +167,7 @@ export default function DroneSchedulerPage() {
       const { fleet, allComplete, completedThisTick } = tickSimulation(prev, clampedDt, speedMultiplier);
       if (completedThisTick > 0) setCompletedCount((c) => c + completedThisTick);
       if (allComplete) { setIsRunning(false); setMessage('全部风机已拍摄完成！'); }
+      useDrone3DStore.getState().setDrones(fleet);
       return fleet;
     });
     setElapsedTime((t) => t + clampedDt * speedMultiplier);
@@ -213,7 +225,11 @@ export default function DroneSchedulerPage() {
             <div className="relative">
               <select
                 value={activeFarm || ''}
-                onChange={(e) => setActiveFarm(e.target.value || null)}
+                onChange={(e) => {
+                  const farm = e.target.value || null;
+                  setActiveFarm(farm);
+                  useDrone3DStore.getState().setActiveFarm(farm);
+                }}
                 className="appearance-none text-[11px] text-accent-blue bg-accent-blue/10 border border-accent-blue/30 rounded-full px-3 py-1 pr-7 cursor-pointer hover:bg-accent-blue/15 transition-colors focus:outline-none focus:border-accent-blue/60"
               >
                 {farms.map((f) => (
@@ -246,20 +262,27 @@ export default function DroneSchedulerPage() {
         </div>
       </div>
 
-      {/* ── MAIN: Map + Slide Panel ── */}
-      <div className="flex-1 relative mx-6 mb-3 rounded-xl overflow-hidden border border-border-subtle" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
-        {/* Map */}
-        <div className="absolute inset-0 z-0">
-          <DroneMap
-            turbines={turbines}
-            drones={drones}
-            activeFarm={activeFarm}
-            onFarmSelect={setActiveFarm}
-            onTurbineClick={handleTurbineClick}
-            showPaths={hasPlan}
-            manualMode={assignmentMode === 'manual'}
-            selectedDroneId={selectedDroneId}
-          />
+      {/* ── MAIN: Split Layout (2D + 3D) + Slide Panel ── */}
+      <div className="flex-1 relative mx-6 mb-3 flex gap-2">
+        {/* 左侧: 2D Leaflet 地图 */}
+        <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle relative" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
+          <div className="absolute inset-0 z-0">
+            <DroneMap
+              turbines={turbines}
+              drones={drones}
+              activeFarm={activeFarm}
+              onFarmSelect={setActiveFarm}
+              onTurbineClick={handleTurbineClick}
+              showPaths={hasPlan}
+              manualMode={assignmentMode === 'manual'}
+              selectedDroneId={selectedDroneId}
+            />
+          </div>
+        </div>
+
+        {/* 右侧: 3D Three.js 视图 */}
+        <div className="flex-1 rounded-xl overflow-hidden border border-border-subtle" style={{ boxShadow: 'inset 0 0 60px rgba(0,0,0,0.3)' }}>
+          <WindFarm3DView />
         </div>
 
         {/* Slide-out Control Panel */}
@@ -386,13 +409,13 @@ export default function DroneSchedulerPage() {
                   <h4 className="text-xs font-medium text-text-secondary mb-3">模拟控制</h4>
                   <div className="flex gap-2 mb-3">
                     {!isRunning ? (
-                      <button onClick={() => setIsRunning(true)}
+                      <button onClick={() => { setIsRunning(true); useDrone3DStore.getState().setIsRunning(true); }}
                         className="flex-1 rounded-md py-2 text-xs font-medium transition-all"
                         style={{ background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.3)', color: '#3fb950' }}>
                         ▶ 执行
                       </button>
                     ) : (
-                      <button onClick={() => setIsRunning(false)}
+                      <button onClick={() => { setIsRunning(false); useDrone3DStore.getState().setIsRunning(false); }}
                         className="flex-1 rounded-md py-2 text-xs font-medium transition-all"
                         style={{ background: 'rgba(210,153,34,0.1)', border: '1px solid rgba(210,153,34,0.3)', color: '#d29922' }}>
                         ⏸ 暂停
@@ -405,7 +428,7 @@ export default function DroneSchedulerPage() {
                   </div>
                   <div className="flex gap-1">
                     {[1, 2, 4, 8].map((spd) => (
-                      <button key={spd} onClick={() => setSpeedMultiplier(spd)}
+                      <button key={spd} onClick={() => { setSpeedMultiplier(spd); useDrone3DStore.getState().setSpeedMultiplier(spd); }}
                         className={`flex-1 rounded border px-2 py-1 text-[10px] transition-colors ${
                           speedMultiplier === spd ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue' : 'border-border-default text-text-muted hover:border-accent-blue/30'
                         }`}>{spd}×</button>
