@@ -237,6 +237,41 @@ export default function DroneMap({
     };
   }, []);
 
+  // Fit bounds only when farm changes — NOT on every drone tick
+  const prevFarmRef = useRef<string | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.invalidateSize();
+
+    if (!activeFarm) {
+      if (prevFarmRef.current !== null) {
+        map.fitBounds(SHAANXI_WIND_BOUNDS, {
+          paddingTopLeft: [56, 56],
+          paddingBottomRight: [360, 56],
+          maxZoom: OVERVIEW_ZOOM,
+          animate: false,
+        });
+      }
+      prevFarmRef.current = null;
+      return;
+    }
+
+    const farmItems = farms.find(([region]) => region === activeFarm)?.[1] || [];
+    if (!farmItems.length) return;
+
+    if (prevFarmRef.current !== activeFarm) {
+      map.fitBounds(paddedBounds(farmItems, 0.22), {
+        paddingTopLeft: [42, 42],
+        paddingBottomRight: [42, 42],
+        maxZoom: regionMaxZoom(activeFarm),
+        animate: false,
+      });
+    }
+    prevFarmRef.current = activeFarm;
+  }, [activeFarm, farms]);
+
+  // Render turbine markers — updates when route colors change
   useEffect(() => {
     const map = mapRef.current;
     const layer = turbineLayerRef.current;
@@ -245,13 +280,6 @@ export default function DroneMap({
     map.invalidateSize();
 
     if (!activeFarm) {
-      map.fitBounds(SHAANXI_WIND_BOUNDS, {
-        paddingTopLeft: [56, 56],
-        paddingBottomRight: [360, 56],
-        maxZoom: OVERVIEW_ZOOM,
-        animate: false,
-      });
-
       farms.forEach(([region, items]) => {
         const bounds = paddedBounds(items, 0.5);
         const center = bounds.getCenter();
@@ -287,13 +315,6 @@ export default function DroneMap({
 
     const farmItems = farms.find(([region]) => region === activeFarm)?.[1] || [];
     if (!farmItems.length) return;
-
-    map.fitBounds(paddedBounds(farmItems, 0.22), {
-      paddingTopLeft: [42, 42],
-      paddingBottomRight: [42, 42],
-      maxZoom: regionMaxZoom(activeFarm),
-      animate: false,
-    });
 
     farmItems.forEach((t) => {
       const routeColor = turbineRouteColors.get(t.id) || null;
