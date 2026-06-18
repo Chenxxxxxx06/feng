@@ -1,8 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Html, useGLTF } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { gpsToScene } from '../../../utils/coordinateTransform';
 import type { Turbine } from '../../../types';
+
+const BLADE_RPM = 15; // wind turbine typical rotation speed
 
 interface Props {
   turbine: Turbine;
@@ -35,6 +38,7 @@ function createProceduralTurbine(): THREE.Group {
   const bladesGroup = new THREE.Group();
   bladesGroup.position.set(2.5, 82, 0);
   bladesGroup.name = 'blades';
+  bladesGroup.userData.isBladeGroup = true;
   for (let i = 0; i < 3; i += 1) {
     const blade = new THREE.Mesh(
       new THREE.BoxGeometry(0.55, 36, 1.7),
@@ -50,7 +54,21 @@ function createProceduralTurbine(): THREE.Group {
   return group;
 }
 
-function RealTurbineModel({ fallback }: { fallback: THREE.Group }) {
+function findBladeGroup(root: THREE.Object3D): THREE.Object3D | null {
+  // Search by name or userData marker
+  let found: THREE.Object3D | null = null;
+  root.traverse((child) => {
+    if (found) return;
+    if (child.userData?.isBladeGroup) { found = child; return; }
+    const lower = child.name.toLowerCase();
+    if (lower === 'blades' || lower === 'rotor' || lower.includes('blade') || lower.includes('fan')) {
+      found = child;
+    }
+  });
+  return found;
+}
+
+function RealTurbineModel({ fallback, onBladesReady }: { fallback: THREE.Group; onBladesReady: (blades: THREE.Object3D | null) => void }) {
   const gltf = useGLTF('/models/wind-turbine.glb');
   const model = useMemo(() => {
     if (!gltf.scene) return fallback;
@@ -71,17 +89,40 @@ function RealTurbineModel({ fallback }: { fallback: THREE.Group }) {
     return clone;
   }, [fallback, gltf.scene]);
 
+  useEffect(() => {
+    onBladesReady(findBladeGroup(model));
+  }, [model, onBladesReady]);
+
   return <primitive object={model} />;
 }
 
 export default function TurbineInstance({ turbine, isFocused, onFocus }: Props) {
   const [hovered, setHovered] = useState(false);
+  const bladeRef = useRef<THREE.Object3D | null>(null);
   const proceduralModel = useMemo(() => createProceduralTurbine(), []);
 
   const [posX, , posZ] = gpsToScene(turbine.lat, turbine.lng, 0);
   const scale = 1 + ((turbine.power_mw || 3) - 2) * 0.12;
   const hiColor = turbine.hi_value >= 90 ? '#10B981' : turbine.hi_value >= 70 ? '#F59E0B' : '#EF4444';
   const statusGlow = turbine.status === 'fault' ? '#ff3333' : turbine.status === 'warning' ? '#ffaa00' : '#3B82F6';
+
+  // Try to find blades in procedural model as fallback
+  useEffect(() => {
+    if (!bladeRef.current) {
+      bladeRef.current = findBladeGroup(proceduralModel);
+    }
+  }, [proceduralModel]);
+
+  const handleBladesReady = useCallback((blades: THREE.Object3D | null) => {
+    if (blades) bladeRef.current = blades;
+  }, []);
+
+  // Rotate blades continuously
+  useFrame((_, delta) => {
+    if (bladeRef.current) {
+      bladeRef.current.rotation.z += (BLADE_RPM / 60) * Math.PI * 2 * delta;
+    }
+  });
 
   return (
     <group position={[posX, 0, posZ]} scale={scale}>
@@ -93,7 +134,7 @@ export default function TurbineInstance({ turbine, isFocused, onFocus }: Props) 
           onFocus(turbine.id);
         }}
       >
-        <RealTurbineModel fallback={proceduralModel} />
+        <RealTurbineModel fallback={proceduralModel} onBladesReady={handleBladesReady} />
       </group>
 
       <mesh position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
