@@ -338,6 +338,7 @@ export default function KnowledgeBasePage() {
   }, [fetchGraph]);
 
   const buildOption = useCallback((data: GraphData) => {
+    const isTopo = graphView === 'topology';
     const cats = [...new Set(data.nodes.map(n => n.category))];
     const nodeCategoryById = new Map(data.nodes.map(n => [n.id, n.category]));
 
@@ -483,7 +484,7 @@ export default function KnowledgeBasePage() {
         },
       }],
     };
-  }, []);
+  }, [graphView]);
 
   useEffect(() => {
     if (!chartRef.current || !graphData) return;
