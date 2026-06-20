@@ -2,7 +2,7 @@
 
 Usage:
   cd backend
-  DASHSCOPE_API_KEY="sk-ff2da15c673e488cbc41b7535176a61d" python tests/e2e_test_ai_config.py
+  DASHSCOPE_API_KEY="your-dashscope-api-key" python tests/e2e_test_ai_config.py
 """
 
 import asyncio
