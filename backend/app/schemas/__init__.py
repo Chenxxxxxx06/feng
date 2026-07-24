@@ -714,3 +714,243 @@ class AgentTaskCancelResponse(BaseModel):
     status: str
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 4: Innovation schemas
+# ═══════════════════════════════════════════════════════════════
+
+# ── 4.1 Incident ──
+
+class IncidentCreate(BaseModel):
+    turbine_id: int = Field(gt=0)
+    title: str = Field(min_length=1, max_length=256)
+    severity: str = Field(default="medium", max_length=16)
+    summary: Optional[str] = None
+
+
+class IncidentUpdate(BaseModel):
+    title: Optional[str] = None
+    severity: Optional[str] = None
+    stage: Optional[str] = None
+    status: Optional[str] = None
+    owner_id: Optional[int] = None
+    summary: Optional[str] = None
+    resolution: Optional[str] = None
+
+
+class IncidentStageTransition(BaseModel):
+    target_stage: str = Field(min_length=1, max_length=32)
+    note: Optional[str] = None
+
+
+class IncidentResponse(BaseModel):
+    id: int
+    incident_id: str
+    turbine_id: int
+    turbine_name: str = ""
+    title: str
+    severity: str
+    stage: str
+    status: str
+    owner_id: Optional[int] = None
+    verification_status: Optional[str] = None
+    alarm_count: int = 0
+    compressed_count: int = 0
+    trace_id: Optional[str] = None
+    summary: Optional[str] = None
+    resolution: Optional[str] = None
+    opened_at: datetime
+    closed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ── 4.2 Alarm ──
+
+class AlarmResponse(BaseModel):
+    id: int
+    incident_id: int
+    turbine_id: int
+    fault_id: Optional[int] = None
+    source: str
+    alarm_type: str
+    component: Optional[str] = None
+    severity: str
+    message: Optional[str] = None
+    value: Optional[float] = None
+    threshold: Optional[float] = None
+    is_primary: bool = False
+    compression_rule: Optional[str] = None
+    compressed: bool = False
+    fired_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AlarmClusterRequest(BaseModel):
+    turbine_id: int = Field(gt=0)
+    window_minutes: int = Field(default=15, ge=1, le=120)
+
+
+class AlarmClusterResponse(BaseModel):
+    incident_id: str
+    primary_alarm: Optional[AlarmResponse] = None
+    total_alarms: int
+    compressed_alarms: int
+    compression_rules: list[str] = Field(default_factory=list)
+    alarms: list[AlarmResponse] = Field(default_factory=list)
+
+
+# ── 4.3 Evidence Graph ──
+
+class EvidenceNodeCreate(BaseModel):
+    node_type: str = Field(min_length=1, max_length=32)
+    label: str = Field(min_length=1, max_length=256)
+    description: Optional[str] = None
+    source: str = Field(default="rule", max_length=32)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    props: Optional[dict] = None
+
+
+class EvidenceEdgeCreate(BaseModel):
+    source_node_id: int = Field(gt=0)
+    target_node_id: int = Field(gt=0)
+    edge_type: str = Field(min_length=1, max_length=32)
+    source: str = Field(default="rule", max_length=32)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    evidence_ref: Optional[str] = None
+
+
+class EvidenceNodeResponse(BaseModel):
+    id: int
+    incident_id: int
+    node_type: str
+    label: str
+    description: Optional[str] = None
+    source: str
+    confidence: float
+    props: Optional[dict] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EvidenceEdgeResponse(BaseModel):
+    id: int
+    incident_id: int
+    source_node_id: int
+    target_node_id: int
+    edge_type: str
+    source: str
+    confidence: float
+    evidence_ref: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EvidenceGraphResponse(BaseModel):
+    nodes: list[EvidenceNodeResponse] = Field(default_factory=list)
+    edges: list[EvidenceEdgeResponse] = Field(default_factory=list)
+
+
+# ── 4.4 Decision Sandbox ──
+
+class DecisionPlanResponse(BaseModel):
+    id: int
+    incident_id: int
+    plan_name: str
+    strategy: str
+    safety_risk: float
+    downtime_loss: float
+    repair_cost: float
+    recovery_days: float
+    personnel_available: bool
+    parts_available: bool
+    weather_compatible: bool
+    total_score: float
+    is_recommended: bool
+    llm_explanation: Optional[str] = None
+    decision_flip_point: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DecisionSandboxResponse(BaseModel):
+    incident_id: str
+    plans: list[DecisionPlanResponse] = Field(default_factory=list)
+    recommended_index: int = -1
+
+
+# ── 4.5 Policy ──
+
+class PolicyRuleResponse(BaseModel):
+    id: int
+    rule_id: str
+    description: str
+    action_pattern: str
+    risk_level: int
+    rule_type: str
+    is_active: bool
+    version: str
+
+    model_config = {"from_attributes": True}
+
+
+class PolicyCheckRequest(BaseModel):
+    action: str = Field(min_length=1, max_length=128)
+    incident_id: Optional[int] = None
+    context: dict = Field(default_factory=dict)
+
+
+class PolicyCheckResponse(BaseModel):
+    action: str
+    decision: str  # allowed/denied/require_approval
+    matched_rules: list[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+# ── 4.6 Flight Recorder ──
+
+class AgentSpanResponse(BaseModel):
+    id: int
+    trace_id: str
+    parent_span_id: Optional[str] = None
+    span_id: str
+    span_name: str
+    agent_name: Optional[str] = None
+    tool_name: Optional[str] = None
+    step_order: int
+    input_digest: Optional[str] = None
+    output_digest: Optional[str] = None
+    status: str
+    duration_ms: float
+    policy_decision: Optional[str] = None
+    approval_by: Optional[str] = None
+    error_code: Optional[str] = None
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AgentTraceResponse(BaseModel):
+    id: int
+    trace_id: str
+    incident_id: Optional[int] = None
+    user_id: Optional[int] = None
+    status: str
+    total_spans: int
+    total_duration_ms: float
+    token_usage: Optional[dict] = None
+    cost_estimate: float
+    error_code: Optional[str] = None
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    spans: list[AgentSpanResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
