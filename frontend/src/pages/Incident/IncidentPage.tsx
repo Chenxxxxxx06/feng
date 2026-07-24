@@ -26,6 +26,18 @@ const STAGE_LABELS: Record<string, string> = {
 const SEV_COLOR: Record<string, string> = {
   low: 'bg-slate-500', medium: 'bg-yellow-500', high: 'bg-orange-500', critical: 'bg-red-600',
 };
+const SEV_BADGE: Record<string, string> = {
+  low: 'bg-slate-600/30 text-slate-300 border-slate-500/30',
+  medium: 'bg-yellow-600/20 text-yellow-300 border-yellow-500/30',
+  high: 'bg-orange-600/20 text-orange-300 border-orange-500/30',
+  critical: 'bg-red-600/20 text-red-300 border-red-500/50 animate-pulse',
+};
+const SEV_DOT: Record<string, string> = {
+  low: 'bg-slate-400 shadow-slate-400/50',
+  medium: 'bg-yellow-400 shadow-yellow-400/50',
+  high: 'bg-orange-400 shadow-orange-400/50',
+  critical: 'bg-red-500 shadow-red-500/70',
+};
 
 // ── Main page ──
 
@@ -164,7 +176,7 @@ export default function IncidentPage() {
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${SEV_COLOR[inc.severity] || 'bg-slate-500'}`} />
+                  <span className={`w-2 h-2 rounded-full shadow-lg ${SEV_DOT[inc.severity] || 'bg-slate-500'}`} />
                   <span className="text-sm font-medium text-slate-200 truncate">{inc.title}</span>
                 </div>
                 <div className="flex justify-between mt-1 text-xs text-slate-500">
@@ -180,21 +192,22 @@ export default function IncidentPage() {
       {/* ── Right: Detail with tabs ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center text-slate-500 bg-slate-900/30 rounded-lg border border-slate-700/30">
-            <div className="text-center">
-              <div className="text-4xl mb-3">📋</div>
-              <div>选择一个事件查看详情</div>
+          <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-slate-900/40 to-slate-800/20 rounded-lg border border-slate-700/30">
+            <div className="text-center space-y-2">
+              <div className="text-5xl mb-3">📋</div>
+              <div className="text-slate-400 text-lg font-medium">选择一个事件查看详情</div>
+              <div className="text-slate-600 text-sm">左侧事件列表中点击任意事件开始</div>
             </div>
           </div>
         ) : (
           <>
             {/* Incident header */}
-            <div className="bg-slate-900/60 rounded-lg border border-slate-700/50 p-4 mb-4">
+            <div className="bg-gradient-to-r from-slate-900/80 via-slate-900/60 to-slate-900/40 rounded-lg border border-slate-700/50 p-4 mb-4 backdrop-blur">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3">
-                    <span className={`px-2 py-0.5 text-xs rounded ${SEV_COLOR[selected.severity]} text-white`}>
-                      {selected.severity}
+                    <span className={`px-2 py-0.5 text-xs rounded border ${SEV_BADGE[selected.severity]}`}>
+                      {selected.severity === 'critical' ? '🔴 ' : selected.severity === 'high' ? '🟠 ' : selected.severity === 'medium' ? '🟡 ' : ''}{selected.severity}
                     </span>
                     <h2 className="text-lg font-bold text-white">{selected.title}</h2>
                     <span className="text-xs text-slate-500">{selected.incident_id}</span>
@@ -234,16 +247,16 @@ export default function IncidentPage() {
             </div>
 
             {/* Tab navigation */}
-            <div className="flex gap-1 border-b border-slate-700/50 mb-4">
+            <div className="flex gap-1 border-b border-slate-700/50 mb-4 overflow-x-auto">
               {[
                 ['overview', '📊 总览'], ['evidence', '🔗 证据'], ['decision', '🎯 决策'],
                 ['economic', '💰 经济'], ['audit', '🔐 审计'], ['traces', '📡 追溯'],
               ].map(([key, label]) => (
                 <button key={key} onClick={() => setActiveTab(key)}
-                  className={`px-4 py-2 text-sm rounded-t transition-colors ${
+                  className={`px-4 py-2.5 text-sm rounded-t transition-all duration-200 whitespace-nowrap ${
                     activeTab === key
-                      ? 'bg-slate-800 text-white border-t-2 border-t-blue-500'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                      ? 'bg-slate-800 text-white border-t-2 border-t-blue-500 font-medium shadow-lg shadow-blue-500/10'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
                   }`}>
                   {label}
                 </button>
