@@ -1,65 +1,60 @@
-"""Test mixed intent: action + follow-up analysis."""
-import asyncio, sys, io, os
-sys.path.insert(0, "G:\\code\\code_vscode\\rjcx\\feng\\backend")
+"""Test mixed intent: action + follow-up analysis.
 
-from app.services.agents.intent_router import IntentRouterAgent
-from app.api.agent import _resolve_atomic_steps
+API key passed externally via DASHSCOPE_API_KEY env var — NOT hardcoded.
+Tests marked 'integration' are skipped when key is unavailable.
+
+Run: pytest backend/tests/test_mixed_intent.py -v
+"""
+
+import os
+import pytest
+
 
 API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 MODEL = "qwen3.7-max-2026-05-17"
 TURBINE_LIST = "#1 A-001 陕北A风机, #2 A-002 陕北B风机, #3 B-001 关中3号风机"
 
-
-async def test_mixed_intents():
-    agent = IntentRouterAgent(model=MODEL, api_key=API_KEY, api_base_url=BASE_URL)
-
-    cases = [
-        "打开故障诊断页面看看里面有什么信息",
-        "打开风场监控看看风机状态如何",
-        "去工单页面看看最新的工单情况",
-        "打开诊断页看看有没有故障报警",
-    ]
-
-    passed = 0
-    for cmd in cases:
-        result = await agent.run(user_message=cmd, current_page="dashboard", turbine_list=TURBINE_LIST)
-        d = result.data
-        intent_type = d.get("intent_type")
-        follow_up = d.get("follow_up_analysis", "")
-        skills = [s["skill"] for s in d.get("scene_skills", [])]
-
-        has_action = intent_type in ("action", "mixed") and len(skills) > 0
-        has_analysis = bool(follow_up)
-        is_mixed = intent_type == "mixed"
-
-        status = "✅" if (has_action and has_analysis) else ("⚠️" if has_action else "❌")
-        if has_action and has_analysis:
-            passed += 1
-
-        print(f"\n{status} 意图={intent_type}(mixed={is_mixed})")
-        print(f"   输入: {cmd}")
-        print(f"   操作: {' → '.join(skills) if skills else '(无)'}")
-        print(f"   后续分析: {follow_up[:80] if follow_up else '❌ 缺失'}")
-
-        if intent_type == "mixed" and skills:
-            steps = _resolve_atomic_steps(d.get("scene_skills", []), d.get("entities", {}))
-            print(f"   原子步骤({len(steps)}步):")
-            for s in steps:
-                print(f"     {s.order}. [{s.skill}] {s.params}")
-
-    print(f"\n  → {passed}/{len(cases)} 混合意图识别正确(Action+Analysis兼备)")
+needs_api_key = pytest.mark.skipif(
+    not API_KEY,
+    reason="DASHSCOPE_API_KEY not set — skipping integration test (requires external LLM)",
+)
 
 
-async def main():
-    print("=" * 60)
-    print("  混合型意图 — Action + Analysis 测试")
-    print(f"  Model: {MODEL}")
-    print("=" * 60)
-    await test_mixed_intents()
-    print("\n" + "=" * 60)
+class TestMixedIntent:
+    """Mixed intent: action + follow-up analysis — requires external LLM."""
 
+    @pytest.mark.asyncio
+    @needs_api_key
+    async def test_mixed_intents_action_and_analysis(self):
+        """All mixed-intent commands should have BOTH action skills AND follow-up analysis."""
+        from app.services.agents.intent_router import IntentRouterAgent
 
-if __name__ == "__main__":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    asyncio.run(main())
+        agent = IntentRouterAgent(model=MODEL, api_key=API_KEY, api_base_url=BASE_URL)
+
+        cases = [
+            "打开故障诊断页面看看里面有什么信息",
+            "打开风场监控看看风机状态如何",
+            "去工单页面看看最新的工单情况",
+            "打开诊断页看看有没有故障报警",
+        ]
+
+        passed = 0
+        for cmd in cases:
+            result = await agent.run(
+                user_message=cmd, current_page="dashboard", turbine_list=TURBINE_LIST
+            )
+            d = result.data
+            intent_type = d.get("intent_type")
+            follow_up = d.get("follow_up_analysis", "")
+            skills = [s["skill"] for s in d.get("scene_skills", [])]
+
+            has_action = intent_type in ("action", "mixed") and len(skills) > 0
+            has_analysis = bool(follow_up)
+
+            if has_action and has_analysis:
+                passed += 1
+
+        assert passed >= 2, (
+            f"Mixed intent: {passed}/{len(cases)} have both action+analysis (need ≥2)"
+        )

@@ -2,7 +2,7 @@
 
 > 不只是预测哪里可能坏，而是把一次设备异常自动组织成**可解释、可审批、可执行、可验证、可复盘**的运维事件。
 
-> 129 tests passing | 18 services | 7 checkpoint commits | Alembic migrations
+> Unit tests passing | Integration tests (requires API key) | E2E ready | Alembic migrations
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white" />
@@ -22,7 +22,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-2.1-blue" />
   <img src="https://img.shields.io/badge/status-active-success" />
-  <img src="https://img.shields.io/badge/license-Educational-lightgrey" />
+  <img src="https://img.shields.io/badge/license-Apache%202.0-blue" />
   <img src="https://img.shields.io/badge/commits-90+-brightgreen" />
 </p>
 
@@ -30,7 +30,7 @@
 
 ## 📋 项目简介
 
-**风调预顺**是面向风电行业的**预测性健康管理 (Prognostics and Health Management)** 平台，为陕西省风场提供从实时监控、故障诊断、预测维护、工单管理到无人机巡检的**全链路智能化运维方案**。
+**风调预顺**是面向风电行业的**预测性健康管理 (Prognostics and Health Management)** 平台，面向风电场提供从实时监控、故障诊断、预测维护、工单管理到无人机巡检的**全链路智能化运维方案**（Demo/原型验证阶段，非生产部署）。
 
 ### 🎯 核心功能模块
 

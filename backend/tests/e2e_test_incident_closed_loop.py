@@ -167,13 +167,23 @@ class TestIncidentClosedLoop:
                 r.status_code == expected
             ), f"Transition to {target} failed: {r.status_code} {r.text}"
 
-        # Resolve with note
+        # ── Step 6b: Recovery verification (required before resolve) ──
+        r = await client.post(
+            f"/api/incidents/{incident_db_id}/verify-recovery",
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, f"Recovery verification failed: {r.status_code} {r.text}"
+        verify_result = r.json()
+        assert "verification_status" in verify_result or "status" in verify_result, \
+            f"Verification response missing status: {verify_result}"
+
+        # ── Step 6c: Resolve after verification ──
         r = await client.post(
             f"/api/incidents/{incident_db_id}/transition",
             headers=auth_headers,
-            json={"target_stage": "resolved", "note": "E2E测试完成：事件已解决"},
+            json={"target_stage": "resolved", "note": "E2E测试完成：事件已解决（含恢复验证）"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 200, f"Resolve after verification failed: {r.status_code} {r.text}"
         inc = r.json()
         assert inc["stage"] == "resolved"
         assert inc["status"] == "resolved"
@@ -256,6 +266,43 @@ class TestIncidentClosedLoop:
         assert (
             r.status_code == 409
         ), f"Expected 409 for invalid transition, got {r.status_code}"
+
+    @pytest.mark.asyncio
+    async def test_resolve_rejected_without_verification(
+        self, client: AsyncClient, auth_headers, test_turbine
+    ):
+        """Resolve must be rejected (403/409) without recovery verification proof."""
+        # Create incident and advance to verifying stage
+        r = await client.post(
+            "/api/incidents",
+            headers=auth_headers,
+            json={
+                "turbine_id": test_turbine.id,
+                "title": "恢复验证拒止测试",
+                "severity": "medium",
+            },
+        )
+        assert r.status_code == 201
+        inc_id = r.json()["id"]
+
+        # Advance through stages to verifying
+        for target in ("awaiting_approval", "executing", "verifying"):
+            r = await client.post(
+                f"/api/incidents/{inc_id}/transition",
+                headers=auth_headers,
+                json={"target_stage": target},
+            )
+            assert r.status_code == 200, f"Transition to {target} failed: {r.text}"
+
+        # Try to resolve WITHOUT verify-recovery first — MUST be rejected
+        r = await client.post(
+            f"/api/incidents/{inc_id}/transition",
+            headers=auth_headers,
+            json={"target_stage": "resolved", "note": "未验证恢复就关闭"},
+        )
+        assert r.status_code in (403, 409), (
+            f"Expected 403/409 for resolve without verification, got {r.status_code}: {r.text}"
+        )
 
     @pytest.mark.asyncio
     async def test_decision_sandbox_stable_results(

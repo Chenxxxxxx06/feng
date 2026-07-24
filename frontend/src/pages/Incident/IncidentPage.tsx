@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  fetchIncidents, createIncident, compressAlarms, fetchEvidenceGraph,
+  fetchIncidents, fetchIncident, createIncident, compressAlarms, fetchEvidenceGraph,
   addEvidenceNode, addEvidenceEdge, generateDecisionSandbox, checkPolicy,
   transitionIncident, startTrace, fetchTraces,
   startInvestigation, generatePlans, verifyRecovery, getEvidenceCompleteness,
@@ -39,6 +39,19 @@ const SEV_DOT: Record<string, string> = {
   critical: 'bg-red-500 shadow-red-500/70',
 };
 
+// State machine: which stages allow which actions
+const STAGE_ALLOWED: Record<string, string[]> = {
+  detected: ['investigate'],
+  correlated: ['investigate', 'generate_plans'],
+  diagnosing: ['investigate', 'generate_plans'],
+  decision_ready: ['generate_plans', 'approve'],
+  awaiting_approval: ['execute'],
+  executing: ['verify'],
+  verifying: ['verify', 'resolve'],
+  resolved: [],
+  escalated: [],
+};
+
 // ── Main page ──
 
 export default function IncidentPage() {
@@ -62,8 +75,12 @@ export default function IncidentPage() {
   // Phase 1-2 state
   const [investigation, setInvestigation] = useState<any>(null);
   const [economicData, setEconomicData] = useState<any>(null);
+  const [economicError, setEconomicError] = useState<string | null>(null);
   const [auditChain, setAuditChain] = useState<any>(null);
   const [ecoRefresh, setEcoRefresh] = useState(0);
+
+  // Evidence refresh version — bumped after investigation / evidence changes
+  const [evidenceVersion, setEvidenceVersion] = useState(0);
 
   // Create form
   const [showCreate, setShowCreate] = useState(false);
@@ -80,14 +97,41 @@ export default function IncidentPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Refresh selected incident from server (preserves investigation state) ──
+  const refreshSelected = useCallback(async (incidentId: number) => {
+    try {
+      const updated = await fetchIncident(incidentId);
+      setSelected(updated);
+      return updated;
+    } catch {
+      // keep current selected on failure
+      return null;
+    }
+  }, []);
+
+  // ── Refresh evidence graph + traces ──
+  const refreshDetailData = useCallback(async (incidentId: number) => {
+    try {
+      const [g, t] = await Promise.all([
+        fetchEvidenceGraph(incidentId).catch(() => ({ nodes: [], edges: [] })),
+        fetchTraces(incidentId).catch(() => []),
+      ]);
+      setGraph(g); setTraces(t);
+    } catch { /* keep stale data on error */ }
+  }, []);
+
   // Economic impact live refresh
   useEffect(() => {
     if (!selected) return;
-    const timer = setInterval(() => {
-      getEconomicImpact(selected.id).then(setEconomicData).catch(() => {});
-      setEcoRefresh(c => c + 1);
-    }, 30000);
-    getEconomicImpact(selected.id).then(setEconomicData).catch(() => {});
+    const fetchEco = () => {
+      getEconomicImpact(selected.id)
+        .then((d) => { setEconomicData(d); setEconomicError(null); })
+        .catch((e) => {
+          setEconomicError(e?.response?.data?.detail || e?.message || '经济数据加载失败');
+        });
+    };
+    fetchEco();
+    const timer = setInterval(fetchEco, 30000);
     return () => clearInterval(timer);
   }, [selected?.id]);
 
@@ -96,7 +140,9 @@ export default function IncidentPage() {
     setActionMsg(null);
     setInvestigation(null);
     setAuditChain(null);
-    setPlans([]);  // Don't pre-empty — only clear on explicit action
+    setEconomicError(null);
+    setPlans([]);
+    setEvidenceVersion(v => v + 1);
     try {
       const [g, t] = await Promise.all([
         fetchEvidenceGraph(inc.id).catch(() => ({ nodes: [], edges: [] })),
@@ -119,33 +165,58 @@ export default function IncidentPage() {
     } finally { setActionLoading(false); }
   };
 
+  // P0-01 FIX: Investigation result persists — refresh incident + detail data without clearing
   const handleStartInvestigation = () => {
     if (!selected) return;
     doAction('启动自主调查', () => startInvestigation(selected.id))
-      .then(setInvestigation)
-      .then(() => selectIncident(selected));
+      .then((result) => {
+        setInvestigation(result);
+        // Refresh incident from server (stage may have advanced)
+        return refreshSelected(selected.id);
+      })
+      .then(() => refreshDetailData(selected.id))
+      .then(() => setEvidenceVersion(v => v + 1))
+      .catch(() => {}); // doAction already sets error message
   };
 
   const handleGeneratePlans = () => {
     if (!selected) return;
     doAction('生成决策方案', () => generatePlans(selected.id))
-      .then((result) => setPlans(result.plans || []));
+      .then((result) => {
+        setPlans(result.plans || []);
+        return refreshSelected(selected.id);
+      })
+      .catch(() => {});
   };
 
+  // P0-02 FIX: Use server-returned data to update state atomically
   const handleVerifyRecovery = () => {
     if (!selected) return;
     doAction('运行恢复验证', () => verifyRecovery(selected.id))
-      .then(() => selectIncident(selected));
+      .then((result) => {
+        // Refresh incident from server to get updated verification_status
+        return refreshSelected(selected.id);
+      })
+      .catch(() => {});
   };
 
+  // P0-02 FIX: transitionIncident returns updated incident — use it directly
   const handleTransition = async (target: string) => {
     if (!selected) return;
     try {
-      await doAction(`状态转换→${STAGE_LABELS[target] || target}`, () =>
-        transitionIncident(selected.id, target, ''));
-      await selectIncident(selected);
+      const updated = await doAction(`状态转换→${STAGE_LABELS[target] || target}`, () =>
+        transitionIncident(selected.id, target, '')
+      );
+      // Use server-returned incident for atomic state update
+      if (updated) {
+        setSelected(updated);
+      }
+      await refreshDetailData(selected.id);
     } catch { /* doAction already sets error */ }
   };
+
+  // ── State-machine driven button visibility ──
+  const allowedActions = STAGE_ALLOWED[selected?.stage || ''] || [];
 
   // ── Render ──
 
@@ -219,20 +290,47 @@ export default function IncidentPage() {
                     {selected.trace_id && <span className="text-xs text-slate-600">Trace: {selected.trace_id}</span>}
                   </div>
                 </div>
-                {/* Quick actions */}
+                {/* Quick actions — state-machine driven */}
                 <div className="flex gap-2">
-                  <button onClick={handleStartInvestigation} disabled={actionLoading}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
-                    🔍 自主调查
-                  </button>
-                  <button onClick={handleGeneratePlans} disabled={actionLoading}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
-                    📊 决策分析
-                  </button>
-                  <button onClick={handleVerifyRecovery} disabled={actionLoading}
-                    className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
-                    ✅ 恢复验证
-                  </button>
+                  {allowedActions.includes('investigate') && (
+                    <button onClick={handleStartInvestigation} disabled={actionLoading}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
+                      🔍 自主调查
+                    </button>
+                  )}
+                  {allowedActions.includes('generate_plans') && (
+                    <button onClick={handleGeneratePlans} disabled={actionLoading}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
+                      📊 决策分析
+                    </button>
+                  )}
+                  {allowedActions.includes('verify') && (
+                    <button onClick={handleVerifyRecovery} disabled={actionLoading}
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
+                      ✅ 恢复验证
+                    </button>
+                  )}
+                  {allowedActions.includes('approve') && (
+                    <button onClick={() => handleTransition('awaiting_approval')} disabled={actionLoading}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
+                      → 提交审批
+                    </button>
+                  )}
+                  {allowedActions.includes('execute') && (
+                    <button onClick={() => handleTransition('executing')} disabled={actionLoading}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
+                      → 开始执行
+                    </button>
+                  )}
+                  {allowedActions.includes('resolve') && (
+                    <button onClick={() => handleTransition('resolved')} disabled={actionLoading}
+                      className="px-3 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
+                      → 标记解决
+                    </button>
+                  )}
+                  {allowedActions.length === 0 && selected.stage !== 'resolved' && selected.stage !== 'escalated' && (
+                    <span className="text-xs text-slate-500 self-center px-2">当前阶段无可执行操作</span>
+                  )}
                 </div>
               </div>
               {actionMsg && (
@@ -242,6 +340,13 @@ export default function IncidentPage() {
                   'bg-slate-800 text-slate-300'
                 }`}>
                   {actionMsg}
+                </div>
+              )}
+              {/* P1-10: Show error states for degraded data */}
+              {economicError && (
+                <div className="mt-2 text-xs px-3 py-1 rounded bg-yellow-950/30 text-yellow-400 border border-yellow-800/30">
+                  ⚠ 经济数据: {economicError}
+                  <button onClick={() => setEcoRefresh(c => c + 1)} className="ml-2 underline text-yellow-300">重试</button>
                 </div>
               )}
             </div>
@@ -266,8 +371,8 @@ export default function IncidentPage() {
             {/* Tab content */}
             <div className="flex-1 overflow-y-auto">
               {activeTab === 'overview' && <OverviewTab selected={selected} investigation={investigation} traces={traces} />}
-              {activeTab === 'evidence' && <EvidenceTab incidentId={selected.id} graph={graph} />}
-              {activeTab === 'decision' && <DecisionTab plans={plans} selected={selected} onTransition={handleTransition} />}
+              {activeTab === 'evidence' && <EvidenceTab incidentId={selected.id} graph={graph} refreshVersion={evidenceVersion} />}
+              {activeTab === 'decision' && <DecisionTab plans={plans} selected={selected} onTransition={handleTransition} allowedActions={allowedActions} />}
               {activeTab === 'economic' && <EconomicImpactPanel incidentId={selected.id} data={economicData} refresh={ecoRefresh} />}
               {activeTab === 'audit' && <AuditChainPanel incidentId={selected.id} />}
               {activeTab === 'traces' && <TracesTab traces={traces} />}
@@ -338,14 +443,26 @@ function OverviewTab({ selected, investigation, traces }: { selected: Incident; 
   );
 }
 
-function EvidenceTab({ incidentId, graph }: { incidentId: number; graph: EvidenceGraph }) {
+// P0-03 FIX: refreshVersion dependency triggers re-fetch on investigation/evidence changes
+function EvidenceTab({ incidentId, graph, refreshVersion }: { incidentId: number; graph: EvidenceGraph; refreshVersion: number }) {
   const [completeness, setCompleteness] = useState<any>(null);
+  const [completenessError, setCompletenessError] = useState<string | null>(null);
   useEffect(() => {
-    getEvidenceCompleteness(incidentId).then(setCompleteness).catch(() => {});
-  }, [incidentId]);
+    setCompletenessError(null);
+    getEvidenceCompleteness(incidentId)
+      .then((d) => { setCompleteness(d); setCompletenessError(null); })
+      .catch((e) => {
+        setCompletenessError(e?.response?.data?.detail || e?.message || '证据完整度加载失败');
+      });
+  }, [incidentId, refreshVersion]);
 
   return (
     <div className="space-y-4">
+      {completenessError && (
+        <div className="p-3 rounded border border-yellow-800/30 bg-yellow-950/20 text-yellow-400 text-sm">
+          ⚠ {completenessError}
+        </div>
+      )}
       {completeness && (
         <div className={`p-4 rounded-lg border ${
           completeness.can_confirm_diagnosis
@@ -386,7 +503,9 @@ function EvidenceTab({ incidentId, graph }: { incidentId: number; graph: Evidenc
   );
 }
 
-function DecisionTab({ plans, selected, onTransition }: { plans: DecisionPlan[]; selected: Incident; onTransition: (t: string) => void }) {
+function DecisionTab({ plans, selected, onTransition, allowedActions }: {
+  plans: DecisionPlan[]; selected: Incident; onTransition: (t: string) => void; allowedActions: string[];
+}) {
   return (
     <div className="space-y-4">
       {plans.length === 0 ? (
@@ -430,15 +549,26 @@ function DecisionTab({ plans, selected, onTransition }: { plans: DecisionPlan[];
               </div>
             ))}
           </div>
+          {/* P1-09 FIX: State-machine driven buttons instead of always-visible */}
           <div className="flex gap-2 mt-4">
-            <button onClick={() => onTransition('awaiting_approval')}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition-colors">
-              → 提交审批
-            </button>
-            <button onClick={() => onTransition('executing')}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-sm transition-colors">
-              → 开始执行
-            </button>
+            {allowedActions.includes('approve') && (
+              <button onClick={() => onTransition('awaiting_approval')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition-colors">
+                → 提交审批
+              </button>
+            )}
+            {allowedActions.includes('execute') && (
+              <button onClick={() => onTransition('executing')}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-sm transition-colors">
+                → 开始执行
+              </button>
+            )}
+            {!allowedActions.includes('approve') && !allowedActions.includes('execute') && plans.length > 0 && (
+              <span className="text-xs text-slate-500 self-center">
+                当前阶段 ({STAGE_LABELS[selected.stage] || selected.stage}) 不支持此操作 —
+                请先在事件头部操作
+              </span>
+            )}
           </div>
         </>
       )}
