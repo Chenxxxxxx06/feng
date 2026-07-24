@@ -259,17 +259,52 @@ export default function AppLayout() {
 }
 
 function DesktopDigestToast({ summary, onClose }: { summary: DesktopDigestSummary; onClose: () => void }) {
+  const [position, setPosition] = useState({ x: window.innerWidth - 332, y: 20 });
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const hasRisk = summary.lowHiCount > 0 || summary.todoCount > 0;
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    setDragging(true);
+    setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      const newX = Math.max(0, Math.min(e.clientX - dragStart.x, window.innerWidth - 300));
+      const newY = Math.max(0, Math.min(e.clientY - dragStart.y, window.innerHeight - 160));
+      setPosition({ x: newX, y: newY });
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [dragging, dragStart]);
+
   return (
-    <div className="fixed right-5 top-5 z-[900] w-[300px] rounded-lg border border-border-card bg-bg-panel/95 p-4 shadow-2xl backdrop-blur">
-      <div className="flex items-start justify-between gap-3">
+    <div
+      className={`fixed z-[900] w-[300px] rounded-lg border border-border-card bg-bg-panel/95 p-4 shadow-2xl backdrop-blur transition-shadow ${
+        dragging ? 'shadow-[0_0_30px_rgba(59,130,246,0.3)] cursor-grabbing select-none' : 'cursor-auto'
+      }`}
+      style={{ left: position.x, top: position.y }}
+    >
+      <div
+        className="flex items-start justify-between gap-3 cursor-grab active:cursor-grabbing"
+        onMouseDown={onMouseDown}
+      >
         <div>
           <p className="text-xs font-semibold text-text-primary">桌面摘要</p>
           <p className={`mt-1 text-[11px] ${hasRisk ? 'text-accent-yellow' : 'text-accent-green'}`}>
             {hasRisk ? '存在待关注事项' : '当前暂无重点待办'}
           </p>
+          <p className="text-[9px] text-text-muted/50 mt-0.5">拖拽标题栏可移动</p>
         </div>
-        <button onClick={onClose} className="text-sm text-text-muted hover:text-text-primary" aria-label="关闭桌面摘要">
+        <button onClick={onClose} className="text-sm text-text-muted hover:text-text-primary cursor-pointer" aria-label="关闭桌面摘要">
           ×
         </button>
       </div>
