@@ -113,8 +113,9 @@ class ComponentDigitalThreadService:
         wo_nodes = await self._trace_work_orders(turbine_id, component)
         nodes.extend(wo_nodes)
 
-        # Sort by timestamp
-        nodes.sort(key=lambda n: n.timestamp or datetime.min.replace(tzinfo=timezone.utc))
+        # Sort by timestamp (handle both naive and aware datetimes)
+        _default_ts = datetime.min  # naive, safe fallback
+        nodes.sort(key=lambda n: n.timestamp.replace(tzinfo=None) if n.timestamp else _default_ts)
 
         thread.nodes = nodes
         thread.total_events = len(nodes)

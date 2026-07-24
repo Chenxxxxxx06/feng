@@ -949,3 +949,4 @@ class AgentTraceResponse(BaseModel):
     spans: list[AgentSpanResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+

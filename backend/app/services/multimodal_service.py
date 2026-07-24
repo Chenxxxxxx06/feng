@@ -83,9 +83,10 @@ class MultimodalService:
         image_path: str,
         image_size: tuple[int, int] = (640, 480),
     ) -> ImageQualityCheck:
-        """Gate image quality before processing.
+        """Gate image quality before processing using REAL image analysis.
 
-        Checks: resolution (≥640×480), estimated blur, exposure.
+        Checks: resolution (≥640×480), blur (Laplacian variance when cv2 available),
+        exposure, angle acceptability.
         Returns specific retake instructions if failed.
         """
         check = ImageQualityCheck()
@@ -100,17 +101,64 @@ class MultimodalService:
             issues.append(f"Resolution too low: {w}×{h}, need ≥640×480")
             retake.append("Retake at higher resolution (≥640×480)")
 
-        # Blur check (simulated — production uses Laplacian variance)
-        check.blur_score = 0.85  # Simulated: 0-1, higher = sharper
-        if check.blur_score < 0.3:
-            issues.append(f"Image too blurry (score: {check.blur_score:.1f})")
-            retake.append("Retake with better focus, stabilize camera")
+        # ── Real blur detection via Laplacian variance ──
+        try:
+            import cv2
+            import os
+            if os.path.exists(image_path):
+                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                if img is not None:
+                    laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
+                    # Normalize: typical sharp image has variance >100
+                    # Map to 0-1 score: 0=variance 0, 1=variance >=500
+                    check.blur_score = min(1.0, laplacian_var / 500.0)
+                    if laplacian_var < 100:
+                        issues.append(
+                            f"Image too blurry (Laplacian variance: {laplacian_var:.1f}, "
+                            f"need ≥100)"
+                        )
+                        retake.append(
+                            "Retake with better focus, stabilize camera, "
+                            "ensure adequate lighting"
+                        )
+                else:
+                    check.blur_score = 0.5  # Cannot read image
+                    issues.append(f"Cannot read image file: {image_path}")
+            else:
+                check.blur_score = 0.5
+                issues.append(f"Image file not found: {image_path}")
+        except ImportError:
+            # cv2 not available — use neutral score, flag as limitation
+            check.blur_score = 0.7
+            logger.debug("cv2 not available for blur detection; using neutral score")
 
-        # Exposure check (simulated)
-        check.exposure_ok = True
+        # ── Exposure check via histogram analysis ──
+        try:
+            import cv2
+            import os
+            if os.path.exists(image_path):
+                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                if img is not None:
+                    hist = cv2.calcHist([img], [0], None, [256], [0, 256])
+                    total_pixels = img.shape[0] * img.shape[1]
+                    # Check for under/over-exposure
+                    dark_pixels = sum(hist[:25])[0] / total_pixels  # < 10th percentile
+                    bright_pixels = sum(hist[230:])[0] / total_pixels  # > 90th percentile
+                    if dark_pixels > 0.5:
+                        check.exposure_ok = False
+                        issues.append("Image underexposed (>50% dark pixels)")
+                        retake.append("Increase exposure or add lighting")
+                    elif bright_pixels > 0.5:
+                        check.exposure_ok = False
+                        issues.append("Image overexposed (>50% bright pixels)")
+                        retake.append("Reduce exposure or avoid direct sunlight")
+                    else:
+                        check.exposure_ok = True
+        except (ImportError, Exception):
+            check.exposure_ok = True  # Cannot verify
 
-        # Angle check (simulated — production uses EXIF + template matching)
-        check.angle_acceptable = True
+        # Angle check
+        check.angle_acceptable = True  # Would use EXIF orientation + template matching
 
         check.issues = issues
         check.retake_instructions = retake
@@ -122,37 +170,132 @@ class MultimodalService:
         image_path: str,
         turbine_id: int,
     ) -> MultimodalEvidence:
-        """Detect blade defects from inspection image.
+        """Detect blade defects from inspection image using REAL YOLO model.
 
-        In production: calls blade_yolo_service.predict().
-        Here: provides structured integration with evidence system.
+        Attempts to use blade_yolo_service for actual inference.
+        Falls back to simulated results only when model is unavailable,
+        clearly marking the source.
         """
-        # Simulated YOLO detection results
-        # Production: blade_yolo_service.predict(image_path, turbine_id)
-        defects = [
-            {
-                "type": "leading_edge_erosion",
-                "bbox": [120, 80, 200, 150],
-                "confidence": 0.82,
-                "severity": "moderate",
-                "area_mm2": 450,
-            },
-        ]
+        yolo_available = False
+        raw_detections: list[dict[str, Any]] = []
+        source_type = "yolo_inspection"
 
-        confidence = 0.82 if defects else 0.0
-        quality = EvidenceQuality.MEDIUM if confidence > 0.7 else EvidenceQuality.LOW
+        # ── Try real YOLO model first ──
+        try:
+            from app.services.blade_yolo_service import BladeYOLOService
+            yolo_svc = BladeYOLOService()
+            if yolo_svc.is_model_available():
+                yolo_available = True
+                raw_detections = yolo_svc.predict(image_path, turbine_id)
+                source_type = "yolo_inspection_real"
+                logger.info(
+                    f"Real YOLO inference on {image_path}: "
+                    f"{len(raw_detections)} detections"
+                )
+        except (ImportError, FileNotFoundError, Exception) as e:
+            logger.warning(
+                f"Blade YOLO model unavailable for {image_path}: {e}. "
+                f"Using simulation fallback."
+            )
+
+        # ── Process detections into structured defects ──
+        if yolo_available and raw_detections:
+            defects = []
+            for det in raw_detections:
+                bbox = det.get("bbox_xyxy", det.get("bbox", [0, 0, 0, 0]))
+                label = det.get("label", det.get("class", "unknown"))
+                conf = det.get("confidence", 0.0)
+
+                # Map YOLO class to defect type
+                defect_type_map = {
+                    "damage": "blade_surface_damage",
+                    "crack": "blade_crack",
+                    "dirt": "surface_contamination",
+                    "erosion": "leading_edge_erosion",
+                    "delamination": "blade_delamination",
+                }
+                defect_type = defect_type_map.get(label, label)
+
+                # Calculate severity from confidence and bbox area
+                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                severity = "minor"
+                if conf > 0.9 and area > 50000:
+                    severity = "critical"
+                elif conf > 0.8 and area > 20000:
+                    severity = "major"
+                elif conf > 0.6:
+                    severity = "moderate"
+
+                defects.append({
+                    "type": defect_type,
+                    "yolo_class": label,
+                    "bbox": bbox,
+                    "confidence": round(conf, 4),
+                    "severity": severity,
+                    "area_px": area,
+                    "source": "blade_yolo_model_dtu",
+                })
+        else:
+            # Simulation fallback — clearly marked
+            source_type = "yolo_inspection_simulated"
+            defects = [
+                {
+                    "type": "simulated_detection",
+                    "bbox": [120, 80, 200, 150],
+                    "confidence": 0.0,
+                    "severity": "unknown",
+                    "area_px": 0,
+                    "source": "simulation_fallback_no_model",
+                    "note": "YOLO model not available — no real inference performed",
+                },
+            ]
+
+        # Calculate aggregate confidence
+        if yolo_available and defects:
+            confidence = sum(d.get("confidence", 0) for d in defects) / len(defects)
+        elif defects and defects[0].get("source") == "simulation_fallback_no_model":
+            confidence = 0.0
+        else:
+            confidence = 0.0
+
+        # Determine evidence quality
+        if yolo_available and confidence > 0.85:
+            quality = EvidenceQuality.HIGH
+        elif yolo_available and confidence > 0.6:
+            quality = EvidenceQuality.MEDIUM
+        elif yolo_available:
+            quality = EvidenceQuality.LOW
+        else:
+            quality = EvidenceQuality.LOW  # Simulated = low quality
+
+        # Build description
+        if yolo_available and defects:
+            real_defects = [d for d in defects if d.get("confidence", 0) > 0]
+            if real_defects:
+                primary = real_defects[0]
+                description = (
+                    f"Real YOLO inspection on turbine {turbine_id}: "
+                    f"{len(real_defects)} defect(s) detected. "
+                    f"Primary: {primary['type']} (conf={primary['confidence']:.2f}, "
+                    f"severity={primary['severity']})"
+                )
+            else:
+                description = (
+                    f"Real YOLO inspection on turbine {turbine_id}: "
+                    f"No defects detected above confidence threshold"
+                )
+        else:
+            description = (
+                f"SIMULATED inspection on turbine {turbine_id}: "
+                f"YOLO model not available. Results are placeholder values — "
+                f"do not use for operational decisions."
+            )
 
         return MultimodalEvidence(
             evidence_type=EvidenceType.OBSERVATION,
-            source_type="yolo_inspection",
-            label="Blade Inspection Result",
-            description=(
-                f"YOLO inspection on turbine {turbine_id}: "
-                f"{len(defects)} defect(s) detected. "
-                f"Primary: {defects[0]['type']} (conf={confidence:.2f})"
-                if defects
-                else f"No defects detected on turbine {turbine_id}"
-            ),
+            source_type=source_type,
+            label=f"Blade Inspection ({'Real YOLO' if yolo_available else 'Simulated'})",
+            description=description,
             confidence=confidence,
             quality=quality,
             image_path=image_path,

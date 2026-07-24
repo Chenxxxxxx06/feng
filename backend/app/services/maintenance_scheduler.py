@@ -69,7 +69,8 @@ def auto_schedule(
             return False
         state = daily_state.get(_key(d))
         if not state:
-            return True
+            # Empty day — still check single-task doesn't blow capacity
+            return _man_hours(item) <= capacity
         # Same turbine already on this day → block non-urgent
         if item["turbine_id"] in state["turbine_ids"] and item["priority"] != "urgent":
             return False
@@ -105,10 +106,121 @@ def auto_schedule(
             item["overflow_reason"] = f"无法在{item['rul_days']:.0f}天RUL窗口内安排，每日容量{capacity}人时已满"
             overflow_items.append(item)
 
+    # ── Leveling pass: move non-urgent tasks from overloaded days ──
+    _level_days(daily_state, items, today, deadline, capacity)
+
     # Return only scheduled items, plus overflow items at the end
     scheduled = [t for t in items if not t.get("overflow")]
     scheduled.sort(key=lambda t: t.get("scheduled_date", "9999"))
     return scheduled + overflow_items
+
+
+def _level_days(
+    daily_state: dict,
+    items: list[dict],
+    today: date,
+    deadline: date,
+    capacity: float,
+) -> None:
+    """Post-schedule leveling: redistribute tasks from overloaded days.
+
+    For any day exceeding capacity, move low-priority items to adjacent
+    days that have spare capacity, respecting each item's RUL deadline.
+    """
+    _key = lambda d: d.isoformat()
+
+    def _day_capacity(d: date) -> float:
+        s = daily_state.get(_key(d))
+        return s["crew_hours"] if s else 0.0
+
+    def _can_move_to(item: dict, d: date) -> bool:
+        """Check if item can be moved to a different day."""
+        if d > deadline:
+            return False
+        item_deadline = today + timedelta(days=max(1, int(item["rul_days"] * 0.7)))
+        if d > item_deadline:
+            return False
+        crew = max(1, item.get("crew_size", 1))
+        man_hours = crew * item.get("downtime_hours", 0)
+        return _day_capacity(d) + man_hours <= capacity
+
+    def _do_move(item: dict, from_date: date, to_date: date):
+        """Execute the move: reclaim from old day, assign to new day."""
+        old_key = _key(from_date)
+        new_key = _key(to_date)
+        crew = max(1, item.get("crew_size", 1))
+        man_hours = crew * item.get("downtime_hours", 0)
+
+        # Reclaim
+        if old_key in daily_state:
+            s = daily_state[old_key]
+            s["crew_hours"] = max(0, s["crew_hours"] - man_hours)
+            s["turbine_ids"].discard(item.get("turbine_id"))
+
+        # Assign
+        ns = daily_state.setdefault(new_key, {"turbine_ids": set(), "crew_hours": 0.0})
+        ns["turbine_ids"].add(item.get("turbine_id"))
+        ns["crew_hours"] += man_hours
+
+        item["scheduled_date"] = to_date.isoformat()
+        item["time_slot"] = _time_slot_for(to_date, item, daily_state)
+
+    # Collect overloaded days
+    overloaded = []
+    for d_str, state in daily_state.items():
+        if state["crew_hours"] > capacity:
+            try:
+                d = date.fromisoformat(d_str)
+                overloaded.append((d, state["crew_hours"] - capacity))
+            except ValueError:
+                continue
+
+    if not overloaded:
+        return
+
+    # For each overloaded day, try to move lowest-priority items
+    for od, excess in sorted(overloaded):
+        # Get items on this day, sorted by priority (lowest first = easiest to move)
+        day_items = [
+            it for it in items
+            if it.get("scheduled_date") == _key(od) and not it.get("overflow")
+        ]
+        day_items.sort(key=lambda it: (
+            0 if it["priority"] == "low" else 1 if it["priority"] == "medium" else 2,
+            it["urgency_score"],
+        ))  # low priority first (easiest to move)
+
+        moved_man_hours = 0.0
+        for item in day_items:
+            if _day_capacity(od) <= capacity:
+                break  # Day is now within capacity
+
+            crew = max(1, item.get("crew_size", 1))
+            man_hours = crew * item.get("downtime_hours", 0)
+
+            # Try adjacent days: same week first, then ±1, ±2, ...
+            candidates = []
+            for offset in range(1, 15):
+                for sign in [1, -1]:
+                    d = od + timedelta(days=offset * sign)
+                    candidates.append(d)
+                    if len(candidates) >= 28:
+                        break
+                if len(candidates) >= 28:
+                    break
+
+            moved = False
+            for candidate in candidates:
+                if candidate.weekday() >= 5 and item["priority"] not in ("urgent",):
+                    continue
+                if _can_move_to(item, candidate):
+                    _do_move(item, od, candidate)
+                    moved_man_hours += man_hours
+                    moved = True
+                    break
+
+            if moved and _day_capacity(od) <= capacity:
+                break  # Day is balanced
 
 
 def _time_slot_for(d: date, item: dict, daily_state: dict) -> str:

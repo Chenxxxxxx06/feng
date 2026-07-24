@@ -647,7 +647,7 @@ async def get_turbine_wind(
 # ═══════════════════════════════════════════════════════════════
 
 
-@router.get("/turbines/{turbine_id}/health-passport")
+@router.get("/{turbine_id}/health-passport")
 async def get_health_passport(
     turbine_id: int,
     db: AsyncSession = Depends(get_db),
@@ -690,7 +690,7 @@ async def get_health_passport(
     }
 
 
-@router.get("/turbines/{turbine_id}/component-thread")
+@router.get("/{turbine_id}/component-thread")
 async def get_component_thread(
     turbine_id: int,
     component: str = Query(..., description="Component name to trace"),
@@ -729,7 +729,7 @@ async def get_component_thread(
     }
 
 
-@router.get("/turbines/{turbine_id}/component-threads")
+@router.get("/{turbine_id}/component-threads")
 async def get_all_component_threads(
     turbine_id: int,
     db: AsyncSession = Depends(get_db),
