@@ -244,7 +244,7 @@ class DecisionTwinService:
                 FaultKnowledgeNode.fault_type,
             )
             .where(
-                app.models.FaultKnowledgeNode.fault_type.contains(
+                FaultKnowledgeNode.fault_type.contains(
                     (incident.title or "").split(" ")[0]
                 )
             )

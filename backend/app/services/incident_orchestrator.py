@@ -407,10 +407,10 @@ class InvestigationOrchestrator:
 
     async def _step_health_diagnosis(self, ctx: InvestigationContext) -> dict:
         """Compute current health index."""
-        from app.services.health_index import compute_health_index
+        from app.services.health_index import calculate_turbine_hi
 
         try:
-            hi = await compute_health_index(self.db, ctx.turbine_id)
+            hi = await calculate_turbine_hi(self.db, ctx.turbine_id)
             ctx.health_index = hi.get("health_index") if isinstance(hi, dict) else None
             hi_value = ctx.health_index
         except Exception:

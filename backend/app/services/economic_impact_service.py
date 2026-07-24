@@ -87,7 +87,11 @@ class EconomicImpactService:
         # 1. Elapsed time
         now = datetime.now(timezone.utc)
         if incident.opened_at:
-            impact.elapsed_hours = (now - incident.opened_at).total_seconds() / 3600.0
+            opened = incident.opened_at
+            if opened.tzinfo is None:
+                from datetime import timezone as tz
+                opened = opened.replace(tzinfo=tz.utc)
+            impact.elapsed_hours = (now - opened).total_seconds() / 3600.0
         else:
             impact.elapsed_hours = 0.0
 
