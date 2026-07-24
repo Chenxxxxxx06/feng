@@ -1905,3 +1905,124 @@ async def release_resource_lock(
         "released": released,
         "message": "Lock released" if released else "Lock not found or already released",
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3-5: Causal discovery + Knowledge flywheel
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/diagnosis/causal-discovery")
+async def run_causal_discovery(
+    time_series: dict[str, list[float]],
+    variable_pairs: Optional[list[tuple[str, str]]] = None,
+):
+    """Run Granger causal discovery on time series data.
+
+    Returns candidate causal links with significance, stability, and
+    physical plausibility. ALL results labeled as 'candidate' only.
+    """
+    from app.services.causal_discovery_service import CausalDiscoveryService
+
+    service = CausalDiscoveryService()
+    result = service.discover(time_series, variable_pairs)
+
+    return {
+        "stationarity_results": result.stationarity_results,
+        "total_tests": result.total_tests,
+        "significant_links": [
+            {
+                "source": l.source,
+                "target": l.target,
+                "lag": l.lag,
+                "p_value_corrected": l.p_value_corrected,
+                "significant": l.significant,
+                "bootstrap_stability": round(l.bootstrap_stability, 3),
+                "stable": l.stable,
+                "physical_plausibility": l.physical_plausibility,
+                "physical_rule": l.physical_rule,
+                "interpretation": l.interpretation,
+                "caveat": l.caveat,
+            }
+            for l in result.significant_links
+        ],
+        "all_links": [
+            {
+                "source": l.source,
+                "target": l.target,
+                "interpretation": l.interpretation,
+            }
+            for l in result.links
+        ],
+        "test_method": result.test_method,
+        "correction_method": result.correction_method,
+        "caveat": result.caveat,
+        "generated_at": result.generated_at.isoformat(),
+    }
+
+
+@router.get("/incidents/{incident_id}/review-draft")
+async def get_review_draft(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate structured post-incident review draft."""
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.knowledge_flywheel_service import KnowledgeFlywheelService
+
+    service = KnowledgeFlywheelService(db)
+    draft = await service.generate_review(inc)
+
+    return {
+        "incident_id": draft.incident_id,
+        "incident_title": draft.incident_title,
+        "summary": draft.summary,
+        "timeline": draft.timeline,
+        "diagnosis_accuracy": draft.diagnosis_accuracy,
+        "decision_quality": draft.decision_quality,
+        "lessons_learned": draft.lessons_learned,
+        "recommended_actions": draft.recommended_actions,
+        "candidate_knowledge": [
+            {
+                "fragment_id": f.fragment_id,
+                "category": f.category,
+                "content": f.content,
+                "confidence": f.confidence,
+                "review_status": f.review_status.value,
+            }
+            for f in draft.candidate_knowledge
+        ],
+        "generated_at": draft.generated_at.isoformat(),
+    }
+
+
+@router.post("/incidents/{incident_id}/extract-knowledge")
+async def extract_knowledge(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract and deduplicate knowledge from a closed incident."""
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.knowledge_flywheel_service import KnowledgeFlywheelService
+
+    service = KnowledgeFlywheelService(db)
+    result = await service.extract_and_dedup(inc)
+
+    return {
+        "incident_id": inc.incident_id,
+        "fragments_extracted": result.fragments_extracted,
+        "fragments_deduped": result.fragments_deduped,
+        "fragments_pending_review": result.fragments_pending_review,
+        "playbook_updated": result.playbook_updated,
+        "message": (
+            f"Extracted {result.fragments_extracted} fragments, "
+            f"{result.fragments_deduped} duplicates removed, "
+            f"{result.fragments_pending_review} pending human review."
+        ),
+    }
