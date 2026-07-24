@@ -5,6 +5,18 @@ const apiTarget = process.env.VITE_API_TARGET || 'http://localhost:8000';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-echarts': ['echarts'],
+          'vendor-three': ['three'],
+          'drone-scheduler': ['./src/pages/DroneScheduler/DroneSchedulerPage.tsx'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
