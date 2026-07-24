@@ -2026,3 +2026,40 @@ async def extract_knowledge(
             f"{result.fragments_pending_review} pending human review."
         ),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 6: Open API + Federated knowledge
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/open-api/spec")
+async def get_open_api_spec():
+    """Get OpenAPI 3.0 specification for the PHM API."""
+    from app.services.open_phm_api_service import OpenPHMAPIService
+    service = OpenPHMAPIService()
+    return service.get_spec()
+
+
+@router.get("/open-api/client-template")
+async def get_python_client_template():
+    """Get Python client SDK template."""
+    from app.services.open_phm_api_service import OpenPHMAPIService
+    service = OpenPHMAPIService()
+    return {"language": "python", "code": service.get_python_client_template()}
+
+
+@router.get("/open-api/industry-templates")
+async def get_industry_templates():
+    """Get industry adaptation templates (PV, pump, compressor)."""
+    from app.services.open_phm_api_service import OpenPHMAPIService
+    service = OpenPHMAPIService()
+    return {"templates": service.get_industry_templates()}
+
+
+@router.get("/open-api/licenses")
+async def get_license_inventory():
+    """Get third-party dependency and license inventory."""
+    from app.services.open_phm_api_service import OpenPHMAPIService
+    service = OpenPHMAPIService()
+    return service.get_third_party_inventory()
