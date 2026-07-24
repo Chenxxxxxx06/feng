@@ -374,11 +374,6 @@ class ThresholdConfigRequest(BaseModel):
     def validate_email_address(cls, value: Optional[str]) -> Optional[str]:
         return validate_email_format(value) if value else None
 
-    @field_validator("email_address")
-    @classmethod
-    def validate_email_address(cls, value: Optional[str]) -> Optional[str]:
-        return validate_email_format(value) if value else None
-
 class ThresholdConfigResponse(BaseModel):
     id: int
     hi_threshold: float

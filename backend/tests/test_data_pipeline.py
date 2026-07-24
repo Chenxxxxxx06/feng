@@ -64,6 +64,8 @@ class TestGeoLoader:
 
 class TestPipelineState:
     def test_pipeline_state_tracking(self):
+        from app.services.data_pipeline import reset_pipeline_state
+        reset_pipeline_state()
         state = get_pipeline_state()
         assert state.scada == SourceStatus.DISCONNECTED
 
