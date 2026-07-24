@@ -10,7 +10,7 @@ Routes for the 6-innovation closed loop:
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, update
@@ -1747,4 +1747,161 @@ async def check_compliance(
             for r in report.results
         ],
         "generated_at": report.generated_at.isoformat(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3-5: Fault genotype + Resource negotiation
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/diagnosis/fault-genotype")
+async def match_fault_genotype(
+    symptoms: dict[str, Any] = {},
+    db: AsyncSession = Depends(get_db),
+):
+    """Match observed symptoms to fault genotypes using Gower distance."""
+    from app.services.fault_genotype_service import FaultGenotypeService
+
+    service = FaultGenotypeService()
+    result = service.match(symptoms)
+
+    return {
+        "top_k": result.top_k,
+        "matches": [
+            {
+                "fault_type": m.fault_type,
+                "similarity": round(m.similarity, 4),
+                "feature_contributions": {
+                    k: round(v, 3) for k, v in m.feature_contributions.items()
+                },
+                "discriminators": m.discriminators,
+            }
+            for m in result.matches[: result.top_k]
+        ],
+        "differential_diagnosis": result.differential_diagnosis,
+        "recommendations": result.recommendations,
+        "evaluation": result.evaluation,
+    }
+
+
+@router.get("/diagnosis/fault-genotypes")
+async def list_fault_genotypes():
+    """List all known fault genotypes with features and discriminators."""
+    from app.services.fault_genotype_service import FAULT_GENOTYPES
+
+    return {
+        "genotypes": [
+            {
+                "fault_type": gt.fault_type,
+                "category": gt.category,
+                "description": gt.description,
+                "features": gt.features,
+                "discriminators": gt.discriminators,
+            }
+            for gt in FAULT_GENOTYPES.values()
+        ],
+        "total": len(FAULT_GENOTYPES),
+    }
+
+
+@router.post("/incidents/{incident_id}/negotiate-resource")
+async def negotiate_resource(
+    incident_id: int,
+    resource_id: str = Query(...),
+    resource_type: str = Query("spare_part"),
+    urgency: str = Query("medium"),
+    economic_impact: float = Query(0.0),
+    safety_risk: float = Query(0.0),
+    max_wait_hours: float = Query(24.0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit a resource request for negotiation."""
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.resource_negotiation_service import ResourceNegotiationService
+
+    service = ResourceNegotiationService(db)
+    request = await service.request_resource(
+        incident=inc,
+        resource_id=resource_id,
+        resource_type=resource_type,
+        urgency=urgency,
+        economic_impact=economic_impact,
+        safety_risk=safety_risk,
+        max_wait_hours=max_wait_hours,
+    )
+
+    return {
+        "request_id": request.request_id,
+        "incident_id": request.incident_id,
+        "resource_id": request.resource_id,
+        "resource_type": request.resource_type,
+        "bid_score": round(request.bid_score, 2),
+        "urgency": request.urgency,
+        "timestamp": request.timestamp.isoformat(),
+    }
+
+
+@router.post("/resources/{resource_id}/negotiate")
+async def run_resource_negotiation(
+    resource_id: str,
+    requests: list[dict[str, Any]],
+    db: AsyncSession = Depends(get_db),
+):
+    """Run one negotiation round for a resource with locking."""
+    from app.services.resource_negotiation_service import (
+        ResourceNegotiationService,
+        ResourceRequest,
+    )
+
+    service = ResourceNegotiationService(db)
+    reqs = [
+        ResourceRequest(
+            incident_id=r.get("incident_id", ""),
+            resource_id=resource_id,
+            resource_type=r.get("resource_type", "spare_part"),
+            urgency=r.get("urgency", "medium"),
+            economic_impact_per_hour=r.get("economic_impact", 0.0),
+            safety_risk=r.get("safety_risk", 0.0),
+            max_wait_hours=r.get("max_wait_hours", 24.0),
+            bid_score=0.0,
+        )
+        for r in requests
+    ]
+
+    result = await service.negotiate(resource_id, reqs)
+
+    return {
+        "resource_id": result.resource_id,
+        "winner_incident_id": result.winner_incident_id,
+        "winner_score": round(result.winner_score, 2),
+        "losers": result.losers,
+        "lock_id": result.lock.lock_id if result.lock else None,
+        "lock_expires_at": result.lock.expires_at.isoformat() if result.lock and result.lock.expires_at else None,
+        "reasoning": result.reasoning,
+        "escalated": result.escalated,
+        "timestamp": result.timestamp.isoformat(),
+    }
+
+
+@router.post("/resources/{resource_id}/release-lock")
+async def release_resource_lock(
+    resource_id: str,
+    incident_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Release a resource lock after maintenance completion."""
+    from app.services.resource_negotiation_service import ResourceNegotiationService
+
+    service = ResourceNegotiationService(db)
+    released = await service.release_lock(resource_id, incident_id)
+
+    return {
+        "resource_id": resource_id,
+        "incident_id": incident_id,
+        "released": released,
+        "message": "Lock released" if released else "Lock not found or already released",
     }
