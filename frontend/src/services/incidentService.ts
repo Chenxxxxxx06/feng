@@ -132,3 +132,69 @@ export async function fetchTraces(id: number): Promise<AgentTrace[]> {
   const { data } = await api.get(`${BASE}/${id}/trace`);
   return Array.isArray(data) ? data : [];
 }
+
+// ── Phase 1-2: ProofLoop endpoints ──
+
+export async function startInvestigation(id: number): Promise<any> {
+  const { data } = await api.post(`${BASE}/${id}/start-investigation`);
+  return data;
+}
+
+export async function generatePlans(id: number): Promise<any> {
+  const { data } = await api.post(`${BASE}/${id}/generate-plans`);
+  return data;
+}
+
+export async function verifyRecovery(id: number): Promise<any> {
+  const { data } = await api.post(`${BASE}/${id}/verify-recovery`);
+  return data;
+}
+
+export async function getEvidenceCompleteness(id: number): Promise<any> {
+  const { data } = await api.get(`${BASE}/${id}/evidence-completeness`);
+  return data;
+}
+
+export async function getEconomicImpact(id: number): Promise<any> {
+  const { data } = await api.get(`${BASE}/${id}/economic-impact`);
+  return data;
+}
+
+export async function getAuditChain(id: number): Promise<any> {
+  const { data } = await api.get(`${BASE}/${id}/audit-chain`);
+  return data;
+}
+
+export async function verifyAuditChain(id: number): Promise<any> {
+  const { data } = await api.post(`${BASE}/${id}/audit-chain/verify`);
+  return data;
+}
+
+export async function getWhatIfAnalysis(id: number): Promise<any> {
+  const { data } = await api.get(`${BASE}/${id}/what-if`);
+  return data;
+}
+
+export async function getTaskPackage(id: number): Promise<any> {
+  const { data } = await api.get(`${BASE}/${id}/task-package`);
+  return data;
+}
+
+export async function getComplianceCheck(id: number, action?: string): Promise<any> {
+  const { data } = await api.post(`${BASE}/${id}/compliance/check`, null, {
+    params: { action: action || 'close_incident' },
+  });
+  return data;
+}
+
+export async function runRedTeamScenario(id: number, scenarioKey: string): Promise<any> {
+  const { data } = await api.post(`${BASE}/${id}/red-team/run`, null, {
+    params: { scenario_key: scenarioKey },
+  });
+  return data;
+}
+
+export async function getHealthPassport(turbineId: number): Promise<any> {
+  const { data } = await api.get(`/turbines/${turbineId}/health-passport`);
+  return data;
+}
