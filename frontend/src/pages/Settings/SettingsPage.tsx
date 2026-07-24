@@ -84,7 +84,7 @@ interface CurrentUser {
   username: string;
   email: string;
   role: string;
-  api_key: string | null;
+  has_api_key: boolean;
   api_provider: string | null;
   api_base_url: string | null;
   model_preference: string;
@@ -1431,7 +1431,7 @@ function AISettingsSection({
               <InfoLine label="供应商" value={currentProvider?.display_name || user?.api_provider || '-'} />
               <InfoLine label="模型" value={currentModel} />
               <InfoLine label="API地址" value={user?.api_base_url || '-'} />
-              <InfoLine label="密钥状态" value={user?.api_key ? '已配置' : '未配置'} />
+              <InfoLine label="密钥状态" value={user?.has_api_key ? '已配置' : '未配置'} />
             </div>
           </div>
 

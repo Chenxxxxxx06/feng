@@ -5,17 +5,23 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.database import Base, get_db
-from app.models import User, Turbine, Fault, WorkOrder
+from app.models import User, Turbine, Fault, WorkOrder, RULPrediction
 from app.core.security import hash_password, create_access_token
 
 
-# Test database URL (SQLite in memory)
+# Test database URL (SQLite in memory with StaticPool for shared state across connections)
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_async_engine(
+    TEST_DATABASE_URL,
+    echo=False,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -91,6 +97,8 @@ async def test_turbine(db_session: AsyncSession):
         region="陕北",
         status="normal",
         hi_value=85.0,
+        source_dataset="care_to_compare_v6",
+        source_asset_id="TEST-ASSET-001",
     )
     db_session.add(turbine)
     await db_session.commit()
@@ -104,3 +112,21 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest_asyncio.fixture
+async def test_rul_prediction(db_session: AsyncSession, test_turbine: Turbine):
+    """Create a test RUL prediction."""
+    from datetime import datetime, timezone
+    pred = RULPrediction(
+        turbine_id=test_turbine.id,
+        component="主轴承",
+        predicted_at=datetime.now(timezone.utc),
+        remaining_life_days=180.0,
+        confidence_lower=120.0,
+        confidence_upper=240.0,
+    )
+    db_session.add(pred)
+    await db_session.commit()
+    await db_session.refresh(pred)
+    return pred

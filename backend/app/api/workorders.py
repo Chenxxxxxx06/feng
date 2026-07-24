@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ai import _detect_anomalies, _generate_local_diagnosis
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_role
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
@@ -48,6 +48,18 @@ STATUS_ACTION = {
     "closed": "closed",
     "cancelled": "cancelled",
 }
+# P0-11: Formal workorder state machine — only these transitions are allowed
+WORKORDER_TRANSITIONS: dict[str, set[str]] = {
+    "pending": {"assigned", "in_progress", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review", "completed", "cancelled"},
+    "review": {"in_progress", "completed", "cancelled"},
+    "completed": {"closed"},
+    "closed": set(),
+    "cancelled": set(),
+}
+# P0-12: Closing requires verification — only these transition paths require verification
+CLOSE_TRANSITIONS: set[tuple[str, str]] = {("completed", "closed")}
 
 
 def _model_fields() -> set[str]:
@@ -786,7 +798,7 @@ async def get_workorder(workorder_id: int, db: AsyncSession = Depends(get_db)):
 async def create_workorder(
     data: WorkOrderCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("operator")),
 ):
     payload = data.model_dump(exclude_none=True)
     turbine = await db.get(Turbine, data.turbine_id)
@@ -823,7 +835,7 @@ async def update_workorder(
     workorder_id: int,
     data: WorkOrderUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("operator")),
 ):
     result = await db.execute(
         select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
@@ -836,6 +848,32 @@ async def update_workorder(
     update_data = data.model_dump(exclude_none=True)
     if data.status and data.status not in VALID_STATUS:
         raise HTTPException(status_code=400, detail="Invalid work order status")
+
+    # P0-11: Validate state transitions
+    if data.status and data.status != before_status:
+        allowed = WORKORDER_TRANSITIONS.get(before_status, set())
+        if data.status not in allowed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot transition from '{before_status}' to '{data.status}'. "
+                       f"Allowed transitions: {sorted(allowed)}",
+            )
+
+    # P0-12: Require verification before closing
+    if data.status and (before_status, data.status) in CLOSE_TRANSITIONS:
+        # Check for verification: must have a maintenance record with action_type="verified"
+        verify_result = await db.execute(
+            select(MaintenanceRecord).where(
+                MaintenanceRecord.work_order_id == workorder_id,
+                MaintenanceRecord.action_type == "verified",
+            )
+        )
+        if not verify_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot close work order without verification. "
+                       "Add a verification record (action_type='verified') first.",
+            )
 
     now = _utc_now()
     if data.status == "completed" and wo.status != "completed":
@@ -877,7 +915,7 @@ async def update_workorder(
 async def delete_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("operator")),
 ):
     result = await db.execute(
         select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))
@@ -909,7 +947,7 @@ async def add_workorder_record(
     workorder_id: int,
     data: MaintenanceRecordCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("operator")),
 ):
     result = await db.execute(
         select(WorkOrder).where(WorkOrder.id == workorder_id, WorkOrder.deleted_at.is_(None))

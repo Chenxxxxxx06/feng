@@ -23,6 +23,11 @@ class User(Base):
     notification_configs = relationship("NotificationConfig", back_populates="user")
     ai_provider_configs = relationship("AIProviderConfig", back_populates="user", cascade="all, delete-orphan")
 
+    @property
+    def has_api_key(self) -> bool:
+        """P0-05: never expose raw api_key in responses."""
+        return bool(self.api_key)
+
 
 class AIProviderConfig(Base):
     __tablename__ = "ai_provider_configs"
@@ -127,6 +132,20 @@ class Fault(Base):
     confidence = Column(Float, nullable=False)
     status = Column(String(16), default="open")
     details = Column(JSON, nullable=True)
+    # Business fields (P0-01: formally mapped, no longer ephemeral)
+    priority = Column(String(16), default="medium")
+    processing_status = Column(String(16), default="pending")
+    handler = Column(String(64), nullable=True)
+    discovered_at = Column(DateTime(timezone=True), nullable=True)
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    failed_at = Column(DateTime(timezone=True), nullable=True)
+    last_action_at = Column(DateTime(timezone=True), nullable=True)
+    work_order_id = Column(Integer, nullable=True)
+    work_order_title = Column(String(128), nullable=True)
+    maintenance_cost_estimate = Column(Float, nullable=True)
+    maintenance_cost_actual = Column(Float, nullable=True)
+    status_note = Column(Text, nullable=True)
 
     turbine = relationship("Turbine", back_populates="faults")
     signals = relationship("FaultSignal", back_populates="fault")

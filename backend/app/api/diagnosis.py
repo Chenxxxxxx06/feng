@@ -13,7 +13,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import BladeImage, Fault, FaultKnowledgeNode, FaultSignal, SCADARecord, Turbine, VibrationData, WorkOrder
+from app.models import BladeImage, Fault, FaultKnowledgeNode, FaultSignal, SCADARecord, Turbine, User, VibrationData, WorkOrder
 from app.schemas import (
     FaultResponse, FaultDetailResponse, FaultSignalResponse,
     BladeDiagnosisRequest, BladeDiagnosisResponse,
@@ -21,7 +21,7 @@ from app.schemas import (
     BatchAutoFaultDetectionRequest, BatchAutoFaultDetectionResponse, BatchAutoFaultRecord,
     DiagnosisSignalInsight, TroubleshootingStep, VibrationPreviewResponse,
 )
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_role
 from app.services.blade_yolo_service import BladeModelUnavailable, blade_yolo_service
 from app.services.care_monitoring_metrics import ANOMALY_STATUS_IDS, CARE_DATASET_ID
 from app.services.diagnosis_orchestrator import build_signal_insights, build_troubleshooting_steps
@@ -712,8 +712,9 @@ async def create_fault(
     priority: str = Query("medium"),
     details: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _auth: User = Depends(require_role("engineer")),
 ):
-    """Create a new fault record."""
+    """Create a new fault record. Requires engineer+ role."""
     turbine = await db.get(Turbine, turbine_id)
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
@@ -751,8 +752,9 @@ async def update_fault(
     handler: str | None = Query(None),
     status_note: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _auth: User = Depends(require_role("engineer")),
 ):
-    """Update fault record fields."""
+    """Update fault record fields. Requires engineer+ role."""
     if fault_id < 0:
         raise HTTPException(status_code=400, detail="Cannot update CARE-synthetic faults")
     fault = await db.get(Fault, fault_id)
@@ -775,8 +777,8 @@ async def update_fault(
 
 
 @router.delete("/faults/{fault_id}")
-async def delete_fault(fault_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete a fault and its signals."""
+async def delete_fault(fault_id: int, db: AsyncSession = Depends(get_db), _auth: User = Depends(require_role("admin"))):
+    """Delete a fault and its signals. Requires admin role."""
     if fault_id < 0:
         raise HTTPException(status_code=400, detail="Cannot delete CARE-synthetic faults")
     fault = await db.get(Fault, fault_id)

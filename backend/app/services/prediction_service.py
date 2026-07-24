@@ -304,14 +304,16 @@ async def _estimate_linear_degradation(
         rows = recs.scalars().all()
         if len(rows) < 3:
             continue
-        # Simple HI proxy: how often power < 10% at wind >= 6 m/s
+        # Simple HI proxy: how often power < 10% of rated at wind >= 6 m/s
+        rated_power_kw = (turbine.power_mw or 2.0) * 1000.0
+        power_threshold = rated_power_kw * 0.10
         bad, total = 0.0, 0.0
         for r in rows:
             w_speed = r.wind_speed_ms or 0
             pwr = abs(r.power_kw or 0)
             if w_speed >= 6:
                 total += 1
-                if pwr < 0.10:
+                if pwr < power_threshold:
                     bad += 1
         perf_ratio = bad / total if total > 0 else 0
         hi = 100.0 - perf_ratio * 60.0

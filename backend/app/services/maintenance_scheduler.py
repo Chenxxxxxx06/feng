@@ -57,6 +57,11 @@ def auto_schedule(
     def _key(d: date) -> str:
         return d.isoformat()
 
+    def _man_hours(item: dict) -> float:
+        """Real capacity: crew_size × downtime_hours (P0-10 fix)."""
+        crew = max(1, item.get("crew_size", 1))
+        return crew * item.get("downtime_hours", 0)
+
     def _can_schedule(d: date, item: dict) -> bool:
         if d > deadline:
             return False
@@ -68,15 +73,15 @@ def auto_schedule(
         # Same turbine already on this day → block non-urgent
         if item["turbine_id"] in state["turbine_ids"] and item["priority"] != "urgent":
             return False
-        # Hard capacity check — reject if over
-        if state["crew_hours"] + item["downtime_hours"] > capacity:
+        # Hard capacity check — reject if over (uses person-hours)
+        if state["crew_hours"] + _man_hours(item) > capacity:
             return False
         return True
 
     def _assign(d: date, item: dict):
         s = daily_state.setdefault(_key(d), {"turbine_ids": set(), "crew_hours": 0.0})
         s["turbine_ids"].add(item["turbine_id"])
-        s["crew_hours"] += item["downtime_hours"]
+        s["crew_hours"] += _man_hours(item)
 
     overflow_items = []
     for item in items:
@@ -97,7 +102,7 @@ def auto_schedule(
             item["scheduled_date"] = None
             item["time_slot"] = None
             item["overflow"] = True
-            item["overflow_reason"] = f"无法在{item['rul_days']:.0f}天RUL窗口内安排，每日容量{capacity}h已满"
+            item["overflow_reason"] = f"无法在{item['rul_days']:.0f}天RUL窗口内安排，每日容量{capacity}人时已满"
             overflow_items.append(item)
 
     # Return only scheduled items, plus overflow items at the end
@@ -148,15 +153,18 @@ def detect_conflicts(scheduled: list[dict]) -> list[dict]:
                     "suggestion": "建议合并为一个停机窗口",
                 })
 
-        # Crew overload
-        total_hours = sum(it.get("downtime_hours", 0) for it in items)
+        # Crew overload (person-hours = crew_size × downtime_hours)
+        total_man_hours = sum(
+            max(1, it.get("crew_size", 1)) * it.get("downtime_hours", 0)
+            for it in items
+        )
         total_crew = sum(it.get("crew_size", 0) for it in items)
-        if total_hours > AVAILABLE_CREWS * SHIFT_HOURS:
+        if total_man_hours > AVAILABLE_CREWS * SHIFT_HOURS:
             conflicts.append({
                 "date": sd,
                 "type": "crew_overload",
                 "severity": "error",
-                "message": f"{sd} 总工时 {total_hours}h 超出容量 ({AVAILABLE_CREWS * SHIFT_HOURS}h)",
+                "message": f"{sd} 总工时 {total_man_hours}人时 超出容量 ({AVAILABLE_CREWS * SHIFT_HOURS}人时)",
                 "suggestion": f"建议将部分任务分流至前后日期，或增加临时班组",
             })
         elif total_crew > AVAILABLE_CREWS * 4:

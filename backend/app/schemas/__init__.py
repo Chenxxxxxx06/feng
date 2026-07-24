@@ -38,7 +38,7 @@ class UserResponse(BaseModel):
     username: str
     email: str
     role: str
-    api_key: Optional[str] = None
+    has_api_key: bool = False
     api_provider: Optional[str] = None
     api_base_url: Optional[str] = None
     model_preference: str

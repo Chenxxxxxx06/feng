@@ -34,6 +34,18 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up PHM system...")
 
+    # P0-07: Fail fast if default secret is used in production
+    _DEV_SECRET = "fengdiao-phm-dev-secret-key-change-in-production"
+    if settings.SECRET_KEY == _DEV_SECRET:
+        env = settings.model_dump().get("ENV", "").upper() or "DEVELOPMENT"
+        if env in ("PRODUCTION", "PROD"):
+            logger.critical("SECRET_KEY is still the default dev key — refusing to start in production")
+            raise SystemExit(
+                "CRITICAL: SECRET_KEY is the default dev key. "
+                "Set the SECRET_KEY environment variable to a strong random value in production."
+            )
+        logger.warning("Using default SECRET_KEY — this is only safe for local development")
+
     # Check for offline database
     offline_db = get_offline_database_path()
     if offline_db and is_sqlite_url(settings.DATABASE_URL):
@@ -69,23 +81,9 @@ async def ensure_runtime_schema(conn):
         }
         for column, definition in work_order_columns.items():
             await _ensure_sqlite_column(conn, "work_orders", column, definition)
-        fault_columns = {
-            "processing_status": "VARCHAR(16) DEFAULT 'pending'",
-            "priority": "VARCHAR(16) DEFAULT 'medium'",
-            "handler": "VARCHAR(64)",
-            "discovered_at": "DATETIME",
-            "processing_started_at": "DATETIME",
-            "closed_at": "DATETIME",
-            "failed_at": "DATETIME",
-            "last_action_at": "DATETIME",
-            "work_order_id": "INTEGER",
-            "work_order_title": "VARCHAR(128)",
-            "maintenance_cost_estimate": "FLOAT",
-            "maintenance_cost_actual": "FLOAT",
-            "status_note": "TEXT",
-        }
-        for column, definition in fault_columns.items():
-            await _ensure_sqlite_column(conn, "faults", column, definition)
+        # Fault business columns are now formally mapped in models/__init__.py (P0-01).
+        # Runtime ALTER TABLE for faults is no longer needed for new deployments.
+        # Existing DBs will be migrated via Alembic.
     else:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_provider VARCHAR(64)"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(512)"))
@@ -99,19 +97,8 @@ async def ensure_runtime_schema(conn):
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE"))
         await conn.execute(text("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMP WITH TIME ZONE"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS processing_status VARCHAR(16) DEFAULT 'pending'"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS priority VARCHAR(16) DEFAULT 'medium'"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS handler VARCHAR(64)"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS discovered_at TIMESTAMP WITH TIME ZONE"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP WITH TIME ZONE"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP WITH TIME ZONE"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS failed_at TIMESTAMP WITH TIME ZONE"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS last_action_at TIMESTAMP WITH TIME ZONE"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS work_order_id INTEGER"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS work_order_title VARCHAR(128)"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS maintenance_cost_estimate FLOAT"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS maintenance_cost_actual FLOAT"))
-        await conn.execute(text("ALTER TABLE faults ADD COLUMN IF NOT EXISTS status_note TEXT"))
+        # Fault business columns are now formally mapped in models/__init__.py (P0-01).
+        # New deployments get columns via create_all; existing DBs migrate via Alembic.
 
 
 async def _ensure_sqlite_column(conn, table_name: str, column_name: str, definition: str):

@@ -6,7 +6,7 @@ interface User {
   username: string;
   email: string;
   role: string;
-  api_key: string | null;
+  has_api_key: boolean;
   api_provider: string | null;
   api_base_url: string | null;
   model_preference: string;

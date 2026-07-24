@@ -195,25 +195,29 @@ async def generate_maintenance_plan(
 # ── Sub-score functions ──
 
 # ── Fallback scoring thresholds (when DB has no data) ──
+# score_floor > score_ceiling: higher score = more urgent
+# RUL: shorter days → higher urgency → higher score
 _FALLBACK_RUL = [
-    {"max_days": 30, "score_floor": 90, "score_ceiling": 100},
-    {"max_days": 90, "score_floor": 60, "score_ceiling": 90},
-    {"max_days": 180, "score_floor": 30, "score_ceiling": 60},
-    {"max_days": 365, "score_floor": 10, "score_ceiling": 30},
-    {"max_days": 9999, "score_floor": 0, "score_ceiling": 10},
+    {"max_days": 30, "score_floor": 100, "score_ceiling": 90},
+    {"max_days": 90, "score_floor": 90, "score_ceiling": 60},
+    {"max_days": 180, "score_floor": 60, "score_ceiling": 30},
+    {"max_days": 365, "score_floor": 30, "score_ceiling": 10},
+    {"max_days": 9999, "score_floor": 10, "score_ceiling": 0},
 ]
+# HI: lower health → higher urgency → higher score
 _FALLBACK_HI = [
     {"max_hi": 50, "score": 90},
-    {"max_hi": 60, "score_floor": 70, "score_ceiling": 90},
-    {"max_hi": 75, "score_floor": 40, "score_ceiling": 70},
-    {"max_hi": 85, "score_floor": 15, "score_ceiling": 40},
-    {"max_hi": 100, "score_floor": 0, "score_ceiling": 15},
+    {"max_hi": 60, "score_floor": 90, "score_ceiling": 70},
+    {"max_hi": 75, "score_floor": 70, "score_ceiling": 40},
+    {"max_hi": 85, "score_floor": 40, "score_ceiling": 15},
+    {"max_hi": 100, "score_floor": 15, "score_ceiling": 0},
 ]
+# Maintenance gap: longer gap → higher urgency → higher score
 _FALLBACK_GAP = [
     {"max_days": 90, "score": 0},
-    {"max_days": 180, "score_floor": 10, "score_ceiling": 25},
-    {"max_days": 365, "score_floor": 25, "score_ceiling": 50},
-    {"max_days": 9999, "score_floor": 50, "score_ceiling": 100},
+    {"max_days": 180, "score_floor": 25, "score_ceiling": 10},
+    {"max_days": 365, "score_floor": 50, "score_ceiling": 25},
+    {"max_days": 9999, "score_floor": 100, "score_ceiling": 50},
 ]
 
 

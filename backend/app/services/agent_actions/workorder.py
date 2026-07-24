@@ -1331,6 +1331,59 @@ async def _load_pending_action(db: AsyncSession, *, user: User, request_id: str)
     return restored
 
 
+async def _claim_pending_action(
+    db: AsyncSession,
+    *,
+    user: User,
+    request_id: str,
+) -> Optional[PendingAction]:
+    """P0-13: Atomically claim a pending action (status: pending → executing).
+
+    Uses an UPDATE with WHERE status='pending' to ensure only one caller
+    can claim the action. Returns the pending action if claimed, None otherwise.
+    """
+    from sqlalchemy import update
+
+    now = _utc_now()
+    result = await db.execute(
+        update(AgentActionLog)
+        .where(
+            AgentActionLog.request_id == request_id,
+            AgentActionLog.user_id == user.id,
+            AgentActionLog.status == "pending",
+        )
+        .values(status="executing", executed_at=now)
+    )
+    if result.rowcount == 0:
+        return None  # Already claimed or not found
+
+    await db.commit()
+
+    # Reload the claimed log
+    reloaded = await db.execute(
+        select(AgentActionLog).where(AgentActionLog.request_id == request_id)
+    )
+    log = reloaded.scalar_one_or_none()
+    if not log:
+        return None
+
+    parsed_action = log.parsed_action or {}
+    created_at = _as_aware_utc(log.created_at)
+    return PendingAction(
+        request_id=request_id,
+        user_id=user.id,
+        raw_message=str(log.raw_message or ""),
+        task_type=str(parsed_action.get("task_type") or "WRITE"),
+        action=log.action,
+        params=dict(log.params or {}),
+        before=dict(log.before_state or {}),
+        after=dict(log.after_state or {}),
+        warnings=list(parsed_action.get("warnings") or []),
+        created_at=created_at,
+        expires_at=created_at + PENDING_ACTION_TTL,
+    )
+
+
 async def plan_agent_action(
     db: AsyncSession,
     *,
@@ -4083,8 +4136,33 @@ async def confirm_agent_action(
     user: User,
     request_id: str,
 ) -> dict[str, Any]:
-    pending = await _load_pending_action(db, user=user, request_id=request_id)
+    # P0-13: Atomically claim the action to prevent duplicate execution
+    pending = await _claim_pending_action(db, user=user, request_id=request_id)
     if not pending:
+        # Check if already claimed/executed or truly missing
+        existing = await db.execute(
+            select(AgentActionLog).where(
+                AgentActionLog.request_id == request_id,
+                AgentActionLog.user_id == user.id,
+            )
+        )
+        log = existing.scalar_one_or_none()
+        if log and log.status == "executing":
+            return {
+                "request_id": request_id,
+                "action": log.action,
+                "status": "failed",
+                "error_code": "already_executing",
+                "error_message": "该动作正在执行中，请勿重复确认。",
+            }
+        if log and log.status in ("completed", "failed"):
+            return {
+                "request_id": request_id,
+                "action": log.action,
+                "status": "failed",
+                "error_code": "already_processed",
+                "error_message": f"该动作已处理（状态: {log.status}），请勿重复确认。",
+            }
         return {
             "request_id": request_id,
             "action": "unknown",

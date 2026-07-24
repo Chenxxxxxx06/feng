@@ -7,15 +7,13 @@ Usage: python tests/test_agent_chain.py
 import asyncio
 import sys
 import io
-sys.path.insert(0, "G:\\code\\code_vscode\\rjcx\\feng\\backend")
+import os
 
-# Fix Windows GBK encoding
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.path.insert(0, "G:\\code\\code_vscode\\rjcx\\feng\\backend")
 
 from app.services.agents.intent_router import IntentRouterAgent
 from app.services.agents import OrchestratorAgent, DataAgent, KnowledgeAgent, SynthesizerAgent
 
-import os
 API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 MODEL = "qwen3.7-max-2026-05-17"
@@ -188,4 +186,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, "G:\\code\\code_vscode\\rjcx\\feng\\backend")
+    # Fix Windows GBK encoding (only when run directly, not under pytest)
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     asyncio.run(main())

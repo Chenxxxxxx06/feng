@@ -1,12 +1,10 @@
 """Test mixed intent: action + follow-up analysis."""
-import asyncio, sys, io
+import asyncio, sys, io, os
 sys.path.insert(0, "G:\\code\\code_vscode\\rjcx\\feng\\backend")
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 from app.services.agents.intent_router import IntentRouterAgent
 from app.api.agent import _resolve_atomic_steps
 
-import os
 API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 MODEL = "qwen3.7-max-2026-05-17"
@@ -63,4 +61,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     asyncio.run(main())
