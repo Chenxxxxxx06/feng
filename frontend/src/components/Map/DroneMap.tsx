@@ -212,15 +212,23 @@ export default function DroneMap({
       markerZoomAnimation: false,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      minZoom: MIN_ZOOM,
-      maxZoom: MAX_ZOOM,
-      maxNativeZoom: 20,
-      noWrap: true,
-      keepBuffer: 8,
-      updateWhenIdle: true,
-      updateWhenZooming: false,
-    }).addTo(map);
+    const cartoTiles = L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxNativeZoom: 20 }
+    );
+    const osmTiles = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, className: 'map-tile-fallback' }
+    );
+    cartoTiles.addTo(map);
+    let tileLoaded = false;
+    cartoTiles.on('load', () => { tileLoaded = true; });
+    setTimeout(() => {
+      if (!tileLoaded) {
+        cartoTiles.remove();
+        osmTiles.addTo(map);
+      }
+    }, 4000);
 
     turbineLayerRef.current = L.layerGroup().addTo(map);
     droneLayerRef.current = L.layerGroup().addTo(map);

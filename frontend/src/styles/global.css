@@ -493,3 +493,8 @@ select.form-input { color-scheme: dark; }
 .drone-path-remaining{animation:dash-march 1.5s linear infinite}
 .drone-turbine-icon{transition:transform .2s ease}
 .drone-turbine-icon:hover{transform:scale(1.3)}
+
+/* ── Map tile fallback dark filter ── */
+.map-tile-fallback {
+  filter: brightness(0.7) saturate(0.5) invert(1) hue-rotate(180deg);
+}

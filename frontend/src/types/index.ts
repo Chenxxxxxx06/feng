@@ -302,3 +302,168 @@ export interface DroneSimState {
   completedTurbines: number;
   elapsedTime: number;
 }
+
+// ── Incident Types ──
+
+export interface Incident {
+  id: number;
+  incident_id: string;
+  turbine_id: number;
+  turbine_name: string;
+  title: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  stage: string;
+  status: string;
+  owner_id: number | null;
+  verification_status: string | null;
+  alarm_count: number;
+  compressed_count: number;
+  trace_id: string | null;
+  summary: string | null;
+  resolution: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface AlarmRecord {
+  id: number;
+  incident_id: number;
+  turbine_id: number;
+  fault_id: number | null;
+  source: string;
+  alarm_type: string;
+  component: string | null;
+  severity: string;
+  message: string | null;
+  value: number | null;
+  threshold: number | null;
+  is_primary: boolean;
+  compression_rule: string | null;
+  compressed: boolean;
+  fired_at: string;
+}
+
+export interface AlarmCluster {
+  incident_id: string;
+  primary_alarm: AlarmRecord | null;
+  total_alarms: number;
+  compressed_alarms: number;
+  compression_rules: string[];
+  alarms: AlarmRecord[];
+}
+
+export interface EvidenceNode {
+  id: number;
+  incident_id: number;
+  node_type: 'observation' | 'hypothesis' | 'check' | 'action' | 'result';
+  label: string;
+  description: string | null;
+  source: 'observation' | 'rule' | 'model' | 'llm' | 'human';
+  confidence: number;
+  props: Record<string, any> | null;
+  created_at: string;
+}
+
+export interface EvidenceEdge {
+  id: number;
+  incident_id: number;
+  source_node_id: number;
+  target_node_id: number;
+  edge_type: 'supports' | 'contradicts' | 'requires_check' | 'caused_by' | 'resolved_by';
+  source: string;
+  confidence: number;
+  evidence_ref: string | null;
+  created_at: string;
+}
+
+export interface EvidenceGraph {
+  nodes: EvidenceNode[];
+  edges: EvidenceEdge[];
+}
+
+export interface DecisionPlan {
+  id: number;
+  incident_id: number;
+  plan_name: string;
+  strategy: string;
+  safety_risk: number;
+  downtime_loss: number;
+  repair_cost: number;
+  recovery_days: number;
+  personnel_available: boolean;
+  parts_available: boolean;
+  weather_compatible: boolean;
+  total_score: number;
+  is_recommended: boolean;
+  llm_explanation: string | null;
+  decision_flip_point: string | null;
+  created_at: string;
+}
+
+export interface DecisionSandbox {
+  incident_id: string;
+  plans: DecisionPlan[];
+  recommended_index: number;
+}
+
+export interface PolicyCheckRequest {
+  action: string;
+  incident_id?: number;
+  context?: Record<string, any>;
+}
+
+export interface PolicyCheckResponse {
+  action: string;
+  decision: 'allowed' | 'denied' | 'require_approval';
+  matched_rules: string[];
+  reason: string | null;
+}
+
+export interface PolicyRule {
+  id: number;
+  rule_id: string;
+  description: string;
+  action_pattern: string;
+  risk_level: number;
+  rule_type: string;
+  is_active: boolean;
+  version: string;
+}
+
+export interface AgentSpan {
+  id: number;
+  trace_id: string;
+  parent_span_id: string | null;
+  span_id: string;
+  span_name: string;
+  agent_name: string | null;
+  tool_name: string | null;
+  step_order: number;
+  input_digest: string | null;
+  output_digest: string | null;
+  status: string;
+  duration_ms: number;
+  policy_decision: string | null;
+  approval_by: string | null;
+  error_code: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface AgentTrace {
+  id: number;
+  trace_id: string;
+  incident_id: number | null;
+  user_id: number | null;
+  status: string;
+  total_spans: number;
+  total_duration_ms: number;
+  token_usage: Record<string, any> | null;
+  cost_estimate: number;
+  error_code: string | null;
+  started_at: string;
+  ended_at: string | null;
+  spans: AgentSpan[];
+}

@@ -66,6 +66,17 @@ const navItems = [
     ), label: '故障百科',
   },
   {
+    path: '/incident',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" />
+        <polyline points="12 6 12 12 16 14" />
+        <line x1="8" y1="18" x2="16" y2="18" />
+        <line x1="8" y1="21" x2="12" y2="21" />
+      </svg>
+    ), label: '事件指挥',
+  },
+  {
     path: '/settings',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
