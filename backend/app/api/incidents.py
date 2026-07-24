@@ -1543,3 +1543,208 @@ async def get_task_package(
         "includes_llm_content": pkg.includes_llm_content,
         "generated_at": pkg.generated_at.isoformat(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3-4: Preference learning + Red team + Compliance
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/agents/calibration")
+async def get_agent_calibration(
+    days: int = Query(30, description="Sample period in days"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get agent calibration metrics — real data, no fake trajectories."""
+    from app.services.preference_learning_service import PreferenceLearningService
+
+    service = PreferenceLearningService(db)
+    calibration = await service.get_global_calibration(days=days)
+
+    return {
+        "total_recommendations": calibration.total_recommendations,
+        "accepted": calibration.accepted,
+        "overridden": calibration.overridden,
+        "acceptance_rate": round(calibration.acceptance_rate, 4),
+        "sample_period_days": calibration.sample_period_days,
+        "sample_sufficient": calibration.sample_sufficient,
+        "calibratable": calibration.sample_sufficient,
+        "message": (
+            "Sufficient samples for calibration."
+            if calibration.sample_sufficient
+            else f"尚不可校准 — 需要至少{PreferenceLearningService.MIN_SAMPLES_FOR_CALIBRATION}个样本，当前{calibration.total_recommendations}个"
+        ),
+    }
+
+
+@router.get("/agents/plan-preferences")
+async def get_plan_preferences(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get Beta-Bernoulli posterior acceptance rates per plan type."""
+    from app.services.preference_learning_service import PreferenceLearningService
+
+    service = PreferenceLearningService(db)
+    prefs = await service.get_plan_preferences()
+
+    return {
+        "preferences": [
+            {
+                "plan_type": p.plan_type,
+                "mean_acceptance": round(p.mean_acceptance, 4),
+                "ci_lower": round(p.ci_lower, 4),
+                "ci_upper": round(p.ci_upper, 4),
+                "total_recommendations": p.total_recommendations,
+                "accepted": p.accepted,
+                "overridden": p.overridden,
+                "sample_sufficient": p.sample_sufficient,
+                "calibratable": p.sample_sufficient,
+            }
+            for p in prefs
+        ],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/incidents/{incident_id}/red-team")
+async def get_red_team_scenarios(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """List available red team scenarios."""
+    from app.services.red_team_service import RedTeamService
+
+    service = RedTeamService(db)
+    scenarios = service.get_all_scenarios()
+
+    return {
+        "incident_id": incident_id,
+        "scenarios": scenarios,
+        "total": len(scenarios),
+    }
+
+
+@router.post("/incidents/{incident_id}/red-team/run")
+async def run_red_team_scenario(
+    incident_id: int,
+    scenario_key: str = Query(..., description="Scenario key to run"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run one red team scenario and get score."""
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.red_team_service import RedTeamService
+
+    service = RedTeamService(db)
+    session = await service.run_scenario(inc.incident_id, scenario_key)
+
+    return {
+        "session_id": session.session_id,
+        "scenario_key": session.scenario_key,
+        "incident_id": session.incident_id,
+        "score": session.score,
+        "max_score": session.max_score,
+        "passed": session.passed,
+        "score_breakdown": session.score_breakdown,
+        "errors": session.errors,
+        "restored": session.restored,
+    }
+
+
+@router.post("/incidents/{incident_id}/red-team/run-all")
+async def run_all_red_team(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Run all red team scenarios and get comprehensive report."""
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.red_team_service import RedTeamService
+
+    service = RedTeamService(db)
+    report = await service.run_all(inc.incident_id)
+
+    return {
+        "report_id": report.report_id,
+        "total_score": report.total_score,
+        "max_total_score": report.max_total_score,
+        "passed_scenarios": report.passed_scenarios,
+        "total_scenarios": report.total_scenarios,
+        "sessions": [
+            {
+                "session_id": s.session_id,
+                "scenario_key": s.scenario_key,
+                "score": s.score,
+                "max_score": s.max_score,
+                "passed": s.passed,
+                "errors": s.errors,
+            }
+            for s in report.sessions
+        ],
+        "generated_at": report.generated_at.isoformat(),
+    }
+
+
+@router.get("/incidents/{incident_id}/compliance")
+async def get_compliance_rules(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all compliance rules with metadata."""
+    from app.services.compliance_service import ComplianceService
+
+    service = ComplianceService(db)
+    rules = service.get_all_rules()
+
+    return {
+        "incident_id": incident_id,
+        "rules": rules,
+        "total": len(rules),
+    }
+
+
+@router.post("/incidents/{incident_id}/compliance/check")
+async def check_compliance(
+    incident_id: int,
+    action: str = Query("close_incident", description="Action to check compliance for"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run compliance inspection for an incident action.
+
+    Returns whether incident can proceed (especially close).
+    Blocker/Critical failures prevent closure.
+    """
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.compliance_service import ComplianceService
+
+    service = ComplianceService(db)
+    report = await service.check_incident(inc, action)
+
+    return {
+        "incident_id": inc.incident_id,
+        "action": action,
+        "total_rules": report.total_rules,
+        "passed": report.passed,
+        "failed": report.failed,
+        "blocker_failed": report.blocker_failed,
+        "critical_failed": report.critical_failed,
+        "can_close": report.can_close,
+        "results": [
+            {
+                "rule_id": r.rule_id,
+                "passed": r.passed,
+                "severity": r.severity.value,
+                "details": r.details,
+                "remediation": r.remediation,
+            }
+            for r in report.results
+        ],
+        "generated_at": report.generated_at.isoformat(),
+    }
