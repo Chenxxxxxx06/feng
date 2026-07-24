@@ -129,8 +129,13 @@ API端点已验证可用，完整Demo需部署后执行，场景脚本见执行�
 ## 9. 本地commit列表
 
 ```
-04a53a7 fix: P0 batch — Fault model fields, auth/RBAC, security, algorithms, state machine, test infra
+14444b6 feat(frontend): add Incident command center page + fix map tile fallback
+97e0e09 docs: finalize execution ledger — all DoD conditions verified
+439b7c3 test(e2e): add incident closed-loop E2E with 4 scenarios + review fixes
+a3f973a fix(tests): resolve all 8 remaining test failures — 84 passed / 0 failed
+f4183ce docs: final delivery report + execution ledger with Definition of Done audit
 7f01bd4 feat(incident): add 6-innovation closed-loop — Incident command center MVP
+04a53a7 fix: P0 batch — Fault model fields, auth/RBAC, security, algorithms, state machine, test infra
 ```
 
 ---
@@ -139,14 +144,19 @@ API端点已验证可用，完整Demo需部署后执行，场景脚本见执行�
 
 | 问题 | 真实原因 | 风险 | 建议 |
 |------|----------|------|------|
-| 8个预存测试失败 | 测试fixture与API过滤逻辑不匹配 | 低：不影响核心功能 | 逐项修复fixture |
-| 前端Incident指挥中心UI | 后端API已完成，前端页面待开发 | 中：Demo需要可视化 | 基于Incident API开发React页面 |
-| 前端巨型文件(>1500行) | 历史遗留 | 中：维护性差 | 按业务区域拆分 |
+| 前端巨型文件(>1500行) | 历史遗留SettingsPage/DiagnosisPage/CopilotFAB | 中：维护性差 | 按业务区域拆分 |
 | 前端超大Chunk(962kB) | Three.js未单独分包 | 低：首屏加载慢 | manualChunks拆分 |
-| Alembic迁移系统 | 当前使用create_all | 中：生产部署风险 | 引入Alembic |
-| OPC UA网关 | 非当前Goal阻断项 | 低 | 核心闭环稳定后实现 |
-| E2E测试 | 未配置Playwright | 中：Demo回归 | 编写关键路径E2E |
-| LICENSE文件 | 缺失 | 低：开源合规 | 添加MIT/Apache2 |
+| Alembic迁移系统 | 当前使用create_all，已有模型新增字段 | 中：生产部署风险 | 引入Alembic生成初始迁移 |
+| OPC UA网关 | 非当前Goal阻断项 | 低 | 核心闭环稳定后实现（IN-07） |
+| LICENSE文件 | 缺失 | 低：开源合规 | 添加Apache 2.0 |
+| 初赛提交材料 | 方案PPT/作品简介/Demo视频未准备 | 高：截止8月16日 | 优先准备 |
+| 前端a11y审计 | 未运行a11y-audit skill | 中：无障碍合规 | UI稳定后执行Scan→Fix→Verify |
+| Playwright浏览器E2E | 已有API E2E，缺少浏览器级别验证 | 中：视觉回归 | 配置Playwright + 录制Demo场景 |
+
+### 已解决的问题（原已标记为未完成）
+- ✅ 8个预存测试失败 → 84/0/0
+- ✅ 前端Incident指挥中心UI → IncidentPage.tsx (18 kB)
+- ✅ E2E测试 → 4/4 e2e_test_incident_closed_loop.py
 
 ---
 
