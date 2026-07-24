@@ -960,6 +960,14 @@ async def add_workorder_record(
     if data.status:
         if data.status not in VALID_STATUS:
             raise HTTPException(status_code=400, detail="Invalid work order status")
+        # Enforce state machine (same as update_workorder)
+        allowed = WORKORDER_TRANSITIONS.get(before_status, set())
+        if data.status not in allowed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot transition from '{before_status}' to '{data.status}'. "
+                       f"Allowed transitions: {sorted(allowed)}",
+            )
         wo.status = data.status
         wo.updated_at = _utc_now()
         if data.status == "completed" and not wo.completed_at:

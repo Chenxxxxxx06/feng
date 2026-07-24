@@ -89,13 +89,13 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _next_incident_id(db_session_hint: str = "") -> str:
-    """Generate a unique incident ID like INC-20260724-001."""
+def _next_incident_id() -> str:
+    """Generate a unique incident ID like INC-20260724-xxxx."""
+    import uuid
     now = _utc_now()
     date_part = now.strftime("%Y%m%d")
-    # Use microsecond as entropy for uniqueness
-    seq = now.microsecond % 9999
-    return f"INC-{date_part}-{seq:04d}"
+    seq = uuid.uuid4().hex[:4]
+    return f"INC-{date_part}-{seq}"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -429,8 +429,8 @@ async def compress_alarms_for_incident(
     inc.compressed_count = total_alarms
     inc.updated_at = _utc_now()
 
-    # Transition to correlated stage
-    if inc.stage == "detected":
+    # Transition to correlated stage only if alarms were found
+    if inc.stage == "detected" and len(persisted) > 0:
         inc.stage = "correlated"
 
     await db.commit()
