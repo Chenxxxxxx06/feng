@@ -2193,3 +2193,50 @@ async def apply_differential_privacy(
                 "noised_content": result.content,
             }
     raise HTTPException(status_code=404, detail=f"Fragment {fragment_id} not found")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 5: Multimodal inspection
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/incidents/{incident_id}/multimodal-inspect")
+async def multimodal_inspect(
+    incident_id: int,
+    images: list[dict[str, Any]],
+    db: AsyncSession = Depends(get_db),
+):
+    """Process multimodal inspection data for an incident.
+
+    Images are quality-gated, defects become typed evidence,
+    conflicts with SCADA are flagged, missing angles are reported.
+    """
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.multimodal_service import MultimodalService
+
+    service = MultimodalService()
+    scada_context = {"power_kw": 1400, "rated_power_kw": 2000}
+    result = await service.process_inspection(
+        inc.incident_id, inc.turbine_id, images, scada_context,
+    )
+
+    return {
+        "incident_id": result.incident_id,
+        "images_processed": result.images_processed,
+        "images_passed_quality": result.images_passed_quality,
+        "evidence_generated": [
+            {
+                "label": e.label,
+                "description": e.description,
+                "confidence": e.confidence,
+                "source_type": e.source_type,
+                "defects": e.defects_detected,
+            }
+            for e in result.evidence_generated
+        ],
+        "conflicts_with_scada": result.conflicts_with_scada,
+        "retake_requests": result.retake_requests,
+    }
