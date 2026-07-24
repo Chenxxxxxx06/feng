@@ -1379,3 +1379,167 @@ async def verify_audit_chain(
         "error_message": result.error_message,
         "verified_at": result.verified_at.isoformat(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2: What-if fork replay
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/incidents/{incident_id}/what-if")
+async def get_what_if_analysis(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get what-if fork replay analysis for a closed incident.
+
+    Extracts decision points from traces, then simulates alternative paths.
+    No hardcoded results — uses the same decision model with perturbed inputs.
+    """
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.what_if_service import WhatIfService
+
+    service = WhatIfService(db)
+    result = await service.analyze(inc)
+
+    return {
+        "incident_id": result.incident_id,
+        "actual_path": result.actual_path,
+        "decision_points": [
+            {
+                "point_id": dp.point_id,
+                "seq": dp.seq,
+                "stage": dp.stage,
+                "timestamp": dp.timestamp.isoformat(),
+                "actual_choice": dp.actual_choice,
+                "alternatives": dp.alternatives,
+            }
+            for dp in result.decision_points
+        ],
+        "forks": [
+            {
+                "decision_point_id": f.decision_point_id,
+                "alternative_choice": f.alternative_choice,
+                "estimated_cost": f.estimated_cost,
+                "estimated_downtime_hours": f.estimated_downtime_hours,
+                "estimated_risk": f.estimated_risk,
+                "recovery_probability": f.recovery_probability,
+                "total_score": f.total_score,
+                "cost_vs_actual": f.cost_vs_actual,
+                "key_assumptions": f.key_assumptions,
+                "data_quality": f.data_quality,
+                "is_catastrophic": f.is_catastrophic,
+            }
+            for f in result.forks
+        ],
+        "seed": result.seed,
+        "algorithm_version": result.algorithm_version,
+    }
+
+
+@router.post("/incidents/{incident_id}/what-if/simulate")
+async def simulate_fork(
+    incident_id: int,
+    decision_point_id: str = Query(...),
+    alternative: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Simulate a single alternative path at a specific decision point."""
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.what_if_service import WhatIfService
+
+    service = WhatIfService(db)
+    fork = await service.simulate_single_fork(inc, decision_point_id, alternative)
+
+    if fork is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No such decision point '{decision_point_id}' or "
+                   f"alternative '{alternative}' not valid",
+        )
+
+    return {
+        "incident_id": inc.incident_id,
+        "decision_point_id": fork.decision_point_id,
+        "alternative_choice": fork.alternative_choice,
+        "estimated_cost": fork.estimated_cost,
+        "estimated_downtime_hours": fork.estimated_downtime_hours,
+        "estimated_risk": fork.estimated_risk,
+        "recovery_probability": fork.recovery_probability,
+        "total_score": fork.total_score,
+        "cost_vs_actual": fork.cost_vs_actual,
+        "is_catastrophic": fork.is_catastrophic,
+        "key_assumptions": fork.key_assumptions,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2: Task Package + Component Digital Thread
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/incidents/{incident_id}/task-package")
+async def get_task_package(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get proof-carrying maintenance task package for an incident.
+
+    Includes: diagnostic evidence, selected plan, required resources,
+    safety checklist, procedure steps, acceptance criteria, rollback conditions.
+    """
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.task_package_service import TaskPackageService
+
+    service = TaskPackageService(db)
+    pkg = await service.build_package(inc)
+
+    return {
+        "incident_id": pkg.incident_id,
+        "work_order_id": pkg.work_order_id,
+        "turbine_id": pkg.turbine_id,
+        "title": pkg.title,
+        "description": pkg.description,
+        "risk_level": pkg.risk_level,
+        "diagnostic_evidence": pkg.diagnostic_evidence,
+        "selected_plan": pkg.selected_plan,
+        "selection_rationale": pkg.selection_rationale,
+        "required_skills": pkg.required_skills,
+        "assigned_personnel": pkg.assigned_personnel,
+        "required_parts": pkg.required_parts,
+        "required_tools": pkg.required_tools,
+        "safety_checklist": [
+            {
+                "id": s.id,
+                "description": s.description,
+                "required": s.required,
+                "completed": s.completed,
+            }
+            for s in pkg.safety_checklist
+        ],
+        "procedure_steps": [
+            {
+                "seq": s.seq,
+                "action": s.action,
+                "tool_required": s.tool_required,
+                "estimated_minutes": s.estimated_minutes,
+                "safety_note": s.safety_note,
+            }
+            for s in pkg.procedure_steps
+        ],
+        "acceptance_criteria": pkg.acceptance_criteria,
+        "rollback_conditions": pkg.rollback_conditions,
+        "escalation_conditions": pkg.escalation_conditions,
+        "recovery_verification_metrics": pkg.recovery_verification_metrics,
+        "includes_llm_content": pkg.includes_llm_content,
+        "generated_at": pkg.generated_at.isoformat(),
+    }

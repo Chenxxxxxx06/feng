@@ -640,3 +640,129 @@ async def get_turbine_wind(
                 status_code=502,
                 detail="Open-Meteo weather lookup failed and no local weather dataset is available.",
             ) from exc
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2: Health Passport
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/turbines/{turbine_id}/health-passport")
+async def get_health_passport(
+    turbine_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get complete health digital passport for a turbine.
+
+    Cross-event digital thread: health index, incidents, faults,
+    RUL predictions, maintenance history, agent decisions, versions.
+    """
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
+    from app.services.health_passport_service import HealthPassportService
+
+    service = HealthPassportService(db)
+    passport = await service.generate(turbine)
+
+    return {
+        "turbine_id": passport.turbine_id,
+        "turbine_name": passport.turbine_name,
+        "turbine_model": passport.turbine_model,
+        "power_mw": passport.power_mw,
+        "region": passport.region,
+        "commissioned_at": passport.commissioned_at.isoformat()
+        if passport.commissioned_at else None,
+        "current_health_index": passport.current_health_index,
+        "health_trend": passport.health_trend,
+        "total_incidents": passport.total_incidents,
+        "total_faults": passport.total_faults,
+        "total_work_orders": passport.total_work_orders,
+        "total_maintenance_cost": round(passport.total_maintenance_cost, 2),
+        "incidents": passport.incidents,
+        "recent_faults": passport.recent_faults,
+        "rul_predictions": passport.rul_predictions,
+        "agent_decisions": passport.agent_decisions,
+        "maintenance_history": passport.maintenance_history,
+        "model_versions": passport.model_versions,
+        "generated_at": passport.generated_at.isoformat(),
+    }
+
+
+@router.get("/turbines/{turbine_id}/component-thread")
+async def get_component_thread(
+    turbine_id: int,
+    component: str = Query(..., description="Component name to trace"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get digital thread for a specific component on a turbine.
+
+    Chains: turbine → measurement → alarm → incident → work order → repair → certificate.
+    """
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
+    from app.services.component_digital_thread import ComponentDigitalThreadService
+
+    service = ComponentDigitalThreadService(db)
+    thread = await service.trace_component(turbine_id, component)
+
+    return {
+        "turbine_id": thread.turbine_id,
+        "turbine_name": thread.turbine_name,
+        "component": thread.component,
+        "total_events": thread.total_events,
+        "nodes": [
+            {
+                "entity_type": n.entity_type,
+                "entity_id": n.entity_id,
+                "label": n.label,
+                "timestamp": n.timestamp.isoformat() if n.timestamp else None,
+                "data": n.data,
+                "source": n.source,
+            }
+            for n in thread.nodes
+        ],
+        "generated_at": thread.generated_at.isoformat(),
+    }
+
+
+@router.get("/turbines/{turbine_id}/component-threads")
+async def get_all_component_threads(
+    turbine_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get digital threads for all components on a turbine."""
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail="Turbine not found")
+
+    from app.services.component_digital_thread import ComponentDigitalThreadService
+
+    service = ComponentDigitalThreadService(db)
+    threads = await service.trace_all_components(turbine_id)
+
+    return {
+        "turbine_id": turbine_id,
+        "turbine_name": turbine.name,
+        "components": [
+            {
+                "component": t.component,
+                "total_events": t.total_events,
+                "nodes": [
+                    {
+                        "entity_type": n.entity_type,
+                        "entity_id": n.entity_id,
+                        "label": n.label,
+                        "timestamp": n.timestamp.isoformat() if n.timestamp else None,
+                        "source": n.source,
+                    }
+                    for n in t.nodes[:10]  # Limit per component for list view
+                ],
+            }
+            for t in threads
+        ],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
