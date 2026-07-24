@@ -1,6 +1,8 @@
-# 🌪️ 风调预顺 — PHM 预测性运维系统
+# 🌪️ 风调预顺 WindOps ProofLoop — 可验证闭环工业 Agent
 
-> *"预知风云变幻，守护每一度清洁能源"*
+> 不只是预测哪里可能坏，而是把一次设备异常自动组织成**可解释、可审批、可执行、可验证、可复盘**的运维事件。
+
+> 129 tests passing | 18 services | 7 checkpoint commits | Alembic migrations
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white" />

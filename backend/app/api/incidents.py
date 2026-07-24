@@ -2063,3 +2063,133 @@ async def get_license_inventory():
     from app.services.open_phm_api_service import OpenPHMAPIService
     service = OpenPHMAPIService()
     return service.get_third_party_inventory()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 6: Federated knowledge
+# ═══════════════════════════════════════════════════════════════
+
+
+_fed_service = None
+
+
+def _get_fed_service():
+    global _fed_service
+    if _fed_service is None:
+        from app.services.federated_knowledge_service import FederatedKnowledgeService
+        _fed_service = FederatedKnowledgeService()
+    return _fed_service
+
+
+@router.get("/federated/status")
+async def get_federation_status():
+    """Get federation hub status across all farms."""
+    return _get_fed_service().get_federation_status()
+
+
+@router.get("/federated/farms")
+async def list_federation_farms():
+    """List all simulated wind farms in the federation."""
+    service = _get_fed_service()
+    return {
+        "farms": [
+            {"farm_id": fid, "farm_name": f.farm_name, "turbine_count": f.turbine_count,
+             "region": f.region, "local_knowledge": len(f.local_knowledge)}
+            for fid, f in service.hub.farms.items()
+        ]
+    }
+
+
+@router.post("/federated/share")
+async def share_federated_knowledge(
+    farm_id: str = Query(...),
+    fault_type: str = Query(...),
+    params_json: str = Query("{}"),
+    sample_size: int = Query(10),
+    db: AsyncSession = Depends(get_db),
+):
+    """Share a knowledge fragment to the federation hub."""
+    import json as _json
+    params = _json.loads(params_json)
+
+    from app.services.federated_knowledge_service import KnowledgeFragment
+    frag = KnowledgeFragment(
+        fault_type=fault_type, content=params, sample_size=sample_size,
+        category="threshold",
+    )
+    result = _get_fed_service().share_knowledge(farm_id, frag)
+    return {
+        "success": result.success, "message": result.message,
+        "fragment_id": result.fragment_id,
+    }
+
+
+@router.post("/federated/download")
+async def download_federated_knowledge(
+    farm_id: str = Query(...),
+):
+    """Download available external knowledge for a farm."""
+    fragments = _get_fed_service().download_knowledge(farm_id)
+    return {
+        "farm_id": farm_id,
+        "available": len(fragments),
+        "fragments": [
+            {"fragment_id": f.fragment_id, "fault_type": f.fault_type,
+             "source_farm": f.source_farm_id, "sample_size": f.sample_size}
+            for f in fragments
+        ],
+    }
+
+
+@router.post("/federated/backtest")
+async def backtest_federated_knowledge(
+    farm_id: str = Query(...),
+    fragment_id: str = Query(...),
+):
+    """Back-test and accept a downloaded knowledge fragment."""
+    result = _get_fed_service().backtest_and_accept(farm_id, fragment_id)
+    return {
+        "success": result.success, "message": result.message,
+        "conflicts_detected": result.conflicts_detected,
+    }
+
+
+@router.post("/federated/withdraw")
+async def withdraw_federated_knowledge(
+    farm_id: str = Query(...),
+    fragment_id: str = Query(...),
+):
+    """Withdraw a previously shared knowledge fragment."""
+    result = _get_fed_service().withdraw_knowledge(farm_id, fragment_id)
+    return {"success": result.success, "message": result.message}
+
+
+@router.get("/federated/aggregate")
+async def aggregate_federated_knowledge(
+    fault_type: str = Query("bearing_wear"),
+):
+    """Aggregate knowledge across farms for a fault type."""
+    return _get_fed_service().aggregate_knowledge(fault_type)
+
+
+@router.post("/federated/apply-dp")
+async def apply_differential_privacy(
+    fragment_id: str = Query(...),
+    epsilon: float = Query(1.0),
+    delta: float = Query(1e-5),
+    mechanism: str = Query("laplace"),
+):
+    """Apply differential privacy to a shared knowledge fragment."""
+    service = _get_fed_service()
+    for frag in service.hub.shared_registry:
+        if frag.fragment_id == fragment_id:
+            result = service.apply_differential_privacy(frag, epsilon, delta, mechanism)
+            return {
+                "fragment_id": result.fragment_id,
+                "dp_applied": result.dp_applied,
+                "dp_epsilon": result.dp_epsilon,
+                "dp_delta": result.dp_delta,
+                "dp_mechanism": result.dp_mechanism,
+                "noised_content": result.content,
+            }
+    raise HTTPException(status_code=404, detail=f"Fragment {fragment_id} not found")
