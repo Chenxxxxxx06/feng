@@ -1,0 +1,108 @@
+{
+  "checked_on": "2026-06-10",
+  "principle": "This file records local real-dataset artifacts and extraction state only. It does not imply cross-dataset asset or time alignment.",
+  "datasets": [
+    {
+      "id": "care_to_compare_v6",
+      "role": "primary_scada_timeline",
+      "source": "Zenodo record 15846963",
+      "doi": "10.5281/zenodo.15846963",
+      "expected_file": "CARE_To_Compare.zip",
+      "expected_size_bytes": 5503439673,
+      "expected_md5": "2547b58c21ac8c242d13232860cf500c",
+      "local_directory": "backend/data/scada/care_to_compare_v6",
+      "status": "downloading_via_zenodo_get",
+      "download_command": "py -3 -m zenodo_get -r 15846963 -o backend/data/scada/care_to_compare_v6 -v 3 --max-http-retries 8 --backoff-factor 1",
+      "verification_required_before_import": [
+        "file size equals expected_size_bytes",
+        "MD5 equals expected_md5",
+        "archive opens without errors"
+      ],
+      "notes": [
+        "Do not use the partial zip for extraction or import.",
+        "With zenodo_get 3.0.3, -m generated md5sums.txt and exited; the actual download was started without -m."
+      ]
+    },
+    {
+      "id": "nrel_grc_gearbox_cm",
+      "role": "diagnostic_sample_library",
+      "source": "Open Energy Data Initiative submission 738",
+      "doi": "10.25984/1844194",
+      "source_archive": "C:/edge/738.zip",
+      "source_archive_size_bytes": 2945901107,
+      "source_archive_sha256": "FDD6FF142B19D78768BF52DF5A3013A06A01A2C2ABEDEE9E984274FB86F8A766",
+      "local_directory": "backend/data/vibration/nrel_grc_gearbox_cm/raw",
+      "status": "extracted",
+      "extracted_summary": {
+        "outer_files": [
+          "Healthy.zip",
+          "Damaged.zip",
+          "Vibration Condition Monitoring Benchmarking Datasets.pdf",
+          "WindTurbineConditionMonitoringLicenseInfo.txt"
+        ],
+        "healthy_mat_files": 10,
+        "damaged_mat_files": 10,
+        "mat_variables_preview": ["Speed", "Torque", "AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10"]
+      },
+      "import_gap": "Current vibration importer needs MATLAB .mat support and explicit channel selection before this dataset can be imported."
+    },
+    {
+      "id": "mendeley_blade_vibration_faults",
+      "role": "diagnostic_sample_library",
+      "source": "Mendeley Data dataset 5d7vbdp8f7 version 4",
+      "doi": "10.17632/5d7vbdp8f7.4",
+      "source_archive": "C:/edge/Wind_Turbine_Blades_Fault_Diagnosis_based_on_Vibration_Dataset_Analysis.zip",
+      "source_archive_size_bytes": 199325,
+      "source_archive_sha256": "D1D67AC57B0B251C30BB3E620C52D4F6661C208EB7E414926B742394FC24EDB1",
+      "local_directory": "backend/data/vibration/mendeley_blade_vibration_faults/raw",
+      "status": "extracted",
+      "extracted_summary": {
+        "csv_files": 28,
+        "xlsx_files": 7,
+        "sample_rate_hz_from_source_page": 1000,
+        "samples_per_channel_from_source_page": 500
+      },
+      "import_gap": "Current vibration importer needs semicolon-delimited CSV detection and XLSX support before all 35 files can be imported."
+    },
+    {
+      "id": "yolo_annotated_wind_turbine_surface_damage",
+      "role": "diagnostic_sample_library",
+      "source": "Mendeley Data dataset t6fwpc735s version 1",
+      "doi": "10.17632/t6fwpc735s.1",
+      "source_archive": "backend/data/blade_images/yolo_annotated_wind_turbine_surface_damage/t6fwpc735s-1.zip",
+      "expected_size_bytes": 2756431451,
+      "local_directory": "backend/data/blade_images/yolo_annotated_wind_turbine_surface_damage",
+      "status": "downloading_via_mendeley_public_api",
+      "download_command": "curl.exe -L --fail --retry 8 --retry-delay 5 --connect-timeout 30 -C - -o backend/data/blade_images/yolo_annotated_wind_turbine_surface_damage/t6fwpc735s-1.zip https://data.mendeley.com/public-api/zip/t6fwpc735s/download/1",
+      "verification_required_before_import": [
+        "file size equals expected_size_bytes",
+        "archive opens without errors",
+        "image files and YOLO label files are both present"
+      ],
+      "notes": [
+        "The source page states this dataset is derived from the DTU drone inspection image dataset and uses YOLO labels for dirt and damage.",
+        "Do not import until the archive is complete and extracted."
+      ]
+    },
+    {
+      "id": "dtu_drone_inspection",
+      "role": "diagnostic_sample_library",
+      "source": "Mendeley Data dataset hd96prn3nc version 2",
+      "doi": "10.17632/hd96prn3nc.2",
+      "source_archive": "backend/data/blade_images/dtu_drone_inspection/hd96prn3nc-2.zip",
+      "expected_size_bytes": 3029715385,
+      "local_directory": "backend/data/blade_images/dtu_drone_inspection",
+      "status": "downloading_via_mendeley_public_api",
+      "download_command": "curl.exe -L --fail --retry 8 --retry-delay 5 --connect-timeout 30 -C - -o backend/data/blade_images/dtu_drone_inspection/hd96prn3nc-2.zip https://data.mendeley.com/public-api/zip/hd96prn3nc/download/2",
+      "verification_required_before_import": [
+        "file size equals expected_size_bytes",
+        "archive opens without errors",
+        "images are original downloaded files"
+      ],
+      "notes": [
+        "Use this dataset for raw blade inspection imagery and source traceability.",
+        "Do not invent labels for raw images that have no annotation."
+      ]
+    }
+  ]
+}
