@@ -36,6 +36,7 @@ build/
 backend/*.db
 backend/*.db-*
 backend/*.sqlite*
+runtime/
 
 # --- IDE ---
 .vscode/
@@ -79,12 +80,25 @@ backend/data/scada/
 backend/data/era5/
 backend/data/curated_datasets/
 backend/data/modeling/
+backend/data/model_outputs/
+backend/data/models/*.pt
+backend/data/uploads/
 !backend/data/real_dataset_sources.json
 !backend/data/geojson/
 !backend/data/geojson/**
 
+# --- Documentation (dev only, not in repo) ---
+docs/
+.superpowers/
+SETUP_REQUIREMENTS.txt
+_patch_icons.py
+
 # --- Local verification artifacts ---
 frontend/prediction-cost-verified.png
+backend/venv/.requirements.stamp
+backend/.seed.stamp
+frontend/.npm-install.stamp
+runtime/logs/
 
 # --- Local handoff packages ---
 handoff_packages/
@@ -94,3 +108,4 @@ handoff_packages/
 API_KEYS_PLACEHOLDER.txt
 *.pem
 *.key
+frontend/tsconfig.tsbuildinfo

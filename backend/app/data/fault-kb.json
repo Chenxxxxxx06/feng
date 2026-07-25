@@ -1,0 +1,347 @@
+{
+  "version": "2.0",
+  "nodes": [
+    {
+      "id": "gearbox_pitting", "fault_type": "齿轮箱点蚀", "category": "齿轮箱", "icon": "⚙️", "severity": "high",
+      "symptoms": [
+        {"indicator": "振动RMS", "threshold": ">12 mm/s", "unit": "mm/s"},
+        {"indicator": "油液金属颗粒", "threshold": ">200 ppm", "unit": "ppm"},
+        {"indicator": "齿轮箱温度", "threshold": ">85°C", "unit": "°C"}
+      ],
+      "root_causes": ["润滑不足或润滑油变质", "长期过载运行", "齿轮材料制造缺陷", "齿面接触应力过大"],
+      "solutions": [
+        {"action": "更换齿轮油并清洗油路", "difficulty": "medium", "downtime_hours": 8},
+        {"action": "齿面修复（激光熔覆）", "difficulty": "hard", "downtime_hours": 48},
+        {"action": "更换齿轮副", "difficulty": "hard", "downtime_hours": 72}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.6}, {"id": "shaft_misalignment", "name": "轴对中不良", "probability": 0.3}],
+      "spare_parts": [{"name": "SKF-32222 圆锥滚子轴承", "quantity": 2, "est_cost": 8000}, {"name": "Shell Omala S4 GX 320 齿轮油", "quantity": 200, "est_cost": 3000}],
+      "cases": [{"turbine": "陕北2号风机", "date": "2025-03-15", "summary": "振动RMS突增至15.2 mm/s，油液分析发现金属颗粒浓度超标。停机检查确认齿轮箱二级齿轮齿面点蚀。激光熔覆修复后恢复正常，至今运行良好。", "resolution": "激光熔覆齿面修复", "total_cost": 35000, "downtime_days": 3}]
+    },
+    {
+      "id": "gearbox_tooth_break", "fault_type": "齿轮断齿", "category": "齿轮箱", "icon": "⚙️", "severity": "critical",
+      "symptoms": [
+        {"indicator": "振动冲击脉冲", "threshold": "突然增大>5倍", "unit": ""},
+        {"indicator": "齿轮箱异响", "threshold": "周期性金属撞击声", "unit": ""},
+        {"indicator": "功率波动", "threshold": ">20% 瞬时波动", "unit": "%"}
+      ],
+      "root_causes": ["疲劳断裂", "冲击过载", "材料内部缺陷", "共振运行"],
+      "solutions": [
+        {"action": "紧急停机更换齿轮", "difficulty": "hard", "downtime_hours": 72},
+        {"action": "齿轮箱总成更换", "difficulty": "hard", "downtime_hours": 120}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.8}],
+      "spare_parts": [{"name": "齿轮箱齿轮副套件", "quantity": 1, "est_cost": 80000}],
+      "cases": [{"turbine": "陕北7号风机", "date": "2024-06-20", "summary": "运行中突然出现强烈冲击振动，紧急停机后发现齿轮箱高速级齿轮断齿。更换齿轮副后恢复。", "resolution": "更换齿轮副", "total_cost": 120000, "downtime_days": 5}]
+    },
+    {
+      "id": "gearbox_oil_leak", "fault_type": "齿轮箱漏油", "category": "齿轮箱", "icon": "⚙️", "severity": "medium",
+      "symptoms": [
+        {"indicator": "油位下降速率", "threshold": ">0.5L/周", "unit": "L"},
+        {"indicator": "机舱底部油渍", "threshold": "肉眼可见", "unit": ""},
+        {"indicator": "油压偏低", "threshold": "<1.5 bar", "unit": "bar"}
+      ],
+      "root_causes": ["密封件老化", "管路接头松动", "呼吸器堵塞导致内部压力升高"],
+      "solutions": [
+        {"action": "更换密封件并紧固接头", "difficulty": "easy", "downtime_hours": 6},
+        {"action": "清洗或更换呼吸器", "difficulty": "easy", "downtime_hours": 4}
+      ],
+      "related_faults": [{"id": "gearbox_pitting", "name": "齿轮箱点蚀", "probability": 0.3}],
+      "spare_parts": [{"name": "齿轮箱密封件套件", "quantity": 1, "est_cost": 3000}, {"name": "Shell Omala S4 GX 320 齿轮油", "quantity": 50, "est_cost": 750}],
+      "cases": [{"turbine": "关中5号风机", "date": "2025-02-10", "summary": "巡检发现机舱底板有油渍，油位每周下降约0.8L。更换密封件后恢复正常。", "resolution": "更换密封件", "total_cost": 5000, "downtime_days": 1}]
+    },
+    {
+      "id": "bearing_wear", "fault_type": "轴承磨损", "category": "轴承", "icon": "🔩", "severity": "medium",
+      "symptoms": [
+        {"indicator": "振动高频分量", "threshold": ">5 kHz 峰值突增", "unit": ""},
+        {"indicator": "轴承温度", "threshold": ">75°C", "unit": "°C"},
+        {"indicator": "包络谱特征频率", "threshold": "匹配BPFO/BPFI", "unit": ""}
+      ],
+      "root_causes": ["润滑脂不足或污染", "安装不当导致偏载", "电蚀（轴电流）", "疲劳剥落"],
+      "solutions": [
+        {"action": "补充/更换润滑脂", "difficulty": "easy", "downtime_hours": 4},
+        {"action": "更换轴承", "difficulty": "medium", "downtime_hours": 16},
+        {"action": "检查并消除轴电流", "difficulty": "hard", "downtime_hours": 24}
+      ],
+      "related_faults": [{"id": "gearbox_pitting", "name": "齿轮箱点蚀", "probability": 0.5}, {"id": "shaft_misalignment", "name": "轴对中不良", "probability": 0.4}],
+      "spare_parts": [{"name": "SKF-32222 圆锥滚子轴承", "quantity": 2, "est_cost": 8000}, {"name": "SKF LGHP 2 高温润滑脂", "quantity": 5, "est_cost": 500}],
+      "cases": [{"turbine": "陕北5号风机", "date": "2025-01-20", "summary": "巡检发现发电机驱动端轴承温度持续升高，包络分析确认轴承内圈故障特征频率。更换轴承后恢复正常。", "resolution": "更换发电机驱动端轴承", "total_cost": 12000, "downtime_days": 1}]
+    },
+    {
+      "id": "bearing_cage_failure", "fault_type": "轴承保持架故障", "category": "轴承", "icon": "🔩", "severity": "high",
+      "symptoms": [
+        {"indicator": "振动频谱边频带", "threshold": "出现FTF特征频率", "unit": ""},
+        {"indicator": "冲击脉冲", "threshold": "不规则高幅值脉冲", "unit": ""},
+        {"indicator": "温度波动", "threshold": "±5°C 短周期波动", "unit": "°C"}
+      ],
+      "root_causes": ["保持架材料疲劳", "润滑不良导致摩擦增大", "制造缺陷"],
+      "solutions": [
+        {"action": "更换轴承总成", "difficulty": "medium", "downtime_hours": 16},
+        {"action": "改善润滑系统", "difficulty": "easy", "downtime_hours": 4}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.9}],
+      "spare_parts": [{"name": "SKF-32222 圆锥滚子轴承", "quantity": 2, "est_cost": 8000}],
+      "cases": [{"turbine": "陕北3号风机", "date": "2024-10-12", "summary": "振动监测发现FTF特征频率及其边频带，拆检确认保持架断裂。更换轴承后恢复。", "resolution": "更换轴承总成", "total_cost": 15000, "downtime_days": 1}]
+    },
+    {
+      "id": "bearing_electrical_corrosion", "fault_type": "轴承电蚀", "category": "轴承", "icon": "⚡", "severity": "medium",
+      "symptoms": [
+        {"indicator": "轴电压", "threshold": ">0.5V", "unit": "V"},
+        {"indicator": "轴承滚道波纹", "threshold": "搓衣板状纹路", "unit": ""},
+        {"indicator": "润滑脂变黑", "threshold": "含金属粉末", "unit": ""}
+      ],
+      "root_causes": ["轴电流未有效接地", "变频器共模电压", "静电积累"],
+      "solutions": [
+        {"action": "加装轴接地碳刷", "difficulty": "medium", "downtime_hours": 8},
+        {"action": "更换绝缘轴承", "difficulty": "hard", "downtime_hours": 24},
+        {"action": "加装共模滤波器", "difficulty": "medium", "downtime_hours": 12}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.7}],
+      "spare_parts": [{"name": "SKF绝缘轴承 6322/C3VL0241", "quantity": 1, "est_cost": 12000}, {"name": "接地碳刷套件", "quantity": 1, "est_cost": 2000}],
+      "cases": [{"turbine": "陕北9号风机", "date": "2025-05-05", "summary": "发电机轴承更换后发现更换周期异常短，拆检发现滚道有电蚀波纹。加装接地碳刷后轴承寿命明显延长。", "resolution": "更换绝缘轴承+加装接地碳刷", "total_cost": 18000, "downtime_days": 2}]
+    },
+    {
+      "id": "blade_erosion", "fault_type": "叶片前缘侵蚀", "category": "叶片", "icon": "🪶", "severity": "medium",
+      "symptoms": [
+        {"indicator": "功率曲线偏离", "threshold": ">5% 同风速下功率下降", "unit": "%"},
+        {"indicator": "叶片图像", "threshold": "前缘可见粗糙/凹坑", "unit": ""},
+        {"indicator": "振动低频异常", "threshold": "<1 Hz 分量增大", "unit": ""}
+      ],
+      "root_causes": ["风沙/雨滴长期冲蚀", "叶片涂层老化失效", "雷击损伤"],
+      "solutions": [
+        {"action": "叶片前缘修复贴膜", "difficulty": "medium", "downtime_hours": 24},
+        {"action": "重新涂装保护涂层", "difficulty": "medium", "downtime_hours": 48}
+      ],
+      "related_faults": [{"id": "blade_crack", "name": "叶片裂纹", "probability": 0.3}, {"id": "blade_imbalance", "name": "转子不平衡", "probability": 0.5}],
+      "spare_parts": [{"name": "3M 风电叶片保护膜 W8607", "quantity": 1, "est_cost": 15000}, {"name": "PPG PSX 700 聚硅氧烷涂料", "quantity": 50, "est_cost": 8000}],
+      "cases": [{"turbine": "关中1号风机", "date": "2024-11-08", "summary": "SCADA功率曲线分析发现同风速下输出下降约8%，无人机巡检确认叶片前缘有明显冲蚀痕迹。贴膜修复后功率恢复。", "resolution": "叶片前缘贴膜修复", "total_cost": 22000, "downtime_days": 2}]
+    },
+    {
+      "id": "blade_crack", "fault_type": "叶片裂纹", "category": "叶片", "icon": "🪶", "severity": "critical",
+      "symptoms": [
+        {"indicator": "叶片应变突变", "threshold": ">50% 局部应变变化", "unit": "%"},
+        {"indicator": "振动1P分量", "threshold": "显著增大", "unit": ""},
+        {"indicator": "叶片图像", "threshold": "可见裂纹或分层", "unit": ""}
+      ],
+      "root_causes": ["疲劳累积损伤", "制造缺陷（气泡/分层）", "极端阵风冲击", "雷击后结构损伤"],
+      "solutions": [
+        {"action": "叶片结构修复（注胶+补强）", "difficulty": "hard", "downtime_hours": 48},
+        {"action": "更换叶片", "difficulty": "hard", "downtime_hours": 120}
+      ],
+      "related_faults": [{"id": "blade_imbalance", "name": "转子不平衡", "probability": 0.8}],
+      "spare_parts": [{"name": "叶片修复树脂套件", "quantity": 1, "est_cost": 50000}, {"name": "碳纤维补强布", "quantity": 20, "est_cost": 10000}],
+      "cases": [{"turbine": "陕北6号风机", "date": "2024-08-25", "summary": "无人机巡检发现叶片后缘出现约30cm裂纹。注胶补强修复后恢复，后续定期监控未扩展。", "resolution": "注胶补强修复", "total_cost": 60000, "downtime_days": 3}]
+    },
+    {
+      "id": "blade_ice", "fault_type": "叶片结冰", "category": "叶片", "icon": "❄️", "severity": "medium",
+      "symptoms": [
+        {"indicator": "功率低于理论值", "threshold": ">15% 同风速偏差", "unit": "%"},
+        {"indicator": "振动低频增大", "threshold": "<0.5 Hz 分量", "unit": ""},
+        {"indicator": "气象条件", "threshold": "温度<0°C + 高湿度", "unit": ""}
+      ],
+      "root_causes": ["低温高湿气象条件", "叶片防冰涂层失效", "加热系统故障"],
+      "solutions": [
+        {"action": "启动除冰模式(限功率运行)", "difficulty": "easy", "downtime_hours": 0},
+        {"action": "涂覆防冰涂层", "difficulty": "medium", "downtime_hours": 24}
+      ],
+      "related_faults": [{"id": "blade_imbalance", "name": "转子不平衡", "probability": 0.6}],
+      "spare_parts": [{"name": "防冰涂层材料", "quantity": 50, "est_cost": 20000}],
+      "cases": [{"turbine": "陕北10号风机", "date": "2025-01-15", "summary": "寒潮期间功率异常偏低，停机检查发现叶片前缘有明显冰层。启动除冰模式后逐渐恢复。", "resolution": "启动除冰模式+后续涂覆防冰涂层", "total_cost": 25000, "downtime_days": 1}]
+    },
+    {
+      "id": "blade_imbalance", "fault_type": "转子不平衡", "category": "叶片", "icon": "⚖️", "severity": "high",
+      "symptoms": [
+        {"indicator": "1P振动分量", "threshold": ">6 mm/s", "unit": "mm/s"},
+        {"indicator": "机舱摆动幅度", "threshold": ">0.3g 前后方向", "unit": "g"},
+        {"indicator": "功率波动", "threshold": "周期性 ±3%", "unit": "%"}
+      ],
+      "root_causes": ["叶片质量不均匀(结冰/污染/修复后)", "配重块脱落", "叶片桨距角不一致"],
+      "solutions": [
+        {"action": "动态平衡校正", "difficulty": "medium", "downtime_hours": 12},
+        {"action": "清洗叶片并检查桨距角", "difficulty": "easy", "downtime_hours": 6}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.6}, {"id": "shaft_misalignment", "name": "轴对中不良", "probability": 0.3}],
+      "spare_parts": [{"name": "配重块套件", "quantity": 1, "est_cost": 5000}],
+      "cases": [{"turbine": "关中8号风机", "date": "2025-04-02", "summary": "振动监测1P分量持续增大至8.2 mm/s。动态平衡校正后降至2.1 mm/s。", "resolution": "动态平衡校正", "total_cost": 10000, "downtime_days": 1}]
+    },
+    {
+      "id": "generator_overheat", "fault_type": "发电机过热", "category": "发电机", "icon": "🔥", "severity": "high",
+      "symptoms": [
+        {"indicator": "发电机绕组温度", "threshold": ">120°C", "unit": "°C"},
+        {"indicator": "冷却系统温差", "threshold": ">15°C 进出口温差", "unit": "°C"},
+        {"indicator": "功率因数", "threshold": "<0.85", "unit": ""}
+      ],
+      "root_causes": ["冷却系统堵塞或故障", "发电机过载运行", "绕组绝缘老化", "通风不良"],
+      "solutions": [
+        {"action": "清洗冷却系统/更换冷却液", "difficulty": "medium", "downtime_hours": 12},
+        {"action": "检查并修复绕组绝缘", "difficulty": "hard", "downtime_hours": 48}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.4}],
+      "spare_parts": [{"name": "冷却液 Shell D25", "quantity": 100, "est_cost": 2000}],
+      "cases": [{"turbine": "陕北8号风机", "date": "2025-04-10", "summary": "夏季高温期间发电机绕组温度持续120°C以上，检查发现冷却系统部分堵塞。清洗后温度恢复正常。", "resolution": "清洗冷却系统", "total_cost": 8000, "downtime_days": 1}]
+    },
+    {
+      "id": "generator_insulation", "fault_type": "发电机绝缘老化", "category": "发电机", "icon": "🔌", "severity": "high",
+      "symptoms": [
+        {"indicator": "绝缘电阻", "threshold": "<100 MΩ", "unit": "MΩ"},
+        {"indicator": "局部放电量", "threshold": ">1000 pC", "unit": "pC"},
+        {"indicator": "绕组温度异常", "threshold": ">110°C", "unit": "°C"}
+      ],
+      "root_causes": ["长期高温运行", "潮湿环境", "电晕放电", "制造缺陷"],
+      "solutions": [
+        {"action": "烘干处理+绝缘漆浸泡", "difficulty": "hard", "downtime_hours": 48},
+        {"action": "更换发电机定子绕组", "difficulty": "hard", "downtime_hours": 168}
+      ],
+      "related_faults": [{"id": "generator_overheat", "name": "发电机过热", "probability": 0.7}],
+      "spare_parts": [{"name": "绝缘漆 H级", "quantity": 20, "est_cost": 5000}],
+      "cases": [{"turbine": "关中2号风机", "date": "2024-12-05", "summary": "年度检测发现绝缘电阻下降至85 MΩ。烘干处理后恢复至500 MΩ以上。", "resolution": "烘干+绝缘漆处理", "total_cost": 15000, "downtime_days": 2}]
+    },
+    {
+      "id": "yaw_failure", "fault_type": "偏航系统故障", "category": "偏航", "icon": "🧭", "severity": "medium",
+      "symptoms": [
+        {"indicator": "偏航误差", "threshold": ">15°持续", "unit": "°"},
+        {"indicator": "偏航电机电流", "threshold": ">额定1.5倍", "unit": "A"},
+        {"indicator": "功率损失", "threshold": ">10% 同风速", "unit": "%"}
+      ],
+      "root_causes": ["偏航电机故障", "偏航轴承润滑不足", "风向传感器故障", "控制板故障"],
+      "solutions": [
+        {"action": "更换偏航电机", "difficulty": "medium", "downtime_hours": 16},
+        {"action": "偏航轴承润滑维护", "difficulty": "easy", "downtime_hours": 6},
+        {"action": "校准/更换风向传感器", "difficulty": "easy", "downtime_hours": 4}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.5}],
+      "spare_parts": [{"name": "偏航电机 Y225S-4", "quantity": 1, "est_cost": 12000}, {"name": "风向传感器", "quantity": 1, "est_cost": 3000}],
+      "cases": [{"turbine": "关中3号风机", "date": "2025-02-18", "summary": "偏航误差持续偏大导致功率损失15%，更换偏航电机后恢复正常。", "resolution": "更换偏航电机", "total_cost": 18000, "downtime_days": 1}]
+    },
+    {
+      "id": "yaw_sensor_fault", "fault_type": "风向传感器故障", "category": "偏航", "icon": "🧭", "severity": "low",
+      "symptoms": [
+        {"indicator": "风向数据跳变", "threshold": ">30°/s 突变", "unit": "°/s"},
+        {"indicator": "偏航频繁启动", "threshold": ">10次/h", "unit": ""},
+        {"indicator": "对风不准", "threshold": "偏航后仍有>8°误差", "unit": "°"}
+      ],
+      "root_causes": ["传感器老化", "雷击损坏", "接线松动", "结冰干扰"],
+      "solutions": [
+        {"action": "更换风向传感器", "difficulty": "easy", "downtime_hours": 4},
+        {"action": "检查并紧固接线", "difficulty": "easy", "downtime_hours": 2}
+      ],
+      "related_faults": [{"id": "yaw_failure", "name": "偏航系统故障", "probability": 0.4}],
+      "spare_parts": [{"name": "超声波风向传感器", "quantity": 1, "est_cost": 5000}],
+      "cases": [{"turbine": "陕北4号风机", "date": "2025-06-01", "summary": "SCADA记录显示风向数据频繁跳变，偏航系统异常频繁启动。更换风向传感器后问题消失。", "resolution": "更换风向传感器", "total_cost": 6000, "downtime_days": 0}]
+    },
+    {
+      "id": "shaft_misalignment", "fault_type": "轴对中不良", "category": "传动", "icon": "⚡", "severity": "high",
+      "symptoms": [
+        {"indicator": "轴向振动", "threshold": ">8 mm/s", "unit": "mm/s"},
+        {"indicator": "联轴器温度", "threshold": ">70°C", "unit": "°C"},
+        {"indicator": "2X转频分量", "threshold": ">基频50%", "unit": ""}
+      ],
+      "root_causes": ["安装对中误差", "基础沉降", "轴承座松动", "热膨胀不均"],
+      "solutions": [
+        {"action": "激光对中校正", "difficulty": "medium", "downtime_hours": 12},
+        {"action": "加固基础/调整垫片", "difficulty": "hard", "downtime_hours": 24}
+      ],
+      "related_faults": [{"id": "bearing_wear", "name": "轴承磨损", "probability": 0.7}, {"id": "gearbox_pitting", "name": "齿轮箱点蚀", "probability": 0.3}],
+      "spare_parts": [{"name": "调整垫片组", "quantity": 1, "est_cost": 3000}],
+      "cases": [{"turbine": "陕北1号风机", "date": "2024-09-05", "summary": "振动监测发现2X转频分量异常增大，激光对中后发现偏差0.15mm。校正后振动恢复正常。", "resolution": "激光对中校正", "total_cost": 15000, "downtime_days": 1}]
+    },
+    {
+      "id": "coupling_wear", "fault_type": "联轴器磨损", "category": "传动", "icon": "⚡", "severity": "medium",
+      "symptoms": [
+        {"indicator": "联轴器振动", "threshold": ">10 mm/s", "unit": "mm/s"},
+        {"indicator": "联轴器温度", "threshold": ">65°C", "unit": "°C"},
+        {"indicator": "扭矩波动", "threshold": ">10% 平均值波动", "unit": "%"}
+      ],
+      "root_causes": ["联轴器弹性元件老化", "润滑不良", "过载运行"],
+      "solutions": [
+        {"action": "更换弹性元件", "difficulty": "medium", "downtime_hours": 12},
+        {"action": "更换联轴器总成", "difficulty": "hard", "downtime_hours": 24}
+      ],
+      "related_faults": [{"id": "shaft_misalignment", "name": "轴对中不良", "probability": 0.6}],
+      "spare_parts": [{"name": "联轴器弹性元件", "quantity": 1, "est_cost": 8000}],
+      "cases": [{"turbine": "关中6号风机", "date": "2025-03-20", "summary": "联轴器部位振动偏大，拆检发现弹性元件老化龟裂。更换后振动恢复正常。", "resolution": "更换弹性元件", "total_cost": 10000, "downtime_days": 1}]
+    },
+    {
+      "id": "converter_fault", "fault_type": "变频器故障", "category": "电气", "icon": "🔌", "severity": "high",
+      "symptoms": [
+        {"indicator": "变频器报警代码", "threshold": "IGBT过温/过流/过压", "unit": ""},
+        {"indicator": "输出电流谐波", "threshold": "THD>8%", "unit": "%"},
+        {"indicator": "直流母线电压波动", "threshold": ">±10%", "unit": "%"}
+      ],
+      "root_causes": ["IGBT模块老化", "直流电容衰减", "控制板故障", "散热不良"],
+      "solutions": [
+        {"action": "更换IGBT功率模块", "difficulty": "hard", "downtime_hours": 16},
+        {"action": "更换直流母线电容", "difficulty": "hard", "downtime_hours": 24}
+      ],
+      "related_faults": [{"id": "generator_insulation", "name": "发电机绝缘老化", "probability": 0.3}],
+      "spare_parts": [{"name": "IGBT功率模块", "quantity": 1, "est_cost": 30000}, {"name": "直流电容组", "quantity": 1, "est_cost": 15000}],
+      "cases": [{"turbine": "陕北11号风机", "date": "2025-05-30", "summary": "变频器频繁报IGBT过温，检查发现散热风扇故障导致模块老化加速。更换IGBT模块+风扇后恢复。", "resolution": "更换IGBT模块+散热风扇", "total_cost": 38000, "downtime_days": 2}]
+    },
+    {
+      "id": "transformer_overheat", "fault_type": "变压器过热", "category": "电气", "icon": "🔌", "severity": "high",
+      "symptoms": [
+        {"indicator": "变压器油温", "threshold": ">95°C", "unit": "°C"},
+        {"indicator": "绕组温度", "threshold": ">105°C", "unit": "°C"},
+        {"indicator": "油中溶解气体", "threshold": "乙炔>5ppm", "unit": "ppm"}
+      ],
+      "root_causes": ["过载运行", "冷却系统故障", "内部局部放电", "油老化"],
+      "solutions": [
+        {"action": "检查冷却系统并降载运行", "difficulty": "easy", "downtime_hours": 4},
+        {"action": "更换变压器油+滤油处理", "difficulty": "medium", "downtime_hours": 12},
+        {"action": "更换变压器", "difficulty": "hard", "downtime_hours": 72}
+      ],
+      "related_faults": [{"id": "converter_fault", "name": "变频器故障", "probability": 0.4}],
+      "spare_parts": [{"name": "变压器油 25#", "quantity": 500, "est_cost": 8000}],
+      "cases": [{"turbine": "关中4号风机", "date": "2024-07-15", "summary": "夏季高温变压器油温持续95°C以上，油色谱分析发现乙炔超标。滤油处理后恢复正常，后续加强监测。", "resolution": "滤油处理+加强冷却", "total_cost": 12000, "downtime_days": 1}]
+    },
+    {
+      "id": "tower_weld_crack", "fault_type": "塔筒焊缝裂纹", "category": "塔筒", "icon": "🗼", "severity": "critical",
+      "symptoms": [
+        {"indicator": "塔筒振动低频", "threshold": "<0.3Hz 异常增大", "unit": ""},
+        {"indicator": "超声检测", "threshold": "发现裂纹缺陷", "unit": ""},
+        {"indicator": "塔筒倾斜度", "threshold": ">0.5°", "unit": "°"}
+      ],
+      "root_causes": ["焊接缺陷", "疲劳累积", "极端风载", "运输/安装损伤"],
+      "solutions": [
+        {"action": "焊缝打磨补焊+无损检测", "difficulty": "hard", "downtime_hours": 72},
+        {"action": "塔筒加固(加焊加强板)", "difficulty": "hard", "downtime_hours": 96}
+      ],
+      "related_faults": [{"id": "tower_foundation", "name": "基础沉降", "probability": 0.5}],
+      "spare_parts": [{"name": "焊接材料 E7018", "quantity": 50, "est_cost": 5000}],
+      "cases": [{"turbine": "陕北12号风机", "date": "2024-05-10", "summary": "年度塔筒检测发现底部法兰焊缝有15mm裂纹。补焊修复后无损检测通过。", "resolution": "焊缝补焊修复", "total_cost": 45000, "downtime_days": 3}]
+    },
+    {
+      "id": "tower_foundation", "fault_type": "基础沉降", "category": "塔筒", "icon": "🗼", "severity": "critical",
+      "symptoms": [
+        {"indicator": "塔筒垂直度", "threshold": ">0.3°偏移", "unit": "°"},
+        {"indicator": "基础环缝隙", "threshold": ">5mm", "unit": "mm"},
+        {"indicator": "地脚螺栓预紧力", "threshold": "<设计值70%", "unit": ""}
+      ],
+      "root_causes": ["地基处理不当", "地下水影响", "地震/地质活动"],
+      "solutions": [
+        {"action": "基础灌浆加固", "difficulty": "hard", "downtime_hours": 120},
+        {"action": "加装基础调平装置", "difficulty": "hard", "downtime_hours": 72}
+      ],
+      "related_faults": [{"id": "tower_weld_crack", "name": "塔筒焊缝裂纹", "probability": 0.6}],
+      "spare_parts": [{"name": "高强灌浆料", "quantity": 5000, "est_cost": 25000}],
+      "cases": [{"turbine": "关中7号风机", "date": "2023-11-20", "summary": "巡检发现基础环与混凝土之间出现8mm缝隙，沉降监测数据显示持续变化。灌浆加固后稳定。", "resolution": "基础灌浆加固", "total_cost": 80000, "downtime_days": 5}]
+    },
+    {
+      "id": "pitch_system_fault", "fault_type": "变桨系统故障", "category": "变桨", "icon": "🔧", "severity": "high",
+      "symptoms": [
+        {"indicator": "桨距角不一致", "threshold": ">2° 三叶片差异", "unit": "°"},
+        {"indicator": "变桨电机过流", "threshold": ">额定1.3倍", "unit": "A"},
+        {"indicator": "变桨速度异常", "threshold": "<5°/s", "unit": "°/s"}
+      ],
+      "root_causes": ["变桨电机故障", "变桨轴承卡涩", "控制信号干扰", "备用电源故障"],
+      "solutions": [
+        {"action": "更换变桨电机", "difficulty": "hard", "downtime_hours": 24},
+        {"action": "变桨轴承清洗润滑", "difficulty": "medium", "downtime_hours": 12},
+        {"action": "更换变桨电池组", "difficulty": "medium", "downtime_hours": 8}
+      ],
+      "related_faults": [{"id": "blade_imbalance", "name": "转子不平衡", "probability": 0.5}],
+      "spare_parts": [{"name": "变桨电机", "quantity": 1, "est_cost": 20000}, {"name": "变桨电池组", "quantity": 1, "est_cost": 15000}],
+      "cases": [{"turbine": "陕北2号风机", "date": "2025-03-08", "summary": "SCADA显示三叶片桨距角最大偏差3.5°，检查发现2号变桨电机电流异常。更换后恢复同步。", "resolution": "更换变桨电机", "total_cost": 25000, "downtime_days": 2}]
+    }
+  ]
+}

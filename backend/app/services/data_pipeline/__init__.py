@@ -58,6 +58,12 @@ def set_source_status(source: str, status: SourceStatus, record_count: int = 0):
         _pipeline_state.weather_updates += record_count
 
 
+def reset_pipeline_state():
+    """Reset pipeline state to defaults (for testing)."""
+    global _pipeline_state
+    _pipeline_state = PipelineState()
+
+
 def log_pipeline_error(source: str, error: str):
     _pipeline_state.errors.append(f"[{source}] {error}")
     if len(_pipeline_state.errors) > 100:

@@ -1,0 +1,172 @@
+{
+  "version": "2026-06-16",
+  "source": {
+    "requirements": "风调预顺_v1.0.0_需求规格说明书.docx",
+    "project": "feng/backend/app/models, feng/backend/app/api, feng/frontend/src/pages"
+  },
+  "principles": [
+    "实体识别由后端解析层负责，模型只能提供候选槽位。",
+    "任何多候选命中都必须追问用户，不允许随机选择。",
+    "所有写动作确认卡片必须展示实体标准ID、中文名称、当前状态和变更后状态。"
+  ],
+  "entities": [
+    {
+      "id": "turbine",
+      "name": "风机",
+      "model": "Turbine",
+      "primary_fields": ["id", "name", "region", "status", "hi_value", "model", "source_dataset", "source_asset_id"],
+      "resolver": "resolve_turbine_by_ref",
+      "accepted_inputs": ["风机ID", "风机编号", "风机名称", "区域+编号", "YD-B-007", "YD-B007", "YD-B-7号风机"],
+      "normalization": "大写字母；去除空格、下划线、号风机等后缀；数字段补齐到3位。",
+      "failure_policy": "无命中返回 turbine_not_found；多命中返回候选列表并追问。"
+    },
+    {
+      "id": "turbine_group",
+      "name": "风机分组/区域",
+      "model": "Turbine.region",
+      "primary_fields": ["region"],
+      "resolver": "resolve_turbine_group",
+      "accepted_inputs": ["风场A", "A组", "区域B", "风场C"],
+      "normalization": "去除风场、区域、组等后缀，保留标准region。",
+      "failure_policy": "未知分组必须返回可选分组。"
+    },
+    {
+      "id": "fault",
+      "name": "故障记录",
+      "model": "Fault",
+      "primary_fields": ["id", "turbine_id", "fault_type", "confidence", "status", "processing_status", "priority", "work_order_id"],
+      "resolver": "resolve_fault_by_id_or_context",
+      "accepted_inputs": ["故障ID", "风机+故障类型", "风机+最新故障", "活跃故障"],
+      "normalization": "优先使用ID；其次按风机、故障类型、状态和检测时间定位。",
+      "failure_policy": "上下文不足时追问风机或故障类型。"
+    },
+    {
+      "id": "workorder",
+      "name": "维修工单",
+      "model": "WorkOrder",
+      "primary_fields": ["id", "turbine_id", "fault_id", "title", "status", "priority", "fault_type", "assignee_id", "assignee"],
+      "resolver": "resolve_workorder_by_ref",
+      "accepted_inputs": ["WO-0003", "3号工单", "某风机某故障的工单"],
+      "normalization": "WO编号数字段补齐到4位；上下文查询需按风机、故障、状态排序。",
+      "failure_policy": "无命中返回 workorder_not_found；上下文多命中时追问。"
+    },
+    {
+      "id": "personnel",
+      "name": "维修人员",
+      "model": "User / MaintenancePersonnel",
+      "primary_fields": ["id", "username", "email", "role", "is_active", "skills", "region", "max_load"],
+      "resolver": "resolve_personnel_by_name",
+      "accepted_inputs": ["姓名", "用户名", "邮箱", "张工", "王师傅"],
+      "normalization": "去除师傅、工程师、人员等称呼后缀；先查可用维护人员，再查technician用户。",
+      "failure_policy": "无命中返回 assignee_not_found；多命中追问。"
+    },
+    {
+      "id": "component",
+      "name": "风机部件",
+      "model": "RULPrediction.component / VibrationData.component",
+      "primary_fields": ["component"],
+      "resolver": "normalize_component",
+      "accepted_inputs": ["叶片", "齿轮箱", "发电机", "轴承", "传动链", "变桨", "偏航"],
+      "normalization": "映射到 blade、gearbox、generator、bearing、drivetrain、pitch、yaw。",
+      "failure_policy": "未知部件返回可选部件列表。"
+    },
+    {
+      "id": "knowledge_node",
+      "name": "故障知识节点",
+      "model": "FaultKnowledgeNode",
+      "primary_fields": ["id", "fault_type", "category", "severity", "symptoms", "root_causes", "solutions", "verified"],
+      "resolver": "resolve_knowledge_node",
+      "accepted_inputs": ["故障类型", "知识节点ID", "故障类别"],
+      "normalization": "优先精确匹配fault_type，再按类别和别名模糊匹配。",
+      "failure_policy": "无命中时允许创建候选草稿，但必须确认。"
+    },
+    {
+      "id": "ai_provider_config",
+      "name": "AI供应商配置",
+      "model": "AIProviderConfig",
+      "primary_fields": ["id", "provider", "display_name", "base_url", "api_style", "default_model", "model_options", "enabled", "last_test_status"],
+      "resolver": "resolve_ai_provider_config",
+      "accepted_inputs": ["DeepSeek", "通义千问", "Kimi", "OpenAI", "GLM", "Ollama"],
+      "normalization": "供应商别名映射到provider key；API KEY不进入提示词。",
+      "failure_policy": "涉及密钥时只显示已配置/未配置，不回显密钥明文。"
+    },
+    {
+      "id": "data_source",
+      "name": "数据源",
+      "model": "DataSource / DataImportBatch",
+      "primary_fields": ["id", "source_type", "name", "status", "last_connected_at", "last_data_at"],
+      "resolver": "resolve_data_source",
+      "accepted_inputs": ["SCADA", "振动", "图像", "气象", "ERA5", "Open-Meteo"],
+      "normalization": "按source_type和name定位。",
+      "failure_policy": "未知数据源返回可选类型。"
+    }
+  ],
+  "enums": {
+    "turbine_status": {
+      "values": ["normal", "warning", "fault"],
+      "aliases": {
+        "健康": "normal",
+        "正常": "normal",
+        "预警": "warning",
+        "告警": "warning",
+        "故障": "fault"
+      }
+    },
+    "workorder_status": {
+      "values": ["pending", "assigned", "in_progress", "review", "completed", "closed", "cancelled"],
+      "aliases": {
+        "待处理": "pending",
+        "待分配": "pending",
+        "已分配": "assigned",
+        "处理中": "in_progress",
+        "复核中": "review",
+        "已完成": "completed",
+        "已关闭": "closed",
+        "已取消": "cancelled"
+      }
+    },
+    "fault_processing_status": {
+      "values": ["pending", "assigned", "processing", "closed", "failed"],
+      "aliases": {
+        "待处理": "pending",
+        "已派工": "assigned",
+        "处理中": "processing",
+        "已关闭": "closed",
+        "处理失败": "failed"
+      }
+    },
+    "priority": {
+      "values": ["low", "medium", "high", "urgent"],
+      "aliases": {
+        "低": "low",
+        "中": "medium",
+        "高": "high",
+        "紧急": "urgent",
+        "立即": "urgent"
+      }
+    },
+    "damage_type": {
+      "values": ["crack", "chip", "dirt", "corrosion", "erosion", "ice"],
+      "aliases": {
+        "裂纹": "crack",
+        "崩角": "chip",
+        "积污": "dirt",
+        "腐蚀": "corrosion",
+        "侵蚀": "erosion",
+        "结冰": "ice"
+      }
+    },
+    "data_context": {
+      "values": ["fleet_overview", "turbine_detail", "diagnosis", "prediction", "workorder", "knowledge", "settings"],
+      "aliases": {
+        "风场监控": "fleet_overview",
+        "单机详情": "turbine_detail",
+        "故障诊断": "diagnosis",
+        "预测决策": "prediction",
+        "维修工单": "workorder",
+        "知识库": "knowledge",
+        "系统设置": "settings"
+      }
+    }
+  }
+}

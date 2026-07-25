@@ -4,10 +4,14 @@ All sensitive values are loaded from environment variables.
 See .env.example for required variables.
 """
 
-import os
-import secrets
+from pathlib import Path
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
 
 
 class Settings(BaseSettings):
@@ -24,6 +28,22 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./fengdiao_phm.db"
+    
+    # PostgreSQL specific settings
+    POSTGRESQL_URL: str = "postgresql+asyncpg://fengdiao_user:your_password@localhost:5432/fengdiao_phm"
+    
+    # Database priority: sqlite | postgresql
+    DB_PRIORITY: str = "sqlite"
+    
+    # PostgreSQL connection pool settings (used when DATABASE_URL starts with postgresql)
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE: int = 3600
+
+    # PostgreSQL specific settings (used when DATABASE_URL starts with postgresql)
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE: int = 3600
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -50,8 +70,21 @@ class Settings(BaseSettings):
     # Notifications (optional)
     WEIXIN_WEBHOOK_URL: str = ""
 
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "t", "yes", "y", "on", "debug"}:
+                return True
+            if normalized in {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}:
+                return False
+        return value
+
     class Config:
-        env_file = ".env"
+        env_file = (ROOT_DIR / ".env", BACKEND_DIR / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = True
 
@@ -60,3 +93,63 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached application settings."""
     return Settings()
+
+
+def get_project_root() -> Path:
+    """Get the project root directory (parent of backend folder)."""
+    # app/config.py -> app/ -> backend/ -> project_root/
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def get_offline_dataset_path() -> Path | None:
+    """
+    Get the path to offline dataset folder.
+
+    The offline dataset folder should be placed at the same level as backend/ and frontend/.
+    Expected name: fengdiao_dataset_db_handoff_20260611
+
+    Returns:
+        Path to offline dataset folder if exists, None otherwise.
+    """
+    project_root = get_project_root()
+    dataset_folder = project_root / "fengdiao_dataset_db_handoff_20260611"
+
+    if dataset_folder.exists() and dataset_folder.is_dir():
+        return dataset_folder
+    return None
+
+
+def get_offline_database_path() -> Path | None:
+    """
+    Get the path to the SQLite database in the offline dataset folder.
+
+    Also checks backend/ directory as fallback, so that the correct database
+    is discovered regardless of the working directory from which the server
+    is started.
+
+    Returns:
+        Path to the SQLite database file if exists, None otherwise.
+    """
+    dataset_path = get_offline_dataset_path()
+    if dataset_path:
+        db_path = dataset_path / "database" / "fengdiao_phm.db"
+        if db_path.exists():
+            return db_path
+
+    # Fallback: backend/fengdiao_phm.db (relative to project root)
+    project_root = get_project_root()
+    backend_db = project_root / "backend" / "fengdiao_phm.db"
+    if backend_db.exists():
+        return backend_db
+
+    return None
+
+
+def is_sqlite_url(url: str) -> bool:
+    """Check if the database URL is for SQLite."""
+    return url.startswith("sqlite")
+
+
+def is_postgresql_url(url: str) -> bool:
+    """Check if the database URL is for PostgreSQL."""
+    return url.startswith("postgresql")

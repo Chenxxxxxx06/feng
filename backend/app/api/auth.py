@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from typing import Callable
 
 from app.database import get_db
 from app.models import User
@@ -11,6 +12,40 @@ from app.core.security import hash_password, verify_password, create_access_toke
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+# ── Role hierarchy (P0-03: server-side RBAC) ──
+# Higher index = more privilege
+ROLE_LEVEL: dict[str, int] = {
+    "viewer": 0,
+    "operator": 1,
+    "engineer": 2,
+    "approver": 3,
+    "admin": 4,
+}
+
+
+def require_role(min_role: str) -> Callable:
+    """Factory: create a dependency that requires at least `min_role`.
+
+    Usage:
+        @router.post("/faults")
+        async def create_fault(
+            ...,
+            user: User = Depends(require_role("engineer")),
+        ):
+    """
+    async def _check(
+        current_user: User = Depends(get_current_user),
+    ) -> User:
+        min_level = ROLE_LEVEL.get(min_role, 0)
+        user_level = ROLE_LEVEL.get(current_user.role, 0)
+        if user_level < min_level:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Action requires at least role '{min_role}'",
+            )
+        return current_user
+    return _check
 
 
 async def get_current_user(
@@ -35,6 +70,12 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+    # P0-04: inactive users cannot use the system
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
     return user
 
 
@@ -45,11 +86,12 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(User).where(User.username == data.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")
+    # P0-02: public registration always creates viewer — role changes require admin
     user = User(
         username=data.username,
         email=data.email,
         password_hash=hash_password(data.password),
-        role=data.role,
+        role="viewer",
     )
     db.add(user)
     await db.commit()
