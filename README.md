@@ -495,47 +495,6 @@ cd frontend && npm run build
 
 ---
 
-## 👥 开发团队
-
-<table>
-<tr>
-  <td align="center"><b>陈曦</b></td>
-  <td>技术负责人 — 全栈架构 + AI Agent + 知识图谱 + 3D数字孪生</td>
-</tr>
-<tr>
-  <td align="center"><b>牛中义</b></td>
-  <td>前端开发 — 风场监控 + 故障诊断</td>
-</tr>
-<tr>
-  <td align="center"><b>王红娟</b></td>
-  <td>前端开发 — 工单管理 + 系统设置</td>
-</tr>
-<tr>
-  <td align="center"><b>张文仿</b></td>
-  <td>后端开发 — 预测决策 + 数据管道</td>
-</tr>
-<tr>
-  <td align="center"><b>逄晋</b></td>
-  <td>前端开发 — 故障百科 + 知识图谱可视化</td>
-</tr>
-<tr>
-  <td align="center"><b>战心悦</b></td>
-  <td>后端开发 — 无人机调度 + 路径规划算法</td>
-</tr>
-<tr>
-  <td align="center"><b>朱彤浩</b></td>
-  <td>后端开发 — 邮件通知 + 人员管理</td>
-</tr>
-<tr>
-  <td align="center"><b>徐韵涵</b></td>
-  <td>前端开发 — AI助手 + Copilot 交互</td>
-</tr>
-</table>
-
-> 🏫 **西北工业大学 · 软件架构设计课程 · 第十五组 · 2026**
-
----
-
 ## 📈 版本历史
 
 ### v2.1 (2026-07) 🆕
