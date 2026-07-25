@@ -81,6 +81,9 @@ class RecoveryVerificationService:
         # Determine time windows
         now = datetime.now(timezone.utc)
         maintenance_end = incident.updated_at or now
+        # Normalize to aware datetime (SQLite stores naive UTC)
+        if maintenance_end.tzinfo is None:
+            maintenance_end = maintenance_end.replace(tzinfo=timezone.utc)
 
         baseline_start = maintenance_end - timedelta(hours=baseline_hours_before)
         baseline_end = maintenance_end

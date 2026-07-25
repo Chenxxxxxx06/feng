@@ -112,15 +112,59 @@ class VibrationData(Base):
     waveform_path = Column(String(256))
 
 
+class InspectionMission(Base):
+    """无人机巡检任务 — 一次完整的巡检飞行"""
+    __tablename__ = "inspection_missions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mission_id = Column(String(64), unique=True, nullable=False, index=True)
+    turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
+    component = Column(String(64), default="blade")  # blade/gearbox/tower/nacelle
+    status = Column(String(32), default="planned")  # planned/in_flight/completed/aborted
+    waypoints = Column(JSON, nullable=True)  # [{lat, lng, alt, angle, part, seq}]
+    drone_id = Column(String(64), nullable=True)
+    pilot = Column(String(64), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    total_shots = Column(Integer, default=0)
+    passed_shots = Column(Integer, default=0)
+    failed_shots = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
+
+
 class BladeImage(Base):
     __tablename__ = "blade_images"
     id = Column(Integer, primary_key=True, index=True)
+    mission_id = Column(Integer, ForeignKey("inspection_missions.id"), nullable=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
+    component = Column(String(64), nullable=True)  # blade/leading_edge/trailing_edge/...
+    inspection_angle = Column(String(32), nullable=True)  # leading_edge/trailing_edge/pressure_side/suction_side/tip_view
+    waypoint_index = Column(Integer, nullable=True)
+    gps_lat = Column(Float, nullable=True)
+    gps_lng = Column(Float, nullable=True)
+    altitude_m = Column(Float, nullable=True)
+    shoot_distance_m = Column(Float, nullable=True)
     timestamp = Column(DateTime(timezone=True), nullable=False)
     image_path = Column(String(256), nullable=False)
+    image_width = Column(Integer, nullable=True)
+    image_height = Column(Integer, nullable=True)
+    quality_passed = Column(Boolean, nullable=True)
+    quality_blur_score = Column(Float, nullable=True)
+    quality_exposure_ok = Column(Boolean, nullable=True)
+    quality_issues = Column(JSON, nullable=True)
+    retake_reason = Column(Text, nullable=True)
+    retake_requested = Column(Boolean, default=False)
+    algorithm_mode = Column(String(32), default="demo_fixture")  # real_inference / demo_fixture
+    model_version = Column(String(32), nullable=True)
     diagnosis_type = Column(String(32), nullable=True)
     diagnosis_confidence = Column(Float, nullable=True)
     damage_bbox = Column(JSON, nullable=True)
+    defects_detected = Column(JSON, nullable=True)  # [{type, confidence, bbox, severity}]
+    data_source = Column(String(64), nullable=True)  # dtu_drone / care_scada / demo_fixture
+    data_license = Column(String(64), nullable=True)
+    evidence_id = Column(Integer, ForeignKey("evidence_nodes.id"), nullable=True)
+    captured_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class Fault(Base):

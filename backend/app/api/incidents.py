@@ -9,8 +9,9 @@ Routes for the 6-innovation closed loop:
   4.6 Agent flight recorder (trace/span replay)
 """
 
+import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, update
@@ -21,16 +22,20 @@ from app.models import (
     AgentSpan,
     AgentTrace,
     AlarmRecord,
+    BladeImage,
     DecisionPlan,
     EvidenceEdge,
     EvidenceNode,
     Fault,
     FaultKnowledgeNode,
     Incident,
+    InspectionMission,
     PolicyDecision,
     PolicyRule,
+    SCADARecord,
     Turbine,
     User,
+    VibrationData,
     WorkOrder,
 )
 from app.schemas import (
@@ -2196,8 +2201,539 @@ async def apply_differential_privacy(
 
 
 # ═══════════════════════════════════════════════════════════════
-# Phase 5: Multimodal inspection
+# Phase 5: Multimodal inspection + conflict analysis + Golden Demo
 # ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/incidents/{incident_id}/multimodal-conflict")
+async def analyze_multimodal_conflict(
+    incident_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("engineer")),
+):
+    """Run cross-modality conflict analysis for an incident.
+
+    Compares image, SCADA, vibration, alarm, and knowledge evidence.
+    Generates typed evidence edges: supports, contradicts, requires_check.
+    Conflicting evidence is surfaced, NOT hidden.
+    """
+    inc = await db.get(Incident, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.multimodal_conflict_service import MultimodalConflictService
+
+    service = MultimodalConflictService(db)
+    report = await service.analyze_incident(inc)
+
+    await db.commit()
+
+    return {
+        "incident_id": report.incident_id,
+        "supports_count": report.supports_count,
+        "contradicts_count": report.contradicts_count,
+        "requires_check_count": report.requires_check_count,
+        "evidence_sufficient": report.evidence_sufficient,
+        "overall_assessment": report.overall_assessment,
+        "checks": [
+            {
+                "source_type": c.source_type,
+                "target_type": c.target_type,
+                "edge_type": c.edge_type,
+                "confidence": c.confidence,
+                "finding": c.finding,
+                "explanation": c.explanation,
+                "recommendation": c.recommendation,
+                "severity": c.severity,
+            }
+            for c in report.checks
+        ],
+        "generated_edges": report.generated_edges,
+        "generated_at": report.generated_at.isoformat(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Golden Demo: deterministic 13-step closed-loop scenario
+# ═══════════════════════════════════════════════════════════════
+
+GOLDEN_DEMO_TURBINE = {
+    "turbine_id": 34,
+    "turbine_name": "YJ-A-013",
+    "scenario": "12号风机叶片前缘侵蚀",
+    "trigger": "振动RMS持续上升 + 健康指数下降至88.2",
+}
+
+
+@router.get("/demo/golden-scenario")
+async def get_golden_demo_info():
+    """Return golden demo scenario metadata (no side effects)."""
+    return {
+        "scenario_name": GOLDEN_DEMO_TURBINE["scenario"],
+        "turbine_id": GOLDEN_DEMO_TURBINE["turbine_id"],
+        "turbine_name": GOLDEN_DEMO_TURBINE["turbine_name"],
+        "demo_mode": "deterministic_replay",
+        "steps": [
+            {"seq": 1, "action": "风险升高检测", "description": "振动RMS持续上升至8.2mm/s，健康指数下降", "data_source": "SCADA历史回放"},
+            {"seq": 2, "action": "创建无人机巡检任务", "description": "生成叶片巡检任务，目标: 前缘/后缘/压力面/吸力面/叶尖", "endpoint": "POST /api/drone/missions"},
+            {"seq": 3, "action": "第一次拍摄(模糊)", "description": "前缘角度照片模糊(Laplacian方差<100)，质量门拒绝", "endpoint": "POST /api/drone/images/{id}/quality-check"},
+            {"seq": 4, "action": "补拍请求", "description": "系统生成补拍原因和拍摄指导(稳定拍摄/增加光照)", "endpoint": "GET /api/drone/missions/{id}/missing-angles"},
+            {"seq": 5, "action": "补拍成功+缺陷检测", "description": "补拍照片通过质量检查，YOLO检测到前缘侵蚀(conf=0.82)", "endpoint": "POST /api/drone/images/{id}/detect"},
+            {"seq": 6, "action": "多模态冲突分析", "description": "图像vs SCADA: 图像发现损伤但SCADA功率正常→矛盾→需振动验证", "endpoint": "POST /api/incidents/{id}/multimodal-conflict"},
+            {"seq": 7, "action": "创建事件", "description": "证据充足，自动创建Incident进入事件指挥中心", "endpoint": "POST /api/drone/missions/{id}/create-incident"},
+            {"seq": 8, "action": "生成维修方案", "description": "Decision Twin生成3方案对比(立即维修/降载+计划/继续监测)", "endpoint": "POST /api/incidents/{id}/generate-plans"},
+            {"seq": 9, "action": "人工审批", "description": "审批'降载运行+7天计划维修'方案", "endpoint": "POST /api/incidents/{id}/transition"},
+            {"seq": 10, "action": "创建工单", "description": "创建维修工单，关联备件(前缘保护膜)和人员", "endpoint": "POST /api/workorders"},
+            {"seq": 11, "action": "记录维修", "description": "维修执行完成，记录实际工时和备件消耗", "endpoint": "PUT /api/workorders/{id}"},
+            {"seq": 12, "action": "恢复验证", "description": "对比修前/修后振动RMS和温度，验证通过", "endpoint": "POST /api/incidents/{id}/verify-recovery"},
+            {"seq": 13, "action": "知识审核入库", "description": "事件关闭后生成知识草稿，审核通过后发布到故障百科", "endpoint": "POST /api/incidents/{id}/extract-knowledge"},
+        ],
+        "api_base": "/api",
+        "notes": [
+            "所有步骤为确定性操作，不依赖LLM API也可完成核心闭环",
+            "LLM用于方案解释和知识摘要，不可用时降级为规则文本",
+            "SCADA数据为CARE公开数据集历史回放模式",
+            "YOLO检测在无模型时使用demo_fixture模式(明确标记)",
+        ],
+    }
+
+
+@router.post("/demo/golden-run")
+async def run_golden_demo_step(
+    step: int = Query(1, description="Demo step to execute (1-13)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("operator")),
+):
+    """Execute one step of the golden demo scenario.
+
+    Deterministic — same inputs produce same outputs every time.
+    Does NOT require LLM API.
+    """
+    import uuid
+
+    tid = GOLDEN_DEMO_TURBINE["turbine_id"]
+    turbine = await db.get(Turbine, tid)
+    if not turbine:
+        raise HTTPException(status_code=404, detail=f"Demo turbine {tid} not found — may need to re-import CARE dataset")
+
+    results: dict[str, Any] = {"step": step, "turbine_id": tid, "turbine_name": turbine.name}
+
+    if step == 1:
+        # Risk detection — check vibration and health
+        vib = await db.execute(
+            select(VibrationData)
+            .where(VibrationData.turbine_id == tid)
+            .order_by(VibrationData.timestamp.desc())
+            .limit(5)
+        )
+        vib_list = vib.scalars().all()
+        results.update({
+            "step_name": "风险升高检测",
+            "health_index": turbine.hi_value,
+            "health_status": "warning" if (turbine.hi_value or 100) < 90 else "normal",
+            "latest_vibration_rms": [{"component": v.component, "rms": v.rms, "timestamp": v.timestamp.isoformat() if v.timestamp else None} for v in vib_list[:3]],
+            "risk_assessment": f"健康指数{turbine.hi_value}，建议安排无人机叶片巡检",
+            "next_action": "创建巡检任务 (step=2)",
+        })
+
+    elif step == 2:
+        # Create drone mission
+        mis = InspectionMission(
+            mission_id=f"MIS-GOLDEN-{_utc_now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}",
+            turbine_id=tid,
+            component="blade",
+            status="planned",
+            waypoints=[
+                {"lat": 37.3, "lng": 107.6, "alt": 110, "angle": "leading_edge", "part": "blade", "seq": 1},
+                {"lat": 37.3001, "lng": 107.6001, "alt": 100, "angle": "trailing_edge", "part": "blade", "seq": 2},
+                {"lat": 37.2999, "lng": 107.5999, "alt": 105, "angle": "pressure_side", "part": "blade", "seq": 3},
+            ],
+        )
+        db.add(mis)
+        await db.commit()
+        await db.refresh(mis)
+        results.update({
+            "step_name": "创建无人机巡检任务",
+            "mission_id": mis.mission_id,
+            "waypoints": mis.waypoints,
+            "next_action": f"模拟第一次拍摄(模糊) (step=3, mission={mis.mission_id})",
+        })
+
+    elif step == 3:
+        # Simulate first capture — quality fail (blur)
+        mis_result = await db.execute(
+            select(InspectionMission)
+            .where(InspectionMission.turbine_id == tid, InspectionMission.status == "planned")
+            .order_by(InspectionMission.created_at.desc()).limit(1)
+        )
+        mission = mis_result.scalar_one_or_none()
+        if not mission:
+            raise HTTPException(status_code=400, detail="No planned mission found — run step=2 first")
+
+        mission.status = "in_flight"
+        mission.started_at = _utc_now()
+
+        img = BladeImage(
+            mission_id=mission.id, turbine_id=tid, component="blade",
+            inspection_angle="leading_edge", waypoint_index=1,
+            gps_lat=37.3, gps_lng=107.6, altitude_m=110, shoot_distance_m=18,
+            timestamp=_utc_now(), image_path="drone_inspection/demo_blur_leading_edge.jpg",
+            algorithm_mode="demo_fixture", data_source="demo_fixture",
+            captured_at=_utc_now(),
+        )
+        db.add(img)
+        await db.flush()
+
+        # Simulate quality check failure
+        img.quality_passed = False
+        img.quality_blur_score = 0.08
+        img.quality_exposure_ok = True
+        img.quality_issues = ["图像模糊 (Laplacian方差: 42.3)", "分辨率过低: 320x240"]
+        img.retake_requested = True
+        img.retake_reason = "图像模糊 (Laplacian方差: 42.3); 分辨率过低: 320x240"
+        mission.total_shots = 1
+        mission.failed_shots = 1
+        await db.commit()
+        await db.refresh(img)
+
+        results.update({
+            "step_name": "第一次拍摄(质量不合格)",
+            "image_id": img.id,
+            "quality_passed": False,
+            "blur_score": 0.08,
+            "issues": img.quality_issues,
+            "retake_reason": img.retake_reason,
+            "next_action": "补拍请求 (step=4)",
+        })
+
+    elif step == 4:
+        # Retake request — show missing angles
+        mis_result = await db.execute(
+            select(InspectionMission)
+            .where(InspectionMission.turbine_id == tid, InspectionMission.status == "in_flight")
+            .order_by(InspectionMission.created_at.desc()).limit(1)
+        )
+        mission = mis_result.scalar_one_or_none()
+        if not mission:
+            raise HTTPException(status_code=400, detail="No in-flight mission — run step=3 first")
+
+        results.update({
+            "step_name": "补拍请求",
+            "mission_id": mission.mission_id,
+            "retakes_needed": 1,
+            "missing_angles": ["trailing_edge", "pressure_side", "suction_side", "tip_view"],
+            "retake_instructions": ["重拍leading_edge: 提高分辨率至≥640x480, 稳定相机, 增加光照"],
+            "next_action": "补拍成功+缺陷检测 (step=5)",
+        })
+
+    elif step == 5:
+        # Retake capture — quality pass + defect detection
+        mis_result = await db.execute(
+            select(InspectionMission)
+            .where(InspectionMission.turbine_id == tid, InspectionMission.status == "in_flight")
+            .order_by(InspectionMission.created_at.desc()).limit(1)
+        )
+        mission = mis_result.scalar_one_or_none()
+        if not mission:
+            raise HTTPException(status_code=400, detail="No in-flight mission — run step=3 first")
+
+        img = BladeImage(
+            mission_id=mission.id, turbine_id=tid, component="blade",
+            inspection_angle="leading_edge", waypoint_index=1,
+            gps_lat=37.3, gps_lng=107.6, altitude_m=110, shoot_distance_m=15,
+            timestamp=_utc_now(), image_path="drone_inspection/demo_retake_leading_edge.jpg",
+            algorithm_mode="demo_fixture", model_version="demo_fixture_v1",
+            data_source="demo_fixture", captured_at=_utc_now(),
+            quality_passed=True, quality_blur_score=0.85, quality_exposure_ok=True,
+            image_width=1920, image_height=1080, quality_issues=[],
+            diagnosis_type="leading_edge_erosion", diagnosis_confidence=0.82,
+            damage_bbox=[120, 80, 80, 70],
+            defects_detected=[{
+                "type": "leading_edge_erosion", "confidence": 0.82,
+                "bbox": [120, 80, 200, 150], "severity": "moderate",
+                "area_px": 12000, "source": "demo_fixture_example"
+            }],
+        )
+        db.add(img)
+        mission.total_shots = (mission.total_shots or 0) + 1
+        mission.passed_shots = (mission.passed_shots or 0) + 1
+        await db.commit()
+        await db.refresh(img)
+
+        results.update({
+            "step_name": "补拍成功+缺陷检测",
+            "image_id": img.id,
+            "quality_passed": True,
+            "diagnosis_type": "leading_edge_erosion",
+            "confidence": 0.82,
+            "defects": img.defects_detected,
+            "algorithm_mode": "demo_fixture",
+            "next_action": "多模态冲突分析 (step=6)",
+        })
+
+    elif step == 6:
+        # Run multimodal conflict analysis — create incident + evidence first
+        mis_result = await db.execute(
+            select(InspectionMission)
+            .where(InspectionMission.turbine_id == tid)
+            .order_by(InspectionMission.created_at.desc()).limit(1)
+        )
+        mission = mis_result.scalar_one_or_none()
+
+        # Create incident
+        inc = Incident(
+            incident_id=f"INC-GOLDEN-{uuid.uuid4().hex[:6]}",
+            turbine_id=tid, title=f"无人机巡检: {turbine.name} 叶片前缘侵蚀",
+            severity="high", stage="diagnosing", status="open",
+            owner_id=user.id, opened_at=_utc_now(),
+            summary="黄金Demo: 无人机巡检发现YJ-A-013叶片前缘侵蚀(conf=0.82)",
+        )
+        db.add(inc)
+        await db.flush()
+
+        # Create evidence
+        ev = EvidenceNode(
+            incident_id=inc.id, node_type="observation",
+            label="无人机巡检: 叶片前缘 前缘角度",
+            description="Demo: 叶片前缘侵蚀检测 (demo_fixture模式，conf=0.82)",
+            source="drone_inspection", confidence=0.82,
+            props={"defects": [{"type": "leading_edge_erosion", "confidence": 0.82}], "algorithm_mode": "demo_fixture"},
+        )
+        db.add(ev)
+        await db.commit()
+        await db.refresh(inc)
+
+        # Run conflict analysis
+        from app.services.multimodal_conflict_service import MultimodalConflictService
+        service = MultimodalConflictService(db)
+        report = await service.analyze_incident(inc)
+        await db.commit()
+
+        results.update({
+            "step_name": "多模态冲突分析",
+            "incident_id": inc.incident_id,
+            "supports_count": report.supports_count,
+            "contradicts_count": report.contradicts_count,
+            "requires_check_count": report.requires_check_count,
+            "overall_assessment": report.overall_assessment,
+            "top_finding": report.checks[0].finding if report.checks else "无需进一步分析",
+            "next_action": "创建事件 (已自动完成, step=7可查看详情)",
+        })
+
+    elif step == 7:
+        # Show incident detail
+        inc_result = await db.execute(
+            select(Incident)
+            .where(Incident.turbine_id == tid, Incident.incident_id.ilike("INC-GOLDEN%"))
+            .order_by(Incident.created_at.desc()).limit(1)
+        )
+        inc = inc_result.scalar_one_or_none()
+        if not inc:
+            raise HTTPException(status_code=400, detail="No golden incident — run step=6 first")
+
+        ev_result = await db.execute(
+            select(EvidenceNode).where(EvidenceNode.incident_id == inc.id)
+        )
+        ev_list = ev_result.scalars().all()
+
+        results.update({
+            "step_name": "查看事件",
+            "incident_id": inc.incident_id,
+            "title": inc.title,
+            "severity": inc.severity,
+            "stage": inc.stage,
+            "status": inc.status,
+            "evidence_count": len(ev_list),
+            "next_action": "生成维修方案 (step=8)",
+        })
+
+    elif step == 8:
+        # Generate plans
+        inc_result = await db.execute(
+            select(Incident)
+            .where(Incident.turbine_id == tid, Incident.incident_id.ilike("INC-GOLDEN%"))
+            .order_by(Incident.created_at.desc()).limit(1)
+        )
+        inc = inc_result.scalar_one_or_none()
+        if not inc:
+            raise HTTPException(status_code=400, detail="No golden incident — run step=6 first")
+
+        from app.services.decision_twin_service import DecisionTwinService
+        service = DecisionTwinService(db)
+        twin_result = await service.generate_plans(inc)
+
+        inc.stage = "decision_ready"
+        await db.commit()
+
+        results.update({
+            "step_name": "生成维修方案",
+            "incident_id": inc.incident_id,
+            "plans": [
+                {
+                    "plan_name": p.plan_name, "strategy": p.strategy,
+                    "total_score": p.total_score, "is_recommended": p.is_recommended,
+                    "safety_risk": p.safety_risk, "repair_cost": p.repair_cost,
+                    "downtime_hours": p.downtime_hours, "is_feasible": p.is_feasible,
+                }
+                for p in twin_result.plans
+            ],
+            "next_action": "人工审批推荐方案 (step=9)",
+        })
+
+    elif step == 9:
+        # Approval
+        inc_result = await db.execute(
+            select(Incident)
+            .where(Incident.turbine_id == tid, Incident.incident_id.ilike("INC-GOLDEN%"))
+            .order_by(Incident.created_at.desc()).limit(1)
+        )
+        inc = inc_result.scalar_one_or_none()
+        if not inc:
+            raise HTTPException(status_code=400, detail="No golden incident — run step=6 first")
+
+        inc.stage = "executing"
+        inc.updated_at = _utc_now()
+        await db.commit()
+
+        results.update({
+            "step_name": "审批通过",
+            "incident_id": inc.incident_id,
+            "approved_stage": "executing",
+            "decision": "降载运行+7天计划维修",
+            "next_action": "创建工单 (step=10)",
+        })
+
+    elif step == 10:
+        # Create work order
+        inc_result = await db.execute(
+            select(Incident)
+            .where(Incident.turbine_id == tid, Incident.incident_id.ilike("INC-GOLDEN%"))
+            .order_by(Incident.created_at.desc()).limit(1)
+        )
+        inc = inc_result.scalar_one_or_none()
+
+        wo = WorkOrder(
+            turbine_id=tid, fault_id=None,
+            title=f"[黄金Demo] {turbine.name} 叶片前缘修复",
+            description="更换叶片前缘保护膜，修复侵蚀区域。预计工时4h，2人班组。备件: 前缘保护膜(宽500mm)。",
+            status="in_progress", priority="high",
+            fault_type="leading_edge_erosion",
+            assignee=user.username, assignee_id=user.id,
+            cost_estimate=3200, downtime_hours=4,
+        )
+        db.add(wo)
+        await db.commit()
+        await db.refresh(wo)
+
+        results.update({
+            "step_name": "创建工单",
+            "work_order_id": wo.id,
+            "title": wo.title,
+            "status": wo.status,
+            "assignee": wo.assignee,
+            "cost_estimate": wo.cost_estimate,
+            "next_action": "记录维修完成 (step=11)",
+        })
+
+    elif step == 11:
+        # Complete work order
+        wo_result = await db.execute(
+            select(WorkOrder)
+            .where(WorkOrder.turbine_id == tid, WorkOrder.title.ilike("%黄金Demo%"))
+            .order_by(WorkOrder.created_at.desc()).limit(1)
+        )
+        wo = wo_result.scalar_one_or_none()
+        if not wo:
+            raise HTTPException(status_code=400, detail="No golden work order — run step=10 first")
+
+        wo.status = "completed"
+        wo.cost_actual = 3000
+        wo.completed_at = _utc_now()
+        await db.commit()
+
+        results.update({
+            "step_name": "维修完成",
+            "work_order_id": wo.id,
+            "status": "completed",
+            "cost_actual": wo.cost_actual,
+            "completed_at": wo.completed_at.isoformat(),
+            "next_action": "恢复验证 (step=12)",
+        })
+
+    elif step == 12:
+        # Recovery verification
+        inc_result = await db.execute(
+            select(Incident)
+            .where(Incident.turbine_id == tid, Incident.incident_id.ilike("INC-GOLDEN%"))
+            .order_by(Incident.created_at.desc()).limit(1)
+        )
+        inc = inc_result.scalar_one_or_none()
+        if not inc:
+            raise HTTPException(status_code=400, detail="No golden incident — run step=6 first")
+
+        from app.services.recovery_verification_service import RecoveryVerificationService
+        service = RecoveryVerificationService(db)
+        cert = await service.verify(inc)
+
+        inc.verification_status = cert.verification_status.value
+        inc.stage = "verifying"
+        await db.commit()
+
+        results.update({
+            "step_name": "恢复验证",
+            "certificate_id": cert.certificate_id,
+            "verification_status": cert.verification_status.value,
+            "observation_hours": cert.observation_hours,
+            "metrics_passed": sum(1 for m in cert.metrics if m.passed),
+            "metrics_total": len(cert.metrics),
+            "can_close": cert.verification_status.value == "pass",
+            "next_action": "知识审核入库 (step=13)",
+        })
+
+    elif step == 13:
+        # Knowledge extraction
+        inc_result = await db.execute(
+            select(Incident)
+            .where(Incident.turbine_id == tid, Incident.incident_id.ilike("INC-GOLDEN%"))
+            .order_by(Incident.created_at.desc()).limit(1)
+        )
+        inc = inc_result.scalar_one_or_none()
+        if not inc:
+            raise HTTPException(status_code=400, detail="No golden incident — run step=6 first")
+
+        # Close incident (requires verification pass)
+        if inc.verification_status == "pass":
+            inc.status = "resolved"
+            inc.stage = "resolved"
+            inc.closed_at = _utc_now()
+
+        from app.services.knowledge_flywheel_service import KnowledgeFlywheelService
+        kfs = KnowledgeFlywheelService(db)
+        draft = await kfs.generate_review(inc)
+        extract = await kfs.extract_and_dedup(inc)
+        await db.commit()
+
+        results.update({
+            "step_name": "知识审核入库",
+            "incident_id": inc.incident_id,
+            "status": inc.status,
+            "review_summary": draft.summary[:200],
+            "lessons_learned": draft.lessons_learned,
+            "knowledge_fragments": extract.fragments_extracted,
+            "fragments_deduped": extract.fragments_deduped,
+            "pending_review": extract.fragments_pending_review,
+            "demo_complete": True,
+            "final_message": (
+                "黄金Demo 13步完整闭环已运行完成。"
+                "核心链路: 风险检测→巡检→补拍→缺陷检测→冲突分析→"
+                "事件→方案→审批→工单→维修→验证→知识沉淀。"
+            ),
+        })
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid step {step}. Valid: 1-13.")
+
+    return results
 
 
 @router.post("/incidents/{incident_id}/multimodal-inspect")

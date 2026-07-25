@@ -159,7 +159,7 @@ async def health_check():
 from app.api import (
     auth, turbines, diagnosis, prediction,
     workorders, settings as settings_api, ai, personnel, knowledge,
-    agent, agent_actions, agent_tools, agent_tasks, incidents,
+    agent, agent_actions, agent_tools, agent_tasks, incidents, drone,
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证管理"])
@@ -176,6 +176,7 @@ app.include_router(settings_api.router, prefix="/api/settings", tags=["系统设
 app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
 app.include_router(personnel.router, prefix="/api/personnel", tags=["人员管理"])
 app.include_router(incidents.router, prefix="/api", tags=["事件指挥"])
+app.include_router(drone.router, prefix="/api/drone", tags=["无人机巡检"])
 
 # --- Frontend SPA serving (production) ---
 if FRONTEND_DIST.exists():

@@ -110,6 +110,18 @@ class BladeYoloService:
         self.model_path = model_path
         self._model = None
 
+    def is_model_available(self) -> bool:
+        """Check if YOLO model weights and ultralytics are available.
+
+        Used by multimodal_service and other callers to decide between
+        real_inference and demo_fixture mode.
+        """
+        try:
+            self._load_model()
+            return True
+        except BladeModelUnavailable:
+            return False
+
     def _load_model(self):
         if self._model is not None:
             return self._model
