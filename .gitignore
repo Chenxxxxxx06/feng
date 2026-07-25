@@ -92,6 +92,13 @@ docs/
 .superpowers/
 SETUP_REQUIREMENTS.txt
 _patch_icons.py
+rubbish/
+reports/
+COMPETITION_GOAL.md
+DATA_INTEGRATION_STRATEGY.md
+ENTERPRISE_UPGRADE_DESIGN.md
+MATHEMATICAL_MODELING_DESIGN.md
+PROJECT_HANDOFF.md
 
 # --- Local verification artifacts ---
 frontend/prediction-cost-verified.png
