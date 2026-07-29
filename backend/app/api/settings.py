@@ -1,8 +1,10 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.models import (
@@ -27,7 +29,8 @@ from app.services.data_pipeline.era5_loader import era5_loader
 from app.services.data_pipeline.scada_loader import scada_loader
 from app.services.qwen_client import get_client
 from app.services.email_service import EmailConfigError, send_email
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_role
+from app.core.crypto import decrypt_secret, mark_secret_for_upgrade
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -41,8 +44,8 @@ AI_PROVIDER_TEMPLATES: dict[str, dict] = {
     "deepseek": {
         "display_name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "default_model": "deepseek-chat",
-        "model_options": ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"],
+        "default_model": "deepseek-v4-flash",
+        "model_options": ["deepseek-v4-flash"],
     },
     "glm": {
         "display_name": "智谱GLM",
@@ -101,7 +104,8 @@ def _serialize_ai_provider(config: AIProviderConfig) -> AIProviderConfigResponse
         default_model=config.default_model,
         model_options=config.model_options or _provider_template(config.provider).get("model_options", []),
         enabled=bool(config.enabled),
-        has_api_key=bool(config.api_key),
+        # 响应始终脱敏：只回传「是否已配置密钥」，永不回传密钥本体（明文或密文）
+        has_api_key=bool(decrypt_secret(config.api_key)),
         last_test_status=config.last_test_status,
         last_test_message=config.last_test_message,
         last_test_at=config.last_test_at,
@@ -149,7 +153,9 @@ async def _ensure_legacy_ai_provider(db: AsyncSession, user: User) -> None:
         user_id=user.id,
         provider=provider,
         display_name=user.api_provider or template["display_name"],
-        api_key=user.api_key,
+        # decrypt_secret 对明文幂等：无论 users.api_key 是历史明文还是密文，
+        # 这里拿到的都是可用明文，写入时再由 EncryptedSecret 列类型统一加密。
+        api_key=decrypt_secret(user.api_key),
         base_url=user.api_base_url or template["base_url"],
         api_style="openai",
         default_model=user.model_preference or template["default_model"],
@@ -157,7 +163,12 @@ async def _ensure_legacy_ai_provider(db: AsyncSession, user: User) -> None:
         enabled=True,
     )
     db.add(config)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Concurrent request already created the legacy provider row; the
+        # caller re-queries afterwards, so just roll back.
+        await db.rollback()
 
 
 @router.get("/ai-provider-templates")
@@ -206,6 +217,9 @@ async def create_ai_provider(
         config.last_test_status = "untested"
         config.last_test_message = None
         config.last_test_at = None
+    # 静态加密「写时升级」：本次保存必定重写 api_key 列，让历史明文行落盘时
+    # 经 EncryptedSecret 加密。不需要任何批量迁移脚本改动既有数据。
+    mark_secret_for_upgrade(config, "api_key")
     config.base_url = data.base_url.strip()
     config.api_style = data.api_style or "openai"
     config.default_model = data.default_model.strip() if data.default_model else None
@@ -243,7 +257,9 @@ async def test_ai_provider(
         raise HTTPException(status_code=404, detail="AI供应商配置不存在")
 
     model = data.model or config.default_model or _provider_template(config.provider).get("default_model") or "qwen-plus"
-    if not config.api_key and config.provider != "ollama":
+    # 读取路径统一解密（对历史明文幂等），确保发给上游供应商的一定是可用明文
+    effective_key = decrypt_secret(config.api_key)
+    if not effective_key and config.provider != "ollama":
         config.last_test_status = "error"
         config.last_test_message = "未配置API Key"
         config.last_test_at = datetime.now(timezone.utc)
@@ -251,8 +267,9 @@ async def test_ai_provider(
         return {"status": "error", "message": config.last_test_message, "model": model}
 
     try:
-        client = get_client(config.api_key, config.base_url)
-        response = client.chat.completions.create(
+        client = get_client(effective_key, config.base_url)
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
             model=model,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=8,
@@ -499,7 +516,10 @@ async def list_data_sources(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/data-sources/test")
-async def test_data_source(data: DataSourceTestRequest):
+async def test_data_source(
+    data: DataSourceTestRequest,
+    _user: User = Depends(require_role("engineer")),
+):
     """Test connection to a data source."""
     src = data.source_type.lower()
     try:

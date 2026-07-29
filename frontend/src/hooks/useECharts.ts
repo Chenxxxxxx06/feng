@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import * as echarts from 'echarts';
-import type { EChartsOption } from 'echarts';
+import * as echarts from '../services/echarts';
+import type { EChartsOption } from '../services/echarts';
 
 export function useECharts({
   option,

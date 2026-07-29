@@ -1,10 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import type { WorkOrder, Turbine } from '../../types';
-import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import StateBlock from '../../components/Common/StateBlock';
+import { Skeleton } from '../../components/Common/Skeleton';
+import { toast, describeError } from '../../components/Common/Toast';
+import WorkOrderSchedulePanel from '../../components/Maintenance/WorkOrderSchedulePanel';
+import { useHasMinimumRole, READ_ONLY_PERMISSION_TITLE } from '../../services/permissions';
 
 const STATUS_FLOW = ['pending', 'assigned', 'in_progress', 'review', 'completed', 'closed'];
 const STATUS_FILTERS = [...STATUS_FLOW, 'cancelled'];
+// 与后端 workorders.py 的 WORKORDER_TRANSITIONS 状态机保持一致
+const STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ['assigned', 'in_progress', 'cancelled'],
+  assigned: ['in_progress', 'cancelled'],
+  in_progress: ['review', 'completed', 'cancelled'],
+  review: ['in_progress', 'completed', 'cancelled'],
+  completed: ['closed'],
+  closed: [],
+  cancelled: [],
+};
 const STATUS_LABEL: Record<string, string> = {
   pending: '待分配',
   assigned: '已分配',
@@ -132,6 +147,8 @@ function WorkOrderStepper({ status }: { status: string }) {
 }
 
 export default function WorkOrderPage() {
+  const canManage = useHasMinimumRole('operator');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [turbines, setTurbines] = useState<Turbine[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
@@ -143,6 +160,11 @@ export default function WorkOrderPage() {
   const [previewWO, setPreviewWO] = useState<WorkOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WorkOrder | null>(null);
   const [deletingOrder, setDeletingOrder] = useState(false);
+  const [verifyTarget, setVerifyTarget] = useState<WorkOrder | null>(null);
+  const [verifyNote, setVerifyNote] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [aiError, setAiError] = useState<string>('');
@@ -163,6 +185,39 @@ export default function WorkOrderPage() {
     cost_estimate: '0',
   });
   const [form, setForm] = useState(emptyForm);
+  const contextIncidentId = Number(searchParams.get('incident_id') || 0);
+  const contextTurbineId = Number(searchParams.get('turbine_id') || 0);
+  const contextIncidentRef = searchParams.get('incident_ref')?.trim() || '';
+  const contextTurbineName = searchParams.get('turbine_name')?.trim() || '';
+  const contextIncidentTitle = searchParams.get('incident_title')?.trim() || '';
+
+  useEffect(() => {
+    if (!canManage || contextIncidentId <= 0 || contextTurbineId <= 0) return;
+
+    setForm((current) => ({
+      ...current,
+      turbine_id: String(contextTurbineId),
+      title: current.title || `${contextTurbineName || `#${contextTurbineId}`} 事件维修处置`,
+      description:
+        current.description ||
+        `关联事件：${contextIncidentRef || `#${contextIncidentId}`}${
+          contextIncidentTitle ? `\n事件标题：${contextIncidentTitle}` : ''
+        }`,
+      priority: current.priority === 'medium' ? 'high' : current.priority,
+    }));
+    setShowCreate(true);
+  }, [
+    contextIncidentId,
+    contextIncidentRef,
+    contextIncidentTitle,
+    contextTurbineId,
+    contextTurbineName,
+    canManage,
+  ]);
+
+  const clearIncidentContext = () => {
+    setSearchParams({}, { replace: true });
+  };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -198,6 +253,7 @@ export default function WorkOrderPage() {
   }, [orders]);
 
   const handleCreate = async () => {
+    if (!canManage) return;
     setCreateResult(null);
     const turbineId = Number(form.turbine_id);
     if (!turbineId || turbineId <= 0) {
@@ -212,6 +268,7 @@ export default function WorkOrderPage() {
     try {
       await api.post('/workorders/', {
         turbine_id: turbineId,
+        incident_id: contextIncidentId > 0 ? contextIncidentId : null,
         title: form.title.trim(),
         description: form.description || null,
         assignee: form.assignee || null,
@@ -224,32 +281,53 @@ export default function WorkOrderPage() {
       });
       setShowCreate(false);
       setForm(emptyForm);
+      clearIncidentContext();
       setCreateResult(null);
+      toast.success('工单已创建', form.title.trim());
       fetchOrders();
     } catch (err: any) {
-      setCreateResult({ type: 'error', message: err.response?.data?.detail || '工单创建失败，请检查必填字段' });
+      const message = describeError(err, '工单创建失败，请检查必填字段');
+      setCreateResult({ type: 'error', message });
+      toast.error('工单创建失败', message);
     } finally {
       setCreating(false);
     }
   };
 
   const advanceStatus = async (id: number, current: string) => {
+    if (!canManage) return;
     const idx = STATUS_FLOW.indexOf(current);
     if (idx < STATUS_FLOW.length - 1) {
-      await api.put(`/workorders/${id}`, { status: STATUS_FLOW[idx + 1] });
-      setOpenActionId(null);
-      fetchOrders();
+      try {
+        await api.put(`/workorders/${id}`, { status: STATUS_FLOW[idx + 1] });
+        setOpenActionId(null);
+        toast.success('工单状态已推进', `WO-${String(id).padStart(4, '0')} → ${STATUS_LABEL[STATUS_FLOW[idx + 1]]}`);
+        fetchOrders();
+      } catch (err: any) {
+        const message = describeError(err, '工单状态推进失败，请稍后重试');
+        setActionError(message);
+        toast.error('工单状态推进失败', message);
+      }
     }
   };
 
   const cancelOrder = async (id: number) => {
-    const { data } = await api.put(`/workorders/${id}`, { status: 'cancelled' });
-    setOrders((prev) => prev.map((o) => (o.id === id ? data : o)));
-    setOpenActionId(null);
-    fetchOrders();
+    if (!canManage) return;
+    try {
+      const { data } = await api.put(`/workorders/${id}`, { status: 'cancelled' });
+      setOrders((prev) => prev.map((o) => (o.id === id ? data : o)));
+      setOpenActionId(null);
+      toast.success('工单已取消', `WO-${String(id).padStart(4, '0')}`);
+      fetchOrders();
+    } catch (err: any) {
+      const message = describeError(err, '取消工单失败，请稍后重试');
+      setActionError(message);
+      toast.error('取消工单失败', message);
+    }
   };
 
   const requestDeleteOrder = (wo: WorkOrder) => {
+    if (!canManage) return;
     setDeleteTarget(wo);
     setOpenActionId(null);
   };
@@ -257,19 +335,62 @@ export default function WorkOrderPage() {
   const confirmDeleteOrder = async () => {
     if (!deleteTarget) return;
     setDeletingOrder(true);
-    await api.delete(`/workorders/${deleteTarget.id}`);
-    setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
-    if (previewWO?.id === deleteTarget.id) {
-      setPreviewWO(null);
-      setAiAnalysis(null);
-      setAiError('');
-      setEditingWO(false);
+    try {
+      await api.delete(`/workorders/${deleteTarget.id}`);
+      setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+      if (previewWO?.id === deleteTarget.id) {
+        setPreviewWO(null);
+        setAiAnalysis(null);
+        setAiError('');
+        setEditingWO(false);
+      }
+      toast.success('工单已删除', deleteTarget.title);
+      setDeleteTarget(null);
+    } catch (err: any) {
+      const message = describeError(err, '工单删除失败，请稍后重试');
+      setActionError(message);
+      toast.error('工单删除失败', message);
+    } finally {
+      setDeletingOrder(false);
     }
-    setDeleteTarget(null);
-    setDeletingOrder(false);
+  };
+
+  const requestVerifyClose = (wo: WorkOrder) => {
+    if (!canManage) return;
+    setVerifyTarget(wo);
+    setVerifyNote('');
+    setVerifyError('');
+    setOpenActionId(null);
+  };
+
+  const confirmVerifyClose = async () => {
+    if (!verifyTarget) return;
+    setVerifying(true);
+    setVerifyError('');
+    try {
+      // 后端 P0-12：completed→closed 前必须存在 action_type='verified' 的维修记录
+      await api.post(`/workorders/${verifyTarget.id}/records`, {
+        action_type: 'verified',
+        content: verifyNote.trim() || '验收通过',
+      });
+      const { data } = await api.put(`/workorders/${verifyTarget.id}`, { status: 'closed' });
+      setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+      if (previewWO?.id === data.id) setPreviewWO(data);
+      toast.success('工单已验收关闭', verifyTarget.title);
+      setVerifyTarget(null);
+      setVerifyNote('');
+      fetchOrders();
+    } catch (err: any) {
+      const message = describeError(err, '验收关闭失败，请稍后重试');
+      setVerifyError(message);
+      toast.error('验收关闭失败', message);
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const startEdit = (wo: WorkOrder) => {
+    if (!canManage) return;
     setEditForm({
       title: wo.title,
       description: wo.description || '',
@@ -283,24 +404,42 @@ export default function WorkOrderPage() {
     setEditingWO(true);
   };
 
+  // 后端 P0-11/P0-12 的状态校验返回英文 detail，这里转为可读中文
+  const translateStatusError = (httpStatus?: number, detail?: string): string => {
+    if (httpStatus === 409 && detail?.includes('without verification')) {
+      return '工单未通过验收，不能直接关闭。请使用「验收并关闭」按钮填写验收结论后再关闭。';
+    }
+    if (httpStatus === 409 && detail?.startsWith('Cannot transition')) {
+      return '当前状态不允许流转到所选状态，请刷新页面确认最新状态后重试。';
+    }
+    if (httpStatus === 400 && detail === 'Invalid work order status') {
+      return '工单状态取值无效，请重新选择。';
+    }
+    return detail || '工单保存失败，请检查填写内容';
+  };
+
   const saveEdit = async () => {
-    if (!previewWO) return;
+    if (!canManage || !previewWO) return;
     const assignee = personnel.find((p) => p.name === editForm.assignee);
-    const { data } = await api.put(`/workorders/${previewWO.id}`, {
-      title: editForm.title,
-      description: editForm.description || null,
-      status: editForm.status,
-      assignee: editForm.assignee || null,
-      assignee_id: assignee?.id || null,
-      assignee_email: assignee?.email || null,
-      priority: editForm.priority,
-      fault_type: editForm.fault_type || null,
-      due_date: editForm.due_date || null,
-      cost_estimate: Number(editForm.cost_estimate),
-    });
-    setPreviewWO(data);
-    setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
-    setEditingWO(false);
+    try {
+      const { data } = await api.put(`/workorders/${previewWO.id}`, {
+        title: editForm.title,
+        description: editForm.description || null,
+        status: editForm.status,
+        assignee: editForm.assignee || null,
+        assignee_id: assignee?.id || null,
+        assignee_email: assignee?.email || null,
+        priority: editForm.priority,
+        fault_type: editForm.fault_type || null,
+        due_date: editForm.due_date || null,
+        cost_estimate: Number(editForm.cost_estimate),
+      });
+      setPreviewWO(data);
+      setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+      setEditingWO(false);
+    } catch (err: any) {
+      setActionError(translateStatusError(err.response?.status, err.response?.data?.detail));
+    }
   };
 
   const translateEmailError = (detail: string): string => {
@@ -316,6 +455,7 @@ export default function WorkOrderPage() {
   };
 
   const sendEmail = async (wo: WorkOrder) => {
+    if (!canManage) return;
     setSendingEmail(true);
     setEmailResult(null);
     try {
@@ -369,9 +509,9 @@ export default function WorkOrderPage() {
       } else if (status) {
         setAiError(detail || `请求失败 (HTTP ${status})，请检查后端服务。`);
       } else if (axiosCode === 'ECONNABORTED') {
-        setAiError('AI分析请求超时（>15秒），AI供应商响应过慢或网络不稳，请稍后重试。');
+        setAiError('AI分析请求超时（>60秒），AI供应商响应过慢或网络不稳，请稍后重试。');
       } else if (axiosCode === 'ERR_NETWORK' || axiosCode === 'ERR_CONNECTION_REFUSED') {
-        setAiError('无法连接后端服务（端口8000），请确认后端已启动：cd feng/backend && python -m app.main');
+        setAiError('无法连接后端服务（端口 8000），请确认后端已启动：双击 启动风调预顺.bat，或 cd backend && python launcher.py');
       } else {
         setAiError(`请求失败 (${axiosCode || '未知错误'})：${err?.message || ''}。请检查后端服务是否运行、AI配置是否正确。`);
       }
@@ -388,8 +528,8 @@ export default function WorkOrderPage() {
   };
 
   return (
-    <div className="h-full overflow-auto ops-page">
-      <div className="mx-auto max-w-[1480px] space-y-5 p-6">
+    <div className="h-full overflow-auto ops-page page-enter">
+      <div className="ops-content mx-auto max-w-[1480px] space-y-4">
         <section className="ops-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="ops-eyebrow">维修记录与通知管理</p>
@@ -400,24 +540,28 @@ export default function WorkOrderPage() {
           </div>
           <button
             data-action="create-workorder"
-            onClick={() => setShowCreate(true)}
-            className="ops-btn ops-btn-primary h-10 px-4 text-sm"
+            onClick={() => canManage && setShowCreate(true)}
+            disabled={!canManage}
+            title={canManage ? '创建维修工单' : READ_ONLY_PERMISSION_TITLE}
+            className="btn btn-primary btn-lg flex-shrink-0"
           >
             创建工单
           </button>
         </section>
 
-        <section className="grid gap-3 md:grid-cols-4">
-          {stats.map((item) => (
-            <div key={item.label} className="ops-panel p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-muted">{item.label}</span>
-                <span className="text-[10px] text-text-muted">{item.hint}</span>
+        <section className="grid gap-3 md:grid-cols-4" aria-label="工单概览指标">
+          {stats.map((item, i) => (
+            <div key={item.label} className={`ops-panel surface-card-hover p-3.5 stagger-${Math.min(4, i + 1)}`} title={`${item.label}：${item.value}（${item.hint}）`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="field-label truncate">{item.label}</span>
+                <span className="field-label flex-shrink-0">{item.hint}</span>
               </div>
-              <p className={`mt-3 font-mono text-3xl font-semibold ${item.tone}`}>{item.value}</p>
+              <p className={`num mt-2 text-[26px] font-bold leading-none ${item.tone}`}>{item.value}</p>
             </div>
           ))}
         </section>
+
+        <WorkOrderSchedulePanel />
 
         <section className="ops-panel p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -468,7 +612,11 @@ export default function WorkOrderPage() {
                 <div>
                   <p className="mb-3 text-xs font-medium text-text-secondary">基础信息</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <select value={form.turbine_id} onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
+                    <select
+                      value={form.turbine_id}
+                      onChange={(e) => setForm({ ...form, turbine_id: e.target.value })}
+                      disabled={contextIncidentId > 0}
+                      aria-label="选择风机"
                       className="form-input px-3 py-2 text-sm text-text-primary">
                       <option value="">选择风机 *</option>
                       {turbines.map((t) => (
@@ -486,6 +634,20 @@ export default function WorkOrderPage() {
                       {FAULT_TYPES.map(ft => <option key={ft} value={ft}>{ft}</option>)}
                     </select>
                   </div>
+                  {contextIncidentId > 0 && (
+                    <div
+                      className="mt-3 rounded border border-accent-blue/40 bg-accent-blue/10 px-3 py-2 text-xs text-accent-blue"
+                      data-testid="incident-workorder-context"
+                    >
+                      已关联事件：
+                      <span className="ml-1 font-mono">
+                        {contextIncidentRef || `#${contextIncidentId}`}
+                      </span>
+                      <span className="ml-2 text-text-secondary">
+                        · {contextTurbineName || `风机 #${contextTurbineId}`}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -527,9 +689,20 @@ export default function WorkOrderPage() {
                 )}
               </div>
               <div className="flex justify-end gap-2 border-t border-border-default px-6 py-4">
-                <button onClick={() => { setShowCreate(false); setCreateResult(null); }} className="ops-btn px-4 py-2 text-sm">取消</button>
-                <button disabled={creating} onClick={handleCreate} className="ops-btn ops-btn-primary px-4 py-2 text-sm disabled:opacity-50">
-                  {creating ? '创建中...' : '创建'}
+                <button
+                  onClick={() => {
+                    setShowCreate(false);
+                    setCreateResult(null);
+                    setForm(emptyForm);
+                    clearIncidentContext();
+                  }}
+                  className="btn btn-secondary"
+                >
+                  取消
+                </button>
+                <button disabled={creating} onClick={handleCreate} className="btn btn-primary">
+                  {creating && <span className="btn-spinner" aria-hidden="true" />}
+                  {creating ? '创建中…' : '创建'}
                 </button>
               </div>
             </div>
@@ -537,20 +710,43 @@ export default function WorkOrderPage() {
         )}
 
         {loading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((item) => (
-              <div key={item} className="h-28 animate-pulse premium-card rounded-2xl" />
+          <div className="space-y-3" role="status" aria-label="工单列表加载中">
+            {[1, 2, 3, 4].map((item) => (
+              <div key={item} className="premium-card flex gap-4 rounded-2xl p-4" style={{ opacity: Math.max(0.4, 1 - item * 0.12) }}>
+                <Skeleton width={4} height={64} radius={999} />
+                <div className="flex-1 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="skeleton-pill" />
+                    <Skeleton className="skeleton-text" width="34%" height={12} />
+                  </div>
+                  <Skeleton className="skeleton-text" width="62%" />
+                  <Skeleton className="skeleton-text" width="44%" height={9} />
+                </div>
+                <Skeleton width={92} height={28} radius={8} />
+              </div>
             ))}
           </div>
         ) : loadError ? (
-          <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-6 text-sm text-accent-red">
-            {loadError}
+          <div className="premium-card rounded-2xl">
+            <StateBlock kind="error" title="工单列表加载失败" desc={loadError} onRetry={() => { void fetchOrders(); }} />
           </div>
         ) : orders.length === 0 ? (
-          <div className="premium-card rounded-2xl p-12 text-center border-dashed">
-            <p className="text-base font-medium text-text-primary">暂无符合条件的维修工单</p>
-            <p className="mt-2 text-sm text-text-muted">可以调整筛选条件，或创建一条新的维修任务。</p>
-            <button onClick={() => setShowCreate(true)} className="mt-5 rounded bg-accent-blue px-4 py-2 text-sm text-white">创建工单</button>
+          <div className="premium-card rounded-2xl">
+            <StateBlock
+              kind="empty"
+              title="暂无符合条件的维修工单"
+              desc="可以调整上方筛选条件，或直接创建一条新的维修任务。"
+              action={
+                <button
+                  onClick={() => canManage && setShowCreate(true)}
+                  disabled={!canManage}
+                  title={canManage ? '创建维修工单' : READ_ONLY_PERMISSION_TITLE}
+                  className="btn btn-primary btn-sm"
+                >
+                  创建工单
+                </button>
+              }
+            />
           </div>
         ) : (
           <div className="space-y-3">
@@ -572,6 +768,11 @@ export default function WorkOrderPage() {
                           {STATUS_LABEL[o.status] || o.status}
                         </span>
                         <span className={`text-[11px] font-medium ${PRIORITY_COLOR[priority]}`}>{PRIORITY_LABEL[priority]}优先级</span>
+                        {o.incident_id && (
+                          <span className="rounded border border-accent-blue/30 bg-accent-blue/10 px-2 py-0.5 font-mono text-[10px] text-accent-blue">
+                            INC #{o.incident_id}
+                          </span>
+                        )}
                         {isOverdue(o) && <span className="rounded bg-accent-red/15 px-2 py-0.5 text-[11px] text-accent-red">已超期</span>}
                       </div>
                       <h3 className="mt-3 truncate text-base font-semibold text-text-primary">{o.title}</h3>
@@ -588,12 +789,24 @@ export default function WorkOrderPage() {
                       {!isTerminal(o.status) && (
                         <button
                           onClick={() => advanceStatus(o.id, o.status)}
+                          disabled={!canManage}
+                          title={canManage ? nextStatusLabel(o.status) : READ_ONLY_PERMISSION_TITLE}
                           className="ops-btn h-8 px-3 text-xs"
                         >
                           {nextStatusLabel(o.status)}
                         </button>
                       )}
-                      <div className="relative">
+                      {o.status === 'completed' && (
+                        <button
+                          onClick={() => requestVerifyClose(o)}
+                          disabled={!canManage}
+                          title={canManage ? '填写验收记录并关闭工单' : READ_ONLY_PERMISSION_TITLE}
+                          className="h-8 rounded border border-accent-green/50 px-3 text-xs text-accent-green hover:bg-accent-green/10"
+                        >
+                          验收并关闭
+                        </button>
+                      )}
+                      {canManage && <div className="relative">
                         <button
                           onClick={() => setOpenActionId(openActionId === o.id ? null : o.id)}
                           className="ops-btn h-8 px-3 text-xs"
@@ -615,7 +828,7 @@ export default function WorkOrderPage() {
                             </button>
                           </div>
                         )}
-                      </div>
+                      </div>}
                     </div>
                   </div>
 
@@ -665,9 +878,17 @@ export default function WorkOrderPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} placeholder="工单标题"
                         className="col-span-2 form-input px-3 py-2 text-sm focus:border-accent-blue focus:outline-none" />
-                      <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })} className="form-input px-3 py-2 text-sm">
-                        {[...STATUS_FLOW, 'cancelled'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-                      </select>
+                      <div>
+                        <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })} className="form-input w-full px-3 py-2 text-sm">
+                          {[previewWO.status, ...(STATUS_TRANSITIONS[previewWO.status] || [])]
+                            // completed→closed 必须先有验收记录，改由「验收并关闭」按钮完成
+                            .filter((s) => !(previewWO.status === 'completed' && s === 'closed'))
+                            .map((s) => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+                        </select>
+                        {previewWO.status === 'completed' && (
+                          <p className="mt-1 text-[11px] text-text-muted">关闭工单需先验收，请在工单列表使用「验收并关闭」按钮。</p>
+                        )}
+                      </div>
                       <select value={editForm.priority} onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })} className="form-input px-3 py-2 text-sm">
                         <option value="low">低优先级</option>
                         <option value="medium">中优先级</option>
@@ -767,8 +988,20 @@ export default function WorkOrderPage() {
                   </>
                 ) : (
                   <>
-                    <button onClick={() => startEdit(previewWO)} className="ops-btn px-4 py-2 text-sm">编辑工单</button>
-                    <button disabled={sendingEmail} onClick={() => sendEmail(previewWO)} className="rounded border border-accent-green/40 bg-accent-green/20 px-4 py-2 text-sm font-semibold text-accent-green hover:bg-accent-green/30 disabled:opacity-50">
+                  <button
+                    onClick={() => startEdit(previewWO)}
+                    disabled={!canManage}
+                    title={canManage ? '编辑工单' : READ_ONLY_PERMISSION_TITLE}
+                    className="ops-btn px-4 py-2 text-sm"
+                  >
+                    编辑工单
+                  </button>
+                  <button
+                    disabled={sendingEmail || !canManage}
+                    title={canManage ? '发送工单通知' : READ_ONLY_PERMISSION_TITLE}
+                    onClick={() => sendEmail(previewWO)}
+                    className="rounded border border-accent-green/40 bg-accent-green/20 px-4 py-2 text-sm font-semibold text-accent-green hover:bg-accent-green/30 disabled:opacity-50"
+                  >
                       {sendingEmail ? '发送中...' : '发送邮件'}
                     </button>
                   </>
@@ -787,6 +1020,65 @@ export default function WorkOrderPage() {
               <p className="break-words text-xs leading-6 text-text-secondary">{emailResult.message}</p>
               <div className="mt-4 flex justify-end">
                 <button onClick={() => setEmailResult(null)} className="rounded bg-accent-blue px-4 py-2 text-sm text-white">知道了</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setActionError('')}>
+            <div className="w-[380px] premium-card rounded-2xl p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="mb-2 text-sm font-medium text-accent-red">操作失败</h3>
+              <p className="break-words text-xs leading-6 text-text-secondary">{actionError}</p>
+              <div className="mt-4 flex justify-end">
+                <button onClick={() => setActionError('')} className="rounded bg-accent-blue px-4 py-2 text-sm text-white">知道了</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {verifyTarget && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4" onClick={() => !verifying && setVerifyTarget(null)}>
+            <div
+              className="w-full max-w-[420px] rounded-lg border border-accent-green/25 bg-bg-card shadow-2xl shadow-black/40"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="border-b border-border-default bg-bg-secondary px-5 py-4">
+                <p className="text-xs font-medium text-accent-green">验收并关闭</p>
+                <h3 className="mt-1 truncate text-base font-semibold text-text-primary">{verifyTarget.title}</h3>
+              </div>
+              <div className="space-y-3 px-5 py-4">
+                <p className="text-xs leading-5 text-text-muted">
+                  将为工单 WO-{String(verifyTarget.id).padStart(4, '0')} 创建验收记录，并把状态推进到「已关闭」。
+                </p>
+                <textarea
+                  value={verifyNote}
+                  onChange={(e) => setVerifyNote(e.target.value)}
+                  placeholder="验收说明（可选，默认为“验收通过”）"
+                  rows={3}
+                  className="w-full form-input px-3 py-2 text-sm text-text-primary focus:border-accent-blue focus:outline-none"
+                />
+                {verifyError && (
+                  <div className="rounded border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
+                    {verifyError}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border-default bg-bg-secondary px-5 py-4">
+                <button
+                  disabled={verifying}
+                  onClick={() => setVerifyTarget(null)}
+                  className="rounded border border-border-default px-4 py-2 text-sm text-text-secondary hover:border-border-active hover:text-text-primary disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  disabled={verifying}
+                  onClick={confirmVerifyClose}
+                  className="rounded bg-accent-green px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+                >
+                  {verifying ? '处理中...' : '确认验收并关闭'}
+                </button>
               </div>
             </div>
           </div>
@@ -830,7 +1122,6 @@ export default function WorkOrderPage() {
           </div>
         )}
 
-        <CopilotFAB />
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { ChangeEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import * as echarts from 'echarts';
+import * as echarts from '../../services/echarts';
 import api from '../../services/api';
 import type {
   AutoFaultDetectionResult,
@@ -13,6 +13,9 @@ import type {
   VibrationPreview,
 } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import StateBlock from '../../components/Common/StateBlock';
+import { SkeletonList } from '../../components/Common/Skeleton';
+import { toast, describeError } from '../../components/Common/Toast';
 import { fetchUserPreferences, loadLocalPreferences, PREFERENCES_UPDATED_EVENT, type UserPreferences } from '../../services/preferences';
 
 const COMPONENT_OPTIONS = [
@@ -698,19 +701,34 @@ export default function DiagnosisPage() {
   const [riskFirst, setRiskFirst] = useState(() => loadLocalPreferences().riskFirst);
   const waveformRef = useRef<HTMLDivElement>(null);
   const spectrumRef = useRef<HTMLDivElement>(null);
+  const selectedTurbineIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    selectedTurbineIdRef.current = selectedTurbineId;
+  }, [selectedTurbineId]);
 
   const viewDetail = useCallback(async (id: number) => {
-    const { data } = await api.get(`/diagnosis/faults/${id}`);
-    setSelected(data);
-    setSelectedTurbineId(data.turbine_id);
-    setAutoResult(null);
+    try {
+      const { data } = await api.get(`/diagnosis/faults/${id}`);
+      setSelected(data);
+      setSelectedTurbineId(data.turbine_id);
+      setAutoResult(null);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || '故障详情加载失败');
+    }
   }, []);
 
   const loadVibration = useCallback(async (turbineId: number, nextComponent: string, faultType: string | undefined) => {
     const params: Record<string, string | number> = { turbine_id: turbineId, component: nextComponent };
     if (faultType) params.fault_type = faultType;
-    const { data } = await api.get('/diagnosis/vibration', { params });
-    setVibration(data);
+    try {
+      const { data } = await api.get('/diagnosis/vibration', { params });
+      if (selectedTurbineIdRef.current !== turbineId) return;
+      setVibration(data);
+    } catch (err: any) {
+      if (selectedTurbineIdRef.current !== turbineId) return;
+      setError(err.response?.data?.detail || err.message || '振动数据加载失败');
+    }
   }, []);
 
   useEffect(() => {
@@ -760,15 +778,33 @@ export default function DiagnosisPage() {
     if (monitorMode !== 'single' || !selectedTurbineId) return;
     setAutoResult(null);  // Clear stale data on turbine switch
     runAutoDetect();
-    const timer = window.setInterval(runAutoDetect, 30000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) runAutoDetect();
+    }, 30000);
+    const handleVisibility = () => {
+      if (!document.hidden) runAutoDetect();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [monitorMode, selectedTurbineId, component, windowHours]);
 
   useEffect(() => {
     if (monitorMode !== 'group' || turbines.length === 0) return;
-    runBatchDetect();
-    const timer = window.setInterval(runBatchDetect, 30000);
-    return () => window.clearInterval(timer);
+    runBatchDetect(true);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) runBatchDetect();
+    }, 30000);
+    const handleVisibility = () => {
+      if (!document.hidden) runBatchDetect();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [monitorMode, batchRegion, batchStatus, component, windowHours, turbines.length]);
 
   useEffect(() => {
@@ -1152,25 +1188,31 @@ export default function DiagnosisPage() {
 
   async function runAutoDetect() {
     if (!selectedTurbineId) return;
+    const requestTurbineId = selectedTurbineId;
     setAutoLoading(true);
     setError('');
     try {
       const { data } = await api.post('/diagnosis/auto-detect', {
-        turbine_id: selectedTurbineId,
+        turbine_id: requestTurbineId,
         component,
         window_hours: windowHours,
         data_source: 'vibration',
-      });
+      }, { timeout: 60000 });
+      if (selectedTurbineIdRef.current !== requestTurbineId) return;
       setAutoResult(data);
-      await loadVibration(selectedTurbineId, component, toVibrationFaultType(data.fault_type));
+      toast.success('自动识别完成', `识别结果：${data.fault_type ?? '未知'}（置信度 ${(Number(data.confidence ?? 0) * 100).toFixed(0)}%）`);
+      await loadVibration(requestTurbineId, component, toVibrationFaultType(data.fault_type));
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || '自动识别失败');
+      if (selectedTurbineIdRef.current !== requestTurbineId) return;
+      const message = describeError(err, '自动识别失败');
+      setError(message);
+      toast.error('自动识别失败', message);
     } finally {
       setAutoLoading(false);
     }
   }
 
-  async function runBatchDetect() {
+  async function runBatchDetect(resetPage = false) {
     setBatchLoading(true);
     setError('');
     try {
@@ -1182,12 +1224,19 @@ export default function DiagnosisPage() {
       if (batchRegion !== 'all') payload.region = batchRegion;
       if (batchStatus !== 'all') payload.status = batchStatus;
 
-      const { data } = await api.post('/diagnosis/auto-detect/batch', payload);
+      const { data } = await api.post('/diagnosis/auto-detect/batch', payload, { timeout: 60000 });
       setBatchResult(data);
-      setBatchPage(1);
-      if (!data.success) setError(data.message || '分组实时监测暂无记录');
+      if (resetPage) setBatchPage(1);
+      if (!data.success) {
+        setError(data.message || '分组实时监测暂无记录');
+        toast.warning('分组实时监测暂无记录', data.message || '当前筛选范围内没有可用的振动数据');
+      } else {
+        toast.success('分组实时监测已同步');
+      }
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || '分组实时监测同步失败');
+      const message = describeError(err, '分组实时监测同步失败');
+      setError(message);
+      toast.error('分组实时监测同步失败', message);
     } finally {
       setBatchLoading(false);
     }
@@ -1374,7 +1423,7 @@ export default function DiagnosisPage() {
               ? (filteredBatchRecords.length
                 ? confidenceText(filteredBatchRecords.reduce((sum, record) => sum + record.confidence, 0) / filteredBatchRecords.length, 1)
                 : '--')
-              : autoResult ? `${confidenceText(autoResult.confidence)} (${confidenceText(autoResult.confidence_interval[0])}-${confidenceText(autoResult.confidence_interval[1])})` : '--'}
+              : autoResult ? `${confidenceText(autoResult.confidence)} (${confidenceText(autoResult.confidence_interval?.[0])}-${confidenceText(autoResult.confidence_interval?.[1])})` : '--'}
           </p>
         </div>
         <div className="bg-bg-hover rounded p-3">
@@ -1396,36 +1445,37 @@ export default function DiagnosisPage() {
   );
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 border-b border-border-default bg-bg-secondary px-6 py-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-semibold">故障诊断中心</h2>
-            <p className="text-[11px] text-text-muted mt-1">实时监测、图像诊断、振动预览和根因排查</p>
+    <div className="ops-page page-enter h-full flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 border-b border-border-default px-5 py-3" style={{ background: 'rgba(10,31,63,0.55)' }}>
+        <div className="ops-header mb-3 flex items-start justify-between gap-4" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+          <div className="min-w-0">
+            <p className="ops-eyebrow">故障诊断 · Fault Diagnosis</p>
+            <h2 className="ops-title gradient-text">故障诊断中心</h2>
+            <p className="ops-subtitle">实时监测、图像诊断、振动预览与根因排查，全部基于真实采集数据。</p>
           </div>
           {selectedTurbine && (
-            <div className="text-right text-xs">
-              <p className="text-text-muted">当前风机</p>
-              <p className="font-mono text-accent-cyan">{selectedTurbine.name}</p>
+            <div className="flex-shrink-0 text-right">
+              <p className="field-label">当前风机</p>
+              <p className="num text-[13px] font-semibold text-accent-cyan">{selectedTurbine.name}</p>
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-          {cards.map((c) => (
-            <div key={c.key} className="relative">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2.5">
+          {cards.map((c, i) => (
+            <div key={c.key} className={`relative stagger-${Math.min(5, i + 1)}`}>
               <button
                 type="button"
                 onClick={() => c.rows ? setOpenStatCard(openStatCard === c.key ? null : c.key) : undefined}
-                className={`w-full bg-bg-card border border-border-default rounded-lg px-3 py-2.5 text-left ${
-                  c.rows ? 'hover:border-accent-blue cursor-pointer' : 'cursor-default'
-                }`}
+                aria-expanded={c.rows ? openStatCard === c.key : undefined}
+                title={c.rows ? `${c.label}：点击查看明细` : c.label}
+                className={`surface-card w-full px-3 py-2 text-left ${c.rows ? 'surface-card-interactive' : 'cursor-default'}`}
               >
-                <p className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
-                  <span>{c.label}</span>
-                  {c.rows && <span className="text-[9px] text-accent-blue">查看</span>}
+                <p className="flex items-center justify-between gap-2 field-label">
+                  <span className="truncate">{c.label}</span>
+                  {c.rows && <span className="flex-shrink-0 text-[9px] text-accent-blue">查看</span>}
                 </p>
-                <p className={`text-lg font-mono font-bold ${c.color}`}>
-                  {c.value}<span className="text-[10px] font-normal text-text-muted ml-0.5">{c.unit}</span>
+                <p className={`num text-[17px] font-bold leading-tight ${c.color}`}>
+                  {c.value}<span className="text-[10px] font-normal text-text-muted ml-0.5" style={{ fontFamily: 'var(--font-sans)' }}>{c.unit}</span>
                 </p>
               </button>
               {c.rows && openStatCard === c.key && (
@@ -1584,7 +1634,7 @@ export default function DiagnosisPage() {
                       <span className="font-mono text-accent-cyan">
                         {(record.confidence * 100).toFixed(0)}%
                         <span className="block text-[10px] text-text-muted">
-                          {(record.confidence_interval[0] * 100).toFixed(0)}-{(record.confidence_interval[1] * 100).toFixed(0)}%
+                          {record.confidence_interval ? `${(record.confidence_interval[0] * 100).toFixed(0)}-${(record.confidence_interval[1] * 100).toFixed(0)}%` : '--'}
                         </span>
                       </span>
                       <span className="font-mono text-text-secondary">{turbineStats?.faultCount ?? 0}</span>
@@ -1861,7 +1911,7 @@ export default function DiagnosisPage() {
             </div>
 
             {loading ? (
-              <p className="text-xs text-text-muted">加载中...</p>
+              <SkeletonList rows={5} className="max-h-[460px]" />
             ) : (
               <div className="space-y-2 max-h-[460px] overflow-auto pr-1">
                 {filteredFaults.map((f) => (
@@ -1907,8 +1957,8 @@ export default function DiagnosisPage() {
                     </div>
                   </button>
                 ))}
-                {faults.length === 0 && <p className="text-xs text-text-muted">暂无故障记录</p>}
-                {faults.length > 0 && filteredFaults.length === 0 && <p className="text-xs text-text-muted">没有符合条件的故障记录</p>}
+                {faults.length === 0 && <StateBlock kind="empty" title="暂无故障记录" desc="当前风机群未检出故障，或诊断任务尚未运行。" compact />}
+                {faults.length > 0 && filteredFaults.length === 0 && <StateBlock kind="empty" title="没有符合条件的故障记录" desc="请放宽上方的时间范围或筛选条件。" compact />}
               </div>
             )}
           </section>

@@ -1,7 +1,10 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import * as echarts from 'echarts';
+import * as echarts from '../../services/echarts';
 import api from '../../services/api';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
+import StateBlock from '../../components/Common/StateBlock';
+import { Skeleton } from '../../components/Common/Skeleton';
+import { toast, describeError } from '../../components/Common/Toast';
 
 interface FaultNode {
   id: number | string;
@@ -511,27 +514,42 @@ export default function KnowledgeBasePage() {
   };
 
   const handleVerifyNode = async (node: FaultNode) => {
-    await api.patch(`/knowledge-base/${node.id}/verify`);
-    const next = { ...node, verified: true, confidence: 1.0, review_state: 'approved' as const };
-    setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? next : n));
-    setDetail(next);
-    fetchGraph();
+    try {
+      await api.patch(`/knowledge-base/${node.id}/verify`);
+      const next = { ...node, verified: true, confidence: 1.0, review_state: 'approved' as const };
+      setNodes(prev => prev.map(n => String(n.id) === String(node.id) ? next : n));
+      setDetail(next);
+      fetchGraph();
+      toast.success('知识已通过审核', node.fault_type);
+    } catch (err: any) {
+      toast.error('审核通过失败', describeError(err, '请稍后重试'));
+    }
   };
 
   const handleRejectNode = async (node: FaultNode) => {
-    await api.patch(`/knowledge-base/${node.id}/reject`);
-    setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
-    setDetail(null);
-    fetchGraph();
+    try {
+      await api.patch(`/knowledge-base/${node.id}/reject`);
+      setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
+      setDetail(null);
+      fetchGraph();
+      toast.success('知识已驳回', node.fault_type);
+    } catch (err: any) {
+      toast.error('驳回失败', describeError(err, '请稍后重试'));
+    }
   };
 
   const handleDeleteNode = async (node: FaultNode) => {
     const ok = window.confirm(`确认删除知识节点「${node.fault_type}」？删除后将不会出现在故障百科、知识图谱和 Copilot 知识参考中。`);
     if (!ok) return;
-    await api.delete(`/knowledge-base/${node.id}`);
-    setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
-    setDetail(null);
-    fetchGraph();
+    try {
+      await api.delete(`/knowledge-base/${node.id}`);
+      setNodes(prev => prev.filter(n => String(n.id) !== String(node.id)));
+      setDetail(null);
+      fetchGraph();
+      toast.success('知识节点已删除', node.fault_type);
+    } catch (err: any) {
+      toast.error('删除失败', describeError(err, '请稍后重试'));
+    }
   };
 
   const openCreateForm = () => {
@@ -599,9 +617,12 @@ export default function KnowledgeBasePage() {
       setFormNode(null);
       setFormOriginalFaultType('');
       fetchGraph();
+      toast.success(formMode === 'edit' ? '知识已更新' : '知识已创建', saved.fault_type);
     } catch (err: any) {
       const status = err.response?.status;
-      setFormError(status === 409 ? '同名故障知识已存在' : '保存失败，请稍后重试');
+      const message = status === 409 ? '同名故障知识已存在' : describeError(err, '保存失败，请稍后重试');
+      setFormError(message);
+      toast.error('知识保存失败', message);
     } finally {
       setFormSaving(false);
     }
@@ -641,20 +662,19 @@ export default function KnowledgeBasePage() {
   }, [graphData, graphView]);
 
   return (
-    <div className="flex h-full min-h-0 bg-bg-deep">
+    <div className="ops-page page-enter flex h-full min-h-0">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden scroll-smooth pb-8">
         <div className="border-b border-border-subtle bg-bg-panel/90 p-3">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-lg font-bold text-text-primary">故障百科</h1>
-              <p className="mt-1 text-xs text-text-muted">沉淀故障症状、根因、方案和案例，并对 AI 抽取知识进行审核。</p>
+          <div className="ops-header flex items-start justify-between gap-4" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+            <div className="min-w-0">
+              <p className="ops-eyebrow">知识沉淀 · Fault Knowledge Base</p>
+              <h1 className="ops-title gradient-text">故障百科</h1>
+              <p className="ops-subtitle">沉淀故障症状、根因、处置方案与历史案例，并对 AI 抽取的知识进行人工审核。</p>
             </div>
-            <button onClick={openCreateForm} className="rounded-lg border border-accent-blue/40 bg-accent-blue/20 px-3 py-2 text-sm font-medium text-accent-blue hover:bg-accent-blue/30">
-              新增知识
-            </button>
+            <button onClick={openCreateForm} className="btn btn-primary flex-shrink-0">新增知识</button>
           </div>
 
-          <div className="mt-3 grid grid-cols-4 gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <SummaryTile label="知识节点" value={stats.total} tone="blue" />
             <SummaryTile label="高危知识" value={stats.high} tone="red" />
             <SummaryTile label="待审核" value={stats.pendingReview} tone="yellow" active={reviewFilter === 'pending'} onClick={() => setReviewFilter('pending')} />
@@ -662,23 +682,27 @@ export default function KnowledgeBasePage() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="kb-search">搜索知识节点</label>
             <input
-              className="min-w-[260px] flex-1 rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm placeholder-text-muted focus:border-accent-blue focus:outline-none"
+              id="kb-search"
+              className="form-input min-w-[240px] flex-1 px-3 py-2 text-sm"
               placeholder="搜索故障名称、症状、根因或方案"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
-            <select className="rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm" value={category} onChange={e => setCategory(e.target.value)}>
+            <label className="sr-only" htmlFor="kb-category">分类筛选</label>
+            <select id="kb-category" className="form-input px-3 py-2 text-sm" value={category} onChange={e => setCategory(e.target.value)}>
               {categories.map(c => <option key={c} value={c}>{c === ALL_CATEGORY ? '全部分类' : c}</option>)}
             </select>
-            <select className="rounded-lg border border-border-subtle bg-bg-card px-3 py-2 text-sm" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
+            <label className="sr-only" htmlFor="kb-severity">严重度筛选</label>
+            <select id="kb-severity" className="form-input px-3 py-2 text-sm" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
               <option value="">全部严重度</option>
               <option value="critical">紧急</option>
               <option value="high">高</option>
               <option value="medium">中</option>
               <option value="low">低</option>
             </select>
-            <div className="flex overflow-hidden rounded-lg border border-border-subtle text-sm">
+            <div className="flex overflow-hidden rounded-lg border border-border-default text-sm" role="group" aria-label="审核状态筛选">
               <ReviewButton label="全部" active={reviewFilter === 'all'} onClick={() => setReviewFilter('all')} />
               <ReviewButton label={`待审核 ${stats.pendingReview}`} active={reviewFilter === 'pending'} onClick={() => setReviewFilter('pending')} />
               <ReviewButton label="已通过" active={reviewFilter === 'approved'} onClick={() => setReviewFilter('approved')} />
@@ -687,16 +711,19 @@ export default function KnowledgeBasePage() {
 
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
             {kbLoading ? (
-              <div className="px-2 py-6 text-xs text-text-muted">正在加载知识库...</div>
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="surface-card w-[210px] flex-shrink-0 space-y-2 p-3" style={{ opacity: Math.max(0.4, 1 - i * 0.14) }}>
+                  <Skeleton className="skeleton-pill" />
+                  <Skeleton className="skeleton-text" width="82%" height={12} />
+                  <Skeleton className="skeleton-text" width="56%" height={9} />
+                </div>
+              ))
             ) : kbError ? (
-              <div className="flex items-center gap-3 px-2 py-6 text-xs text-text-muted">
-                <span>知识库加载失败</span>
-                <button onClick={fetchKnowledgeBase} className="text-accent-blue hover:underline">重试</button>
-              </div>
+              <StateBlock kind="error" title="知识库加载失败" desc="未能获取知识节点列表，请确认后端服务可用后重试。" onRetry={fetchKnowledgeBase} compact />
             ) : filtered.length > 0 ? filtered.map(node => (
               <KnowledgeCard key={node.id} node={node} active={String(detail?.id) === String(node.id)} onClick={() => setDetail(node)} />
             )) : (
-              <div className="px-2 py-6 text-xs text-text-muted">暂无符合条件的知识节点</div>
+              <StateBlock kind="empty" title="暂无符合条件的知识节点" desc="请调整搜索关键词或筛选条件，或点击右上角「新增知识」录入。" compact />
             )}
           </div>
         </div>
@@ -1342,25 +1369,34 @@ function SummaryTile({ label, value, tone, active, onClick }: { label: string; v
 
   const content = (
     <>
-      <span className="text-[10px] text-text-muted">{label}</span>
-      <span className={`mt-1 text-lg font-bold ${toneClass.split(' ')[0]}`}>{value}</span>
+      <span className="field-label">{label}</span>
+      <span className={`num mt-1 text-[18px] font-bold leading-none ${toneClass.split(' ')[0]}`}>{value}</span>
     </>
   );
 
   if (onClick) {
     return (
-      <button onClick={onClick} className={`flex flex-col rounded-lg border p-3 text-left transition-colors ${toneClass} ${active ? 'ring-1 ring-accent-yellow/40' : ''}`}>
+      <button
+        onClick={onClick}
+        aria-pressed={active}
+        title={`${label}：${value}（点击筛选）`}
+        className={`flex flex-col rounded-lg border p-2.5 text-left transition-all hover:brightness-110 ${toneClass} ${active ? 'ring-1 ring-accent-yellow/40' : ''}`}
+      >
         {content}
       </button>
     );
   }
 
-  return <div className={`flex flex-col rounded-lg border p-3 ${toneClass}`}>{content}</div>;
+  return <div className={`flex flex-col rounded-lg border p-2.5 ${toneClass}`} title={`${label}：${value}`}>{content}</div>;
 }
 
 function ReviewButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={`px-3 py-2 transition-colors ${active ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}>
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-3 py-2 text-[12px] transition-colors ${active ? 'bg-accent-blue/20 font-semibold text-accent-blue' : 'bg-bg-card text-text-muted hover:text-text-primary'}`}
+    >
       {label}
     </button>
   );

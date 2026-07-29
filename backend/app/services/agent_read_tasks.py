@@ -25,6 +25,11 @@ from app.services.agent_data_tools import (
     query_vibration_context,
     query_workorder_context,
 )
+from app.services.agent_domain_read_tasks import (
+    DOMAIN_READ_PLAYBOOKS,
+    answer_domain_read_task,
+    override_playbook_for_domain,
+)
 from app.services.agent_entities import extract_turbine_ref, resolve_turbine_by_ref
 from app.services.agent_workflows.workorder import extract_fault_keyword
 
@@ -479,6 +484,13 @@ async def answer_read_task(
             "missing_slots": ["turbine_ref"],
             "clarification_question": "请说明要查询哪台风机，例如 YD-B-007。",
         }
+
+    # 维护排程的确定性只读回答器
+    playbook_id = override_playbook_for_domain(message, playbook_id)
+    if playbook_id and playbook_id in DOMAIN_READ_PLAYBOOKS:
+        domain_answer = await answer_domain_read_task(db, playbook_id=playbook_id, message=message)
+        if domain_answer is not None:
+            return domain_answer
 
     if playbook_id == "monitoring.view_fleet_status":
         data = await query_fleet_overview(db)

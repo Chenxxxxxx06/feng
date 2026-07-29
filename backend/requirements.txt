@@ -15,7 +15,7 @@ greenlet==3.2.4
 aiosqlite==0.20.0  # SQLite async driver (development)
 asyncpg==0.31.0    # PostgreSQL async driver (production)
 # psycopg2-binary==2.9.9  # PostgreSQL sync driver (optional)
-# alembic==1.13.3   # Database migrations (recommended for production)
+alembic==1.13.3     # Database migrations
 
 # Auth & Security
 python-jose[cryptography]==3.3.0

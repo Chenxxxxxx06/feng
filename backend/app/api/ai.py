@@ -4,10 +4,14 @@ Provides AI-powered analysis using Qwen API with fallback to local analysis.
 """
 
 import asyncio
+import hashlib
+import ipaddress
 import json
 import logging
 import re
+import time
 from typing import Optional
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +26,7 @@ from app.schemas import (
     AITestConnectionRequest,
 )
 from app.api.auth import get_current_user
+from app.core.crypto import decrypt_secret
 from app.services.copilot_context import (
     build_copilot_context_bundle,
     get_allowed_tool_specs,
@@ -32,6 +37,54 @@ from app.services.qwen_client import summarize_page, diagnose_fault, copilot_cha
 logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+_SUMMARY_CACHE_TTL_SECONDS = 300.0
+_SUMMARY_CACHE_MAX_ENTRIES = 256
+_summary_cache: dict[str, tuple[float, dict]] = {}
+_summary_locks: dict[str, asyncio.Lock] = {}
+
+
+def _summary_cache_key(
+    *,
+    user_id: int,
+    provider_id: int | None,
+    page_type: str,
+    turbine_id: int | None,
+    page_data: dict,
+    model: str | None,
+    provider: str | None,
+    base_url: str | None,
+) -> str:
+    payload = {
+        "user_id": user_id,
+        "provider_id": provider_id,
+        "page_type": page_type,
+        "turbine_id": turbine_id,
+        "page_data": page_data,
+        "model": model,
+        "provider": provider,
+        "base_url": base_url,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _get_cached_summary(cache_key: str) -> dict | None:
+    cached = _summary_cache.get(cache_key)
+    if not cached:
+        return None
+    cached_at, summary = cached
+    if time.monotonic() - cached_at >= _SUMMARY_CACHE_TTL_SECONDS:
+        _summary_cache.pop(cache_key, None)
+        return None
+    return dict(summary)
+
+
+def _store_cached_summary(cache_key: str, summary: dict) -> None:
+    if len(_summary_cache) >= _SUMMARY_CACHE_MAX_ENTRIES:
+        oldest_key = min(_summary_cache, key=lambda key: _summary_cache[key][0])
+        _summary_cache.pop(oldest_key, None)
+    _summary_cache[cache_key] = (time.monotonic(), dict(summary))
 
 
 def _safe_ai_error_message(exc: Exception) -> str:
@@ -273,7 +326,9 @@ async def generate_summary(
             )
 
     effective_model = (data.model or session_provider.default_model) if session_provider else (data.model or current_user.model_preference)
-    effective_key = session_provider.api_key if session_provider else current_user.api_key
+    # API Key 静态加密：读取路径统一 decrypt_secret（对历史明文幂等），
+    # 保证发往上游供应商的一定是可用明文；响应侧只暴露 has_api_key 布尔值。
+    effective_key = decrypt_secret(session_provider.api_key if session_provider else current_user.api_key)
     effective_provider = (session_provider.display_name or session_provider.provider) if session_provider else current_user.api_provider
     effective_base_url = session_provider.base_url if session_provider else current_user.api_base_url
     model_status = describe_model(
@@ -296,19 +351,49 @@ async def generate_summary(
         provider_str = (session_provider.provider if session_provider else effective_provider) or ""
         if "dashscope" in str(provider_str).lower():
             summary_model = "qwen-turbo"
-        summary = await asyncio.wait_for(
-            asyncio.to_thread(
-                summarize_page,
-                data.page_type,
-                data.page_data,
-                model=summary_model,
-                api_key=effective_key,
-                api_provider=effective_provider,
-                base_url=effective_base_url,
-                raise_on_error=True,
-            ),
-            timeout=20.0,
+        cache_key = _summary_cache_key(
+            user_id=current_user.id,
+            provider_id=session_provider.id if session_provider else None,
+            page_type=data.page_type,
+            turbine_id=data.turbine_id,
+            page_data=data.page_data,
+            model=summary_model,
+            provider=effective_provider,
+            base_url=effective_base_url,
         )
+        cached_summary = _get_cached_summary(cache_key)
+        if cached_summary is not None:
+            return AISummaryResponse(
+                **cached_summary,
+                status="success",
+                model_status=model_status,
+            )
+
+        # Coalesce identical requests from React Strict Mode or rapid route
+        # changes so only one paid upstream request is made.
+        summary_lock = _summary_locks.setdefault(cache_key, asyncio.Lock())
+        async with summary_lock:
+            cached_summary = _get_cached_summary(cache_key)
+            if cached_summary is not None:
+                return AISummaryResponse(
+                    **cached_summary,
+                    status="success",
+                    model_status=model_status,
+                )
+            summary = await asyncio.wait_for(
+                asyncio.to_thread(
+                    summarize_page,
+                    data.page_type,
+                    data.page_data,
+                    model=summary_model,
+                    api_key=effective_key,
+                    api_provider=effective_provider,
+                    base_url=effective_base_url,
+                    raise_on_error=True,
+                ),
+                timeout=10.0,
+            )
+            _store_cached_summary(cache_key, summary)
         return AISummaryResponse(
             **summary,
             status="success",
@@ -322,7 +407,7 @@ async def generate_summary(
         fallback_mode = model_status["mode"] if model_status.get("mode") in {"key_unbound", "provider_mismatch"} else "local_fallback"
         return AISummaryResponse(
             **fallback,
-            status="error",
+            status="fallback",
             error_code=error_code,
             error_message=error_message,
             model_status={**model_status, "mode": fallback_mode},
@@ -402,7 +487,7 @@ async def analyze_fault(
                 turbine_data,
                 fault_data,
                 model=current_user.model_preference,
-                api_key=current_user.api_key,
+                api_key=decrypt_secret(current_user.api_key),
                 api_provider=current_user.api_provider,
                 base_url=current_user.api_base_url,
             ),
@@ -462,8 +547,10 @@ async def copilot_endpoint(
                 warnings=warnings,
             )
 
-    effective_model = data.model or session_provider.default_model if session_provider else current_user.model_preference
-    effective_key = session_provider.api_key if session_provider else current_user.api_key
+    effective_model = (data.model or session_provider.default_model) if session_provider else (data.model or current_user.model_preference)
+    # API Key 静态加密：读取路径统一 decrypt_secret（对历史明文幂等），
+    # 保证发往上游供应商的一定是可用明文；响应侧只暴露 has_api_key 布尔值。
+    effective_key = decrypt_secret(session_provider.api_key if session_provider else current_user.api_key)
     effective_provider = (session_provider.display_name or session_provider.provider) if session_provider else current_user.api_provider
     effective_base_url = session_provider.base_url if session_provider else current_user.api_base_url
 
@@ -668,8 +755,10 @@ async def copilot_stream_endpoint(
                 "当前会话选择的AI供应商已停用，请在AI对话中选择其他供应商。",
             )
 
-    effective_model = data.model or session_provider.default_model if session_provider else current_user.model_preference
-    effective_key = session_provider.api_key if session_provider else current_user.api_key
+    effective_model = (data.model or session_provider.default_model) if session_provider else (data.model or current_user.model_preference)
+    # API Key 静态加密：读取路径统一 decrypt_secret（对历史明文幂等），
+    # 保证发往上游供应商的一定是可用明文；响应侧只暴露 has_api_key 布尔值。
+    effective_key = decrypt_secret(session_provider.api_key if session_provider else current_user.api_key)
     effective_provider = (session_provider.display_name or session_provider.provider) if session_provider else current_user.api_provider
     effective_base_url = session_provider.base_url if session_provider else current_user.api_base_url
 
@@ -822,12 +911,41 @@ async def copilot_stream_endpoint(
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
+def _validate_test_base_url(base_url: str) -> Optional[str]:
+    """SSRF guard for user-supplied base_url: return an error message if disallowed.
+
+    Only http/https is accepted. localhost/loopback stays allowed (local Ollama),
+    other private networks (10./172.16-31./192.168.) and metadata addresses
+    (169.254.) are rejected.
+    """
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        return "Base URL 仅支持 http/https 协议"
+    host = parsed.hostname or ""
+    if not host:
+        return "Base URL 缺少有效主机名"
+    if host == "localhost":
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None  # public domain names are allowed
+    if ip.is_loopback:
+        return None  # 127.0.0.1 etc. — local Ollama scenario
+    if ip.is_private or ip.is_link_local:
+        return "Base URL 不允许指向内网或元数据地址"
+    return None
+
+
 @router.post("/test-connection")
 async def test_ai_connection(data: AITestConnectionRequest):
     """Test AI connection with ad-hoc credentials (no save required)."""
     try:
         from app.services.qwen_client import get_client
         base_url = data.base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        url_error = _validate_test_base_url(base_url)
+        if url_error:
+            return {"status": "error", "message": url_error, "model": data.model}
         client = get_client(data.api_key, base_url)
         response = client.chat.completions.create(
             model=data.model,
@@ -852,7 +970,7 @@ def _detect_anomalies(scada_records: list, rated_power_mw: float) -> list[dict]:
         return []
 
     anomalies = []
-    rated_power_kw = rated_power_mw * 1000
+    rated_power_kw = (rated_power_mw or 0) * 1000
 
     def avg(attr: str) -> float | None:
         values = [getattr(r, attr) for r in scada_records if getattr(r, attr) is not None]

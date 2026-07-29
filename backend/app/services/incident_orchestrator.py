@@ -232,6 +232,7 @@ class InvestigationOrchestrator:
             step.output_summary = f"Unknown step: {step.step_id}"
             return
 
+        result: dict[str, Any] = {}
         try:
             result = await handler(self, ctx)
             step.status = InvestigationStepStatus.COMPLETED
@@ -241,9 +242,6 @@ class InvestigationOrchestrator:
                 step.status = InvestigationStepStatus.DEGRADED
                 step.degraded = True
                 ctx.degraded_steps.append(step.step_id)
-
-            # Create flight recorder span
-            await self._record_span(ctx.trace_id, step, result)
 
         except Exception as exc:
             logger.exception(f"Step {step.step_id} failed: {exc}")
@@ -257,8 +255,12 @@ class InvestigationOrchestrator:
                 step.status = InvestigationStepStatus.FAILED
                 step.output_summary = f"Failed after {step.max_retries} retries: {exc}"
                 ctx.errors.append(f"{step.step_id}: {exc}")
+            result = {"summary": step.output_summary}
 
         step.ended_at = datetime.now(timezone.utc)
+        # 飞行记录必须在 ended_at 落定之后写入，否则 duration_ms 恒为 0（瀑布图无法反映真实耗时）；
+        # 失败步骤同样记录，便于回放时看到失败发生在哪一环。
+        await self._record_span(ctx.trace_id, step, result)
         workflow.updated_at = datetime.now(timezone.utc)
         await self.db.flush()
 

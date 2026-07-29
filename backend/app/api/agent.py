@@ -2,7 +2,7 @@ r"""Agent API — multi-agent diagnosis endpoint + unified agent execution."""
 
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -112,7 +112,7 @@ async def multi_agent_diagnose(
     # 4. Synthesizer: merge results
     synthesizer = SynthesizerAgent(model=agent_model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
     synth_result = await synthesizer.run(
-        data_result=str(data_result.data) if data_result else "（未查询实时数据）",
+            data_result=str(data_result.data) if data_result else "（未查询当前可用数据）",
         knowledge_result=str(knowledge_result.data) if knowledge_result else "（知识库为空或未匹配）",
     )
 
@@ -192,9 +192,12 @@ async def execute_agent_command(
         if llm_steps:
             # LLM already decomposed into atomic operations → use directly
             for i, s in enumerate(llm_steps):
+                skill = s.get("skill") if isinstance(s, dict) else None
+                if not skill:
+                    raise HTTPException(status_code=422, detail="AI返回的atomic_steps缺少skill字段，请重试")
                 atomic_steps.append(AgentAtomicStep(
                     order=s.get("order", i + 1),
-                    skill=s["skill"],
+                    skill=skill,
                     params=s.get("params", {}),
                     reason=s.get("reason", ""),
                 ))

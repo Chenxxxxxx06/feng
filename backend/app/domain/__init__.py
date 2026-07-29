@@ -138,6 +138,10 @@ class ResourceSnapshot:
     personnel_skills: list[str] = field(default_factory=list)
     # Spare parts
     spare_parts: list[dict[str, Any]] = field(default_factory=list)
+    parts_status: str = "unknown"
+    parts_summary: str = ""
+    parts_earliest_ready_date: Optional[str] = None
+    parts_source_type: str = "demo"
     # Weather
     weather_windows: list[dict[str, Any]] = field(default_factory=list)
     weather_restrictions: list[str] = field(default_factory=list)

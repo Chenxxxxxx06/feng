@@ -24,6 +24,37 @@ CLASS_LABELS = {
     "dirt": "表面污垢",
 }
 
+# 权重文件里的类别名与系统内部规范名不完全一致（如权重用 Dirty/Damage，
+# 内部规范名是 dirt/damage）。历史实现直接做 `== "dirt"` 精确匹配，
+# 导致 Dirty 类别的检测结果被静默丢弃。这里用别名表做归一，
+# 新增权重时只需在此登记，不必改判定逻辑。
+CLASS_ALIASES = {
+    "damage": "damage",
+    "damaged": "damage",
+    "defect": "damage",
+    "crack": "damage",
+    "erosion": "damage",
+    "dirt": "dirt",
+    "dirty": "dirt",
+    "dust": "dirt",
+    "soil": "dirt",
+    "contamination": "dirt",
+}
+
+
+def _canonical_class(model_name: str) -> str:
+    """把权重中的类别名归一为系统规范名；无法识别时返回空串。"""
+    if not model_name:
+        return ""
+    name = model_name.strip().lower()
+    if name in CLASS_ALIASES:
+        return CLASS_ALIASES[name]
+    # 兜底：按词根前缀匹配（覆盖 damage_area / dirty_surface 这类复合命名）
+    for alias, canonical in CLASS_ALIASES.items():
+        if name.startswith(alias):
+            return canonical
+    return ""
+
 
 class BladeModelUnavailable(RuntimeError):
     """Raised when the local model cannot run in the current environment."""
@@ -144,11 +175,14 @@ class BladeYoloService:
         names = result.names
 
         raw: list[dict[str, Any]] = []
+        unmapped: set[str] = set()
         for box in result.boxes:
             class_id = int(box.cls[0])
             model_name = str(names.get(class_id, "")).lower()
-            label = "damage" if model_name == "damage" else "dirt" if model_name == "dirt" else ""
+            label = _canonical_class(model_name)
             if not label:
+                if model_name:
+                    unmapped.add(model_name)
                 continue
             xyxy = [int(value) for value in box.xyxy[0].tolist()]
             raw.append(
@@ -189,6 +223,8 @@ class BladeYoloService:
                 "model_file": self.model_path.name,
                 "raw_detection_count": len(raw),
                 "merged_detection_count": len(detections),
+                "model_class_names": sorted({str(v) for v in names.values()}) if names else [],
+                "unmapped_classes": sorted(unmapped),
             },
             "algorithm_status": "windblade_dtu_yolo_inference",
             "message": "结果由本地 DTU 叶片巡检 YOLO 模型推理生成。",

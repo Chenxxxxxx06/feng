@@ -1,12 +1,17 @@
 """Alarm correlation service — weighted graph alarm compression.
 
-Replaces string-dedup with explainable weighted alarm graph clustering.
-Uses time proximity, same turbine/component, topology proximity,
-operating conditions, causal rules, and signal correlation.
+Explainable weighted alarm graph clustering. Uses time proximity,
+same turbine/component, topology proximity, operating conditions,
+causal rules, and signal correlation.
 
 Algorithm: Union-Find over weighted edges. Alarms with edge weight
 above a configurable threshold are merged into the same cluster.
 The primary alarm in each cluster is selected by severity × recency.
+
+Wiring: this is stage 1 of `POST /incidents/{id}/compress-alarms`
+(`app.api.incidents._correlate_alarms`); the deterministic string-rule pass
+(`_compress_alarms`) runs afterwards as supplement and as fallback when
+clustering cannot run.
 """
 from __future__ import annotations
 

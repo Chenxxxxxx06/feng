@@ -7,7 +7,6 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 import re
-import shutil
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -31,6 +30,7 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 RAW_BLADE_IMAGE_DIR = DATA_DIR / "curated_datasets" / "raw" / "blade_images"
 UPLOAD_BLADE_IMAGE_DIR = DATA_DIR / "uploads" / "blade_diagnosis"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+MAX_UPLOAD_IMAGE_MB = 50
 INSPECTION_TURBINE_SLOTS = 36
 
 
@@ -310,10 +310,33 @@ def _spectrum_from_waveform(waveform: list[float], sample_rate_hz: int, max_bins
 def _load_vibration_payload(record: VibrationData) -> dict:
     if not record.waveform_path:
         return {}
-    path = DATA_DIR / record.waveform_path
+    path = (DATA_DIR / record.waveform_path).resolve()
+    if not path.is_relative_to(DATA_DIR.resolve()):
+        return {}
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    stat = path.stat()
+    return _load_vibration_payload_file(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=128)
+def _load_vibration_payload_file(path: str, _mtime_ns: int, _size: int) -> dict:
+    """Parse an immutable imported waveform once per file revision."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _downsample_series(values: list, max_points: int) -> list[float]:
+    """Preserve the full time span while bounding browser payload/render cost."""
+    numeric = [float(value) for value in values]
+    if len(numeric) <= max_points:
+        return numeric
+    if max_points <= 1:
+        return numeric[:1]
+    last_index = len(numeric) - 1
+    return [
+        numeric[round(index * last_index / (max_points - 1))]
+        for index in range(max_points)
+    ]
 
 
 def _public_quality_fields(quality: dict | None) -> dict | None:
@@ -726,7 +749,10 @@ async def create_fault(
         status="open",
     )
     if details:
-        fault.details = json.loads(details)
+        try:
+            fault.details = json.loads(details)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"details must be valid JSON: {exc.msg}") from exc
     fault.priority = priority
     fault.processing_status = "pending"
     fault.discovered_at = now
@@ -800,6 +826,7 @@ async def update_fault_status(
     processing_status: str = Query(...),
     handler: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _auth: User = Depends(require_role("engineer")),
 ):
     """Update fault processing_status: pending→assigned→processing→closed."""
     valid = {"pending", "assigned", "processing", "closed", "failed"}
@@ -950,10 +977,13 @@ async def diagnose_blade_upload(
     if suffix not in IMAGE_EXTS:
         raise HTTPException(status_code=400, detail="Only image files are supported")
 
+    content = await image.read()
+    if len(content) > MAX_UPLOAD_IMAGE_MB * 1024 * 1024:
+        raise HTTPException(status_code=400, detail=f"File too large (max {MAX_UPLOAD_IMAGE_MB}MB)")
+
     UPLOAD_BLADE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     save_path = UPLOAD_BLADE_IMAGE_DIR / f"{uuid4().hex}{suffix}"
-    with save_path.open("wb") as output:
-        shutil.copyfileobj(image.file, output)
+    save_path.write_bytes(content)
 
     try:
         return BladeDiagnosisResponse(**blade_yolo_service.predict(save_path, turbine_id))
@@ -966,6 +996,7 @@ async def get_vibration_data(
     turbine_id: int = Query(...),
     component: str = Query("gearbox_high_speed"),
     fault_type: str | None = Query(None),
+    max_points: int = Query(1024, ge=128, le=4096),
     db: AsyncSession = Depends(get_db),
 ):
     """Get vibration waveform for a turbine component.
@@ -980,14 +1011,11 @@ async def get_vibration_data(
     if not record:
         raise HTTPException(status_code=404, detail="No imported vibration data for this turbine")
 
-    payload = {}
-    if record.waveform_path:
-        path = DATA_DIR / record.waveform_path
-        if path.exists():
-            payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _load_vibration_payload(record)
 
-    waveform = payload.get("waveform", [])
-    spectrum = payload.get("spectrum", [])
+    full_waveform = payload.get("waveform", [])
+    waveform = _downsample_series(full_waveform, max_points)
+    spectrum = _downsample_series(payload.get("spectrum", []), min(max_points, 512))
     sample_rate = payload.get("sample_rate_hz", 1000)
     # Compute spectrum if not in payload
     if waveform and not spectrum:
@@ -997,9 +1025,11 @@ async def get_vibration_data(
         "turbine_id": turbine_id,
         "component": record.component,
         "timestamp": record.timestamp.isoformat(),
-        "duration_seconds": payload.get("duration_seconds"),
+        "message": "ok" if waveform else "波形数据缺失",
+        "duration_seconds": payload.get("duration_seconds") or 0,
         "sample_rate_hz": sample_rate,
-        "sample_count": payload.get("sample_count", len(waveform)),
+        "sample_count": payload.get("sample_count", len(full_waveform)),
+        "returned_sample_count": len(waveform),
         "rms": payload.get("rms", record.rms),
         "waveform": waveform,
         "spectrum": spectrum,
@@ -1078,7 +1108,10 @@ async def list_blade_images(
 
 
 @router.post("/refresh-faults-from-events")
-async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
+async def refresh_faults_from_care_events(
+    db: AsyncSession = Depends(get_db),
+    _auth: User = Depends(require_role("engineer")),
+):
     """Sync faults from CARE event CSV files. Replaces seed_data demo faults.
 
     Reads 95 CARE normalized event CSVs, extracts anomaly events (status_type_id in {3,4}
@@ -1110,6 +1143,18 @@ async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
         t.source_asset_id: t for t in all_turbines if t.source_asset_id
     }
 
+    def _event_source_turbine_id(csv_path: str) -> str | None:
+        """Read source_turbine_id from the first data row of a CARE event CSV."""
+        import csv as _csv
+        try:
+            with open(csv_path, "r", encoding="utf-8-sig", newline="") as fh:
+                first_row = next(_csv.DictReader(fh), None)
+        except OSError:
+            return None
+        value = str((first_row or {}).get("source_turbine_id") or "").strip()
+        return value or None
+
+    farm_rr: dict[str, int] = {}
     created = 0
     for window in windows:
         labels = str(window.get("event_label") or "").lower()
@@ -1121,14 +1166,22 @@ async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
         wind_farm = FARM_REVERSE.get(region_label, region_label)
         source_file = window.get("source_file", "")
 
-        # Match turbine by wind farm — find first matching source_asset_id
+        # Match turbine: prefer exact source_asset_id ("<wind_farm>:<source_turbine_id>")
         matched = None
-        for asset_id, turbine in turbine_by_asset.items():
-            if wind_farm in asset_id:
-                matched = turbine
-                break
+        approximate = False
+        src_turbine_id = _event_source_turbine_id(source_file)
+        if src_turbine_id is not None:
+            matched = turbine_by_asset.get(f"{wind_farm}:{src_turbine_id}")
         if not matched:
-            continue
+            # Approximate fallback: round-robin across the farm's turbines so
+            # events do not all pile onto a single turbine.
+            candidates = [t for asset_id, t in sorted(turbine_by_asset.items()) if wind_farm in asset_id]
+            if not candidates:
+                continue
+            idx = farm_rr.get(wind_farm, 0)
+            matched = candidates[idx % len(candidates)]
+            farm_rr[wind_farm] = idx + 1
+            approximate = True
 
         # Derive fault type from event component category (from CSV)
         component = str(window.get("event_component_category") or "bearing")
@@ -1173,6 +1226,8 @@ async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
                 "event_end": window.get("event_end"),
                 "component": component,
                 "method": "care_event_csv_sync",
+                "approximate": approximate,
+                "match_method": "farm_round_robin" if approximate else "exact_asset_id",
             },
             processing_status="pending",
             discovered_at=datetime.now(timezone.utc),
@@ -1190,7 +1245,10 @@ async def refresh_faults_from_care_events(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/seed-knowledge")
-async def seed_knowledge_base(db: AsyncSession = Depends(get_db)):
+async def seed_knowledge_base(
+    db: AsyncSession = Depends(get_db),
+    _auth: User = Depends(require_role("admin")),
+):
     """Import fault knowledge base from frontend/src/data/fault-kb.json into DB.
 
     Reads the structured fault knowledge JSON (symptoms, root_causes, solutions,

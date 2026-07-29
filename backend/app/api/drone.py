@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +67,8 @@ class MissionCreateRequest(BaseModel):
 
 
 class ImageCaptureRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     mission_id: str
     turbine_id: int
     component: str = "blade"
@@ -363,6 +365,8 @@ async def check_image_quality(
         raise HTTPException(status_code=404, detail="Image not found")
 
     full_path = DATA_DIR / record.image_path
+    # Idempotency: re-running quality check must not re-increment mission counters
+    first_check = record.quality_passed is None
     issues: list[str] = []
     blur_score: float = 0.5
     exposure_ok = True
@@ -420,8 +424,8 @@ async def check_image_quality(
         record.retake_requested = True
         record.retake_reason = "; ".join(issues)
 
-    # Update mission counters
-    if record.mission_id:
+    # Update mission counters (only on first quality check for this image)
+    if record.mission_id and first_check:
         mission = await db.get(InspectionMission, record.mission_id)
         if mission:
             if passed:
@@ -473,9 +477,10 @@ async def detect_defects(
     defects: list[dict] = []
     diagnosis_type = "no_damage"
     confidence = 0.0
-    algorithm_mode = "demo_fixture"
+    algorithm_mode = "model_unavailable"
     model_version = None
     bbox = None
+    real_inference_ran = False
 
     # ── Try real YOLO inference ──
     try:
@@ -483,6 +488,7 @@ async def detect_defects(
         if blade_yolo_service.is_model_available() and full_path.exists():
             result = blade_yolo_service.predict(full_path, record.turbine_id)
             algorithm_mode = "real_inference"
+            real_inference_ran = True
             model_version = result.get("quality", {}).get("model_file", "unknown")
             diagnosis_type = result.get("damage_type", "no_damage")
             confidence = result.get("confidence", 0.0)
@@ -499,24 +505,15 @@ async def detect_defects(
                     "source": "blade_yolo_model_dtu",
                 })
     except Exception as e:
-        logger.warning("Real YOLO inference failed, using demo_fixture: %s", e)
+        logger.warning("Real YOLO inference failed (model unavailable): %s", e)
 
-    # ── Demo fixture (when model unavailable) ──
-    if not defects:
-        algorithm_mode = "demo_fixture"
-        # Fixed demo fixture for turbine 12 blade leading edge erosion scenario
-        if record.turbine_id == 12 or record.component == "leading_edge":
-            defects = [{
-                "type": "leading_edge_erosion",
-                "bbox": [120, 80, 200, 150],
-                "confidence": 0.82,
-                "severity": "moderate",
-                "area_px": 12000,
-                "source": "demo_fixture_example",
-            }]
-            diagnosis_type = "leading_edge_erosion"
-            confidence = 0.82
-            bbox = [120, 80, 80, 70]
+    # 模型不可用时不臆造缺陷：如实返回 model_unavailable，由调用方决定是否补齐权重后重试。
+    # （历史实现曾对特定风机注入固定的示例缺陷，会让演示数据与真实推理结果混淆，已移除。）
+    if not real_inference_ran:
+        diagnosis_type = "model_unavailable"
+        confidence = 0.0
+        defects = []
+        bbox = None
 
     # ── Update record ──
     record.algorithm_mode = algorithm_mode
@@ -528,7 +525,7 @@ async def detect_defects(
     await db.commit()
     await db.refresh(record)
 
-    return {
+    payload = {
         "image_id": record.id,
         "algorithm_mode": algorithm_mode,
         "model_version": model_version,
@@ -538,6 +535,9 @@ async def detect_defects(
         "defects_detected": defects,
         "data_source": record.data_source,
     }
+    if not real_inference_ran:
+        payload["message"] = "叶片检测模型不可用，本次未产生检测结论（不提供模拟结果）。请确认已放置 YOLO 权重后重试。"
+    return payload
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -572,6 +572,9 @@ async def link_to_evidence(
                 "image_id": image_id,
                 "already_linked": True,
             }
+
+    if record.diagnosis_type is None or record.diagnosis_confidence is None:
+        raise HTTPException(status_code=400, detail="该图片尚未执行缺陷检测，请先执行缺陷检测后再关联证据")
 
     has_defect = record.diagnosis_type and record.diagnosis_type != "no_damage" and record.diagnosis_confidence > 0
     defects = record.defects_detected or []

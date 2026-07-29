@@ -32,6 +32,7 @@ from app.models import (
     Fault,
     FaultKnowledgeNode,
     FaultSignal,
+    Incident,
     MaintenancePersonnel,
     NotificationConfig,
     MaintenanceRecord,
@@ -122,8 +123,8 @@ AI_PROVIDER_TEMPLATES: dict[str, dict[str, Any]] = {
     "deepseek": {
         "display_name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "default_model": "deepseek-chat",
-        "model_options": ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"],
+        "default_model": "deepseek-v4-flash",
+        "model_options": ["deepseek-v4-flash"],
     },
     "glm": {
         "display_name": "智谱GLM",
@@ -641,6 +642,19 @@ def _context_turbine_ref(page_context: dict[str, Any] | None) -> Optional[str]:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _context_incident_id(page_context: dict[str, Any] | None) -> Optional[int]:
+    if not page_context:
+        return None
+    value = page_context.get("incident_id")
+    if value is None or value == "":
+        return None
+    try:
+        incident_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return incident_id if incident_id > 0 else None
 
 
 def _extract_reason(message: str) -> Optional[str]:
@@ -1413,7 +1427,12 @@ async def plan_agent_action(
     if _looks_like_create_workorder_intent(message):
         if not _can_execute_agent_action(user, "create_workorder_record"):
             return _permission_denied_response("create_workorder_record")
-        return await _plan_create_workorder(db, user=user, message=message)
+        return await _plan_create_workorder(
+            db,
+            user=user,
+            message=message,
+            page_context=page_context,
+        )
     if _looks_like_create_fault_intent(message):
         if not _can_execute_agent_action(user, "create_fault_record"):
             return _permission_denied_response("create_fault_record")
@@ -2016,9 +2035,31 @@ async def _plan_add_maintenance_record(db: AsyncSession, *, user: User, message:
     }
 
 
-async def _plan_create_workorder(db: AsyncSession, *, user: User, message: str) -> dict[str, Any]:
-    turbine_ref = _extract_turbine_ref(message)
-    if not turbine_ref:
+async def _plan_create_workorder(
+    db: AsyncSession,
+    *,
+    user: User,
+    message: str,
+    page_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    explicit_turbine_ref = _extract_turbine_ref(message)
+    turbine_ref = explicit_turbine_ref or _context_turbine_ref(page_context)
+    context_turbine_id = _context_turbine_id(page_context)
+    context_incident_id = _context_incident_id(page_context)
+    incident: Incident | None = None
+
+    if context_incident_id is not None:
+        incident = await db.get(Incident, context_incident_id)
+        if not incident:
+            return {
+                "status": "error",
+                "task_type": "WRITE",
+                "confidence": 0.9,
+                "error_code": "incident_not_found",
+                "error_message": "当前页面关联的事件不存在或已被删除，请刷新事件页面后重试。",
+            }
+
+    if not turbine_ref and context_turbine_id is None and incident is None:
         return {
             "status": "needs_clarification",
             "task_type": "CLARIFY",
@@ -2027,8 +2068,20 @@ async def _plan_create_workorder(db: AsyncSession, *, user: User, message: str) 
             "clarification_question": "请说明要为哪台风机创建维修工单，例如 YD-B-007。",
         }
 
-    turbine_resolution = await resolve_turbine_by_ref(db, turbine_ref)
-    turbine, candidates = turbine_resolution.entity, turbine_resolution.candidates
+    # A selected page entity carries a stable database id and is therefore more
+    # precise than a display name, which can legitimately exist in two datasets.
+    if explicit_turbine_ref:
+        turbine_resolution = await resolve_turbine_by_ref(db, turbine_ref)
+        turbine, candidates = turbine_resolution.entity, turbine_resolution.candidates
+    elif context_turbine_id is not None or incident is not None:
+        resolved_turbine_id = context_turbine_id or (incident.turbine_id if incident else None)
+        turbine = await db.get(Turbine, resolved_turbine_id) if resolved_turbine_id else None
+        candidates = [turbine] if turbine else []
+    elif turbine_ref:
+        turbine_resolution = await resolve_turbine_by_ref(db, turbine_ref)
+        turbine, candidates = turbine_resolution.entity, turbine_resolution.candidates
+    else:
+        turbine, candidates = None, []
     if not turbine:
         if candidates:
             names = "、".join(item.name for item in candidates)
@@ -2045,6 +2098,18 @@ async def _plan_create_workorder(db: AsyncSession, *, user: User, message: str) 
             "confidence": 0.78,
             "error_code": "turbine_not_found",
             "error_message": f"未找到风机 {turbine_ref}。",
+        }
+
+    if incident is not None and incident.turbine_id != turbine.id:
+        return {
+            "status": "error",
+            "task_type": "WRITE",
+            "confidence": 0.95,
+            "error_code": "incident_turbine_mismatch",
+            "error_message": (
+                f"当前事件 {incident.incident_id} 属于其他风机，"
+                f"不能为 {turbine.name} 创建关联工单。"
+            ),
         }
 
     assignee_name = _extract_assignee_name(message)
@@ -2080,7 +2145,24 @@ async def _plan_create_workorder(db: AsyncSession, *, user: User, message: str) 
         assignee_id=assignee.id if assignee else None,
         assignee_email=assignee.email if assignee else None,
     )
-    before = {"turbine": _turbine_state(turbine), "fault_context": fault_context, "workorder": None}
+    if incident is not None:
+        after["incident_id"] = incident.id
+        after["incident_ref"] = incident.incident_id
+    before = {
+        "turbine": _turbine_state(turbine),
+        "incident": (
+            {
+                "id": incident.id,
+                "incident_id": incident.incident_id,
+                "title": incident.title,
+                "stage": incident.stage,
+            }
+            if incident
+            else None
+        ),
+        "fault_context": fault_context,
+        "workorder": None,
+    }
     warnings: list[str] = []
     if after.get("fault_type") == "待诊断":
         warnings.append("未查询到明确活跃故障，系统已按待诊断维修任务草拟，确认前请核对标题和描述。")
@@ -2103,6 +2185,7 @@ async def _plan_create_workorder(db: AsyncSession, *, user: User, message: str) 
         action="create_workorder_record",
         params={
             "turbine_id": turbine.id,
+            "incident_id": incident.id if incident else None,
             "fault_id": after.get("fault_id"),
             "title": after["title"],
             "description": after["description"],
@@ -2115,6 +2198,7 @@ async def _plan_create_workorder(db: AsyncSession, *, user: User, message: str) 
         warnings=warnings,
         parsed_slots={
             "turbine_ref": turbine.name,
+            "incident_id": incident.id if incident else None,
             "assignee_name": assignee.username if assignee else None,
             "priority": after["priority"],
             "fault_type": after["fault_type"],
@@ -4665,7 +4749,25 @@ async def _confirm_create_workorder(db: AsyncSession, *, user: User, pending: Pe
             "status": "failed",
             "error_code": "turbine_not_found",
             "error_message": "执行前风机不存在，请重新发起 Agent 指令。",
-        }
+            }
+
+    incident_id = pending.params.get("incident_id")
+    if incident_id:
+        incident = await db.get(Incident, int(incident_id))
+        if not incident or incident.turbine_id != turbine.id:
+            await _mark_log_failed(
+                db,
+                pending.request_id,
+                "incident_context_changed",
+                "执行前事件不存在或事件所属风机已变化。",
+            )
+            return {
+                "request_id": pending.request_id,
+                "action": pending.action,
+                "status": "failed",
+                "error_code": "incident_context_changed",
+                "error_message": "执行前事件上下文已变化，请返回事件页面重新发起工单。",
+            }
 
     assignee = None
     assignee_id = pending.params.get("assignee_id")
@@ -4684,6 +4786,7 @@ async def _confirm_create_workorder(db: AsyncSession, *, user: User, pending: Pe
     now = _utc_now()
     workorder = WorkOrder(
         turbine_id=turbine.id,
+        incident_id=int(incident_id) if incident_id else None,
         fault_id=pending.params.get("fault_id"),
         title=str(pending.params["title"]),
         description=str(pending.params.get("description") or ""),

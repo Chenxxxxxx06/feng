@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text, UniqueConstraint, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Index, JSON, Text, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -83,6 +83,10 @@ class Turbine(Base):
 
 class SCADARecord(Base):
     __tablename__ = "scada_records"
+    __table_args__ = (
+        Index("ix_scada_turbine_timestamp", "turbine_id", "timestamp"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
@@ -224,6 +228,7 @@ class WorkOrder(Base):
     id = Column(Integer, primary_key=True, index=True)
     turbine_id = Column(Integer, ForeignKey("turbines.id"), nullable=False, index=True)
     fault_id = Column(Integer, ForeignKey("faults.id"), nullable=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True, index=True)
     title = Column(String(128), nullable=False)
     description = Column(Text)
     status = Column(String(16), default="pending")
@@ -338,6 +343,7 @@ class NotificationConfig(Base):
     hi_threshold = Column(Float, default=70.0)
     email_enabled = Column(Boolean, default=False)
     email_address = Column(String(128), nullable=True)
+    wechat_enabled = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=func.now())
 
     user = relationship("User", back_populates="notification_configs")
@@ -443,7 +449,7 @@ class AlarmRecord(Base):
     value = Column(Float, nullable=True)
     threshold = Column(Float, nullable=True)
     is_primary = Column(Boolean, default=False)  # primary alarm in cluster
-    compression_rule = Column(String(64), nullable=True)  # which rule compressed it
+    compression_rule = Column(String(255), nullable=True)  # comma-joined rule ids that compressed it
     compressed = Column(Boolean, default=False)  # whether this was merged
     fired_at = Column(DateTime(timezone=True), default=func.now())
 
@@ -576,3 +582,25 @@ class AgentSpan(Base):
     error_code = Column(String(64), nullable=True)
     started_at = Column(DateTime(timezone=True), default=func.now())
     ended_at = Column(DateTime(timezone=True), nullable=True)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 维护窗口规划模型
+# 已归档业务域的历史表由 Alembic 继续管理，不再由运行时模型注册。
+# ═══════════════════════════════════════════════════════════════════
+
+from app.models.production import (  # noqa: E402,F401
+    PowerForecast,
+    ProductionPlan,
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# 多 Agent 资源协商域 —— 资源锁 / 竞价持久化
+# 让 ResourceNegotiationService 的锁跨请求可见（原先只存在于实例内存字典）。
+# 纯增量：只新增 resource_locks / resource_bids 两张表。
+# ═══════════════════════════════════════════════════════════════════
+
+from app.models.negotiation import (  # noqa: E402,F401
+    ResourceLockRecord,
+    ResourceBid,
+)

@@ -1,5 +1,10 @@
 """Federated PHM knowledge sharing — privacy-preserving multi-farm learning.
 
+【状态】演示级模拟（`mode = "simulation"`）：三个参与风场为**进程内模拟实例**，
+数据保存在内存中，**服务重启即清零**，farms 之间也不存在真实网络边界。
+本模块用于验证联邦知识共享协议的流程（共享→下载→本地回测→接受/冲突→撤回，
+以及差分隐私加噪），**并非真实的多方部署**，其统计结果不可作为跨场实证结论。
+
 Three isolated simulated wind farm instances:
 - NO raw SCADA exchange
 - Share pattern-validated knowledge summaries or model statistics only
@@ -338,7 +343,11 @@ class FederatedKnowledgeService:
         }
 
     def get_federation_status(self) -> dict[str, Any]:
-        """Get overall federation hub status."""
+        """Get overall federation hub status.
+
+        ``mode`` is always ``"simulation"``: the farms are in-process instances,
+        not real remote participants (see module docstring).
+        """
         farms_status = []
         for fid, farm in self.hub.farms.items():
             farms_status.append({
@@ -352,6 +361,11 @@ class FederatedKnowledgeService:
 
         return {
             "hub_id": self.hub.hub_id,
+            "mode": "simulation",
+            "mode_note": (
+                "三个参与风场为进程内模拟实例，重启清零；"
+                "用于验证联邦共享协议流程，非真实多方部署。"
+            ),
             "total_farms": len(self.hub.farms),
             "total_shared_fragments": len(self.hub.shared_registry),
             "total_conflicts": len(self.hub.conflict_log),

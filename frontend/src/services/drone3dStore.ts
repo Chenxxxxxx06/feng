@@ -6,6 +6,28 @@
 import { create } from 'zustand';
 import type { Turbine, Drone, NoFlyZone, InspectionWaypoint, InspectionTargetPart } from '../types';
 
+/**
+ * 后端巡检任务实时状态（/api/drone 落库结果的摘要）。
+ * online=false 表示后端不可达，页面处于纯本地离线演示。
+ */
+export interface MissionTelemetry {
+  missionId: string | null;
+  missionStatus: 'idle' | 'planned' | 'in_flight' | 'completed' | 'aborted';
+  online: boolean;
+  shotCount: number;
+  passedCount: number;
+  defectCount: number;
+}
+
+const EMPTY_MISSION: MissionTelemetry = {
+  missionId: null,
+  missionStatus: 'idle',
+  online: false,
+  shotCount: 0,
+  passedCount: 0,
+  defectCount: 0,
+};
+
 export interface Drone3DState {
   // ── 数据 ──
   turbines: Turbine[];
@@ -17,6 +39,9 @@ export interface Drone3DState {
   inspectionWaypoints: InspectionWaypoint[];
   selectedInspectionTurbineId: number | null;
   inspectionTargetPart: InspectionTargetPart;
+
+  // ── 后端巡检任务 ──
+  mission: MissionTelemetry;
 
   // ── 禁飞区 ──
   noFlyZones: NoFlyZone[];
@@ -39,6 +64,8 @@ export interface Drone3DState {
   setInspectionWaypoints: (waypoints: InspectionWaypoint[]) => void;
   setSelectedInspectionTurbine: (id: number | null) => void;
   setInspectionTargetPart: (part: InspectionTargetPart) => void;
+  setMissionTelemetry: (patch: Partial<MissionTelemetry>) => void;
+  resetMissionTelemetry: () => void;
   setViewMode: (m: 'overview' | 'detail') => void;
   focusTurbine: (id: number | null) => void;
   setNoFlyZones: (zones: NoFlyZone[]) => void;
@@ -61,6 +88,8 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   selectedInspectionTurbineId: null,
   inspectionTargetPart: 'blade_tip',
 
+  mission: EMPTY_MISSION,
+
   noFlyZones: [],
   showNoFlyZones: true,
 
@@ -79,6 +108,8 @@ export const useDrone3DStore = create<Drone3DState>((set) => ({
   setInspectionWaypoints: (inspectionWaypoints) => set({ inspectionWaypoints }),
   setSelectedInspectionTurbine: (selectedInspectionTurbineId) => set({ selectedInspectionTurbineId }),
   setInspectionTargetPart: (inspectionTargetPart) => set({ inspectionTargetPart }),
+  setMissionTelemetry: (patch) => set((s) => ({ mission: { ...s.mission, ...patch } })),
+  resetMissionTelemetry: () => set({ mission: EMPTY_MISSION }),
   setViewMode: (viewMode) => set({ viewMode }),
   focusTurbine: (id) =>
     set({ focusedTurbineId: id, viewMode: id ? 'detail' : 'overview' }),

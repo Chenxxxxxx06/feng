@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
 from app.database import get_db
-from app.models import SCADARecord, Turbine
+from app.models import SCADARecord, Turbine, User
 from app.schemas import TurbineResponse, TurbineListResponse
 from app.services.care_monitoring_metrics import (
     CARE_DATASET_ID,
@@ -19,12 +19,14 @@ from app.services.data_pipeline.open_meteo_loader import (
     open_meteo_loader,
 )
 from app.services.data_pipeline.geo_loader import geo_loader
-from app.api.auth import get_current_user
+from app.services.data_provenance import build_data_provenance
+from app.api.auth import get_current_user, require_role
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # ── Simple in-memory cache for heavy dashboard-aggregate query ──
-_agg_cache: dict = {"data": None, "ts": 0}
+# Keyed by full query params (source_dataset) so different datasets don't share entries.
+_agg_cache: dict[str, dict] = {}
 _AGG_CACHE_TTL = 60  # seconds
 
 CARE_POWER_SOURCE_FIELDS = {
@@ -65,6 +67,7 @@ async def get_monitoring_metrics(
 async def refresh_health_snapshots(
     source_dataset: str = Query(CARE_DATASET_ID, description="数据集ID"),
     db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("engineer")),
 ):
     """Recalculate persisted turbine HI snapshots from imported dataset rows."""
     if source_dataset != CARE_DATASET_ID:
@@ -155,8 +158,10 @@ async def get_dashboard_aggregate(
     """
     # ── Cache hit ──
     now_ts = time.time()
-    if _agg_cache["data"] is not None and (now_ts - _agg_cache["ts"]) < _AGG_CACHE_TTL:
-        return _agg_cache["data"]
+    cache_key = f"source_dataset={source_dataset}"
+    cached = _agg_cache.get(cache_key)
+    if cached is not None and (now_ts - cached["ts"]) < _AGG_CACHE_TTL:
+        return cached["data"]
 
     dataset_filter = _source_dataset_filter(source_dataset)
 
@@ -171,6 +176,12 @@ async def get_dashboard_aggregate(
 
     if not turbine_ids:
         return {
+            **build_data_provenance(
+                source_type="historical",
+                source_label="历史公开数据",
+                source_description="CARE 公开风机 SCADA 历史数据，非现场实时流。",
+                is_demo=False,
+            ),
             "source_dataset": source_dataset,
             "total_turbines": 0,
             "component_temps": [],
@@ -234,12 +245,16 @@ async def get_dashboard_aggregate(
         power_multiplier = 1.0
 
     # ── 24h SCADA trends ──
-    max_ts_result = await db.execute(
-        text(f"SELECT MAX(timestamp) AS max_ts FROM scada_records WHERE turbine_id IN ({placeholders})"),
+    time_range_result = await db.execute(
+        text(
+            f"SELECT MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts "
+            f"FROM scada_records WHERE turbine_id IN ({placeholders})"
+        ),
         params,
     )
-    max_ts_row = max_ts_result.mappings().first()
-    latest_ts_raw = max_ts_row["max_ts"] if max_ts_row else None
+    time_range_row = time_range_result.mappings().first()
+    earliest_ts_raw = time_range_row["min_ts"] if time_range_row else None
+    latest_ts_raw = time_range_row["max_ts"] if time_range_row else None
 
     # Parse SQLite timestamp string → datetime
     if latest_ts_raw:
@@ -252,8 +267,15 @@ async def get_dashboard_aggregate(
         latest_ts = None
         window_start = datetime.now(timezone.utc) - timedelta(hours=24)
 
+    # Hour-bucket expression per DB dialect (strftime is SQLite-only)
+    bind = db.get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", "sqlite")
+    if dialect_name == "postgresql":
+        hour_bucket_expr = "to_char(date_trunc('hour', timestamp), 'YYYY-MM-DD HH24:00:00')"
+    else:
+        hour_bucket_expr = "strftime('%Y-%m-%d %H:00:00', timestamp)"
     trends_sql = text(f"""
-        SELECT strftime('%Y-%m-%d %H:00:00', timestamp) AS hour_bucket,
+        SELECT {hour_bucket_expr} AS hour_bucket,
             AVG(wind_speed_ms) AS avg_wind,
             AVG(power_kw) AS avg_power,
             AVG(gearbox_temperature_c) AS avg_gearbox_temp
@@ -313,7 +335,10 @@ async def get_dashboard_aggregate(
     maint_scores: list[float] = []
     for t in turbines:
         if t.last_maintenance:
-            days = (now - t.last_maintenance).days
+            lm = t.last_maintenance
+            if lm.tzinfo is None:
+                lm = lm.replace(tzinfo=timezone.utc)
+            days = (now - lm).days
             if days < 90:
                 maint_scores.append(95.0)
             elif days < 180:
@@ -381,6 +406,13 @@ async def get_dashboard_aggregate(
     ]
 
     result = {
+        **build_data_provenance(
+            source_type="historical",
+            source_label="历史公开数据",
+            source_description="CARE 公开风机 SCADA 历史数据，非现场实时流。",
+            is_demo=False,
+            timestamps=[earliest_ts_raw, latest_ts_raw],
+        ),
         "source_dataset": source_dataset,
         "total_turbines": total_count,
         "component_temps": component_temps,
@@ -398,8 +430,7 @@ async def get_dashboard_aggregate(
     }
 
     # ── Cache write ──
-    _agg_cache["data"] = result
-    _agg_cache["ts"] = now_ts
+    _agg_cache[cache_key] = {"data": result, "ts": now_ts}
     return result
 
 
@@ -416,6 +447,8 @@ async def get_turbine(turbine_id: int, db: AsyncSession = Depends(get_db)):
 async def get_scada_data(
     turbine_id: int,
     hours: int = Query(24, ge=1, le=720),
+    max_points: int | None = Query(None, ge=24, le=2000),
+    compact: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
     """Get SCADA data from imported database records."""
@@ -424,11 +457,16 @@ async def get_scada_data(
     if not turbine:
         raise HTTPException(status_code=404, detail="Turbine not found")
 
-    db_records, dataset_window = await _load_scada_window_records(db, turbine_id, hours)
+    db_records, dataset_window = await _load_scada_window_records(
+        db,
+        turbine_id,
+        hours,
+        max_points=max_points,
+    )
 
     if db_records:
         return [
-            _scada_response(r, dataset_window)
+            _scada_response(r, dataset_window, compact=compact)
             for r in reversed(db_records)
         ]
 
@@ -439,16 +477,18 @@ async def _load_scada_window_records(
     db: AsyncSession,
     turbine_id: int,
     hours: int,
+    max_points: int | None = None,
 ) -> tuple[list[SCADARecord], str]:
     # Try recent records first. Imported public datasets are often historical,
     # so if no recent records exist, return the latest real dataset window and
     # mark it explicitly in the response.
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    record_limit = min(hours * 6, max_points) if max_points is not None else hours * 6
     db_result = await db.execute(
         select(SCADARecord)
         .where(SCADARecord.turbine_id == turbine_id, SCADARecord.timestamp >= since)
         .order_by(SCADARecord.timestamp.desc())
-        .limit(hours * 6)
+        .limit(record_limit)
     )
     db_records = db_result.scalars().all()
     dataset_window = "recent"
@@ -458,7 +498,7 @@ async def _load_scada_window_records(
             select(SCADARecord)
             .where(SCADARecord.turbine_id == turbine_id)
             .order_by(SCADARecord.timestamp.desc())
-            .limit(hours * 6)
+            .limit(record_limit)
         )
         db_records = latest_result.scalars().all()
         dataset_window = "historical_latest"
@@ -466,10 +506,10 @@ async def _load_scada_window_records(
     return db_records, dataset_window
 
 
-def _scada_response(record, dataset_window: str) -> dict:
+def _scada_response(record, dataset_window: str, compact: bool = False) -> dict:
     extra = dict(record.extra or {})
     power_meta = _power_display_metadata(record.power_kw, extra)
-    return {
+    response = {
         "timestamp": record.timestamp.isoformat(),
         "power_kw": record.power_kw,
         **power_meta,
@@ -483,8 +523,14 @@ def _scada_response(record, dataset_window: str) -> dict:
         "grid_frequency_hz": record.grid_frequency_hz,
         "ambient_temp_c": record.ambient_temp_c,
         "data_source": "real_dataset",
+        "source_type": "historical",
+        "is_demo": False,
         "dataset_window": dataset_window,
         "source_dataset": extra.get("source_dataset"),
+    }
+    if compact:
+        return response
+    response.update({
         "source_file": extra.get("source_file"),
         "source_row": extra.get("source_row"),
         "source_turbine_id": extra.get("source_turbine_id"),
@@ -492,7 +538,8 @@ def _scada_response(record, dataset_window: str) -> dict:
         "event_label": extra.get("event_label"),
         "event_component_category": extra.get("event_component_category"),
         "status_type_id": extra.get("status_type_id"),
-    }
+    })
+    return response
 
 
 def _power_display_metadata(power_value: float | None, extra: dict) -> dict:
@@ -596,7 +643,10 @@ async def get_turbine_health(
     # Days since last maintenance
     last_maint_days = None
     if turbine.last_maintenance:
-        last_maint_days = (datetime.now(timezone.utc) - turbine.last_maintenance).days
+        lm = turbine.last_maintenance
+        if lm.tzinfo is None:
+            lm = lm.replace(tzinfo=timezone.utc)
+        last_maint_days = (datetime.now(timezone.utc) - lm).days
 
     hi_result = calculate_turbine_hi(
         scada_data=scada_dicts if scada_dicts else None,

@@ -11,12 +11,18 @@ from app.config import get_settings
 settings = get_settings()
 from app.models import RULPrediction, Turbine, User
 from app.schemas import RULResponse, RULListResponse, CostComparisonRequest, CostComparisonResponse
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_role
 from app.services.prediction_service import (
     calculate_cost_comparison,
     refresh_rul_predictions,
     get_prediction_summary,
     get_valid_fault_types,
+    predict_turbine_rul_detailed,
+    RUL_MODEL_VERSION,
+    RUL_METHOD_CATALOG,
+    RUL_CONFIDENCE_LEVEL,
+    RUL_BOOTSTRAP_SAMPLES,
+    RUL_PRIOR_PSEUDO_R2,
 )
 from app.services.maintenance_planner import (
     generate_maintenance_plan,
@@ -76,6 +82,7 @@ async def get_rul_predictions(
 async def refresh_rul(
     turbine_id: int | None = Query(None, description="Turbine ID; omit to refresh all"),
     db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_role("engineer")),
 ):
     """Regenerate RUL predictions using current health index data.
 
@@ -87,6 +94,56 @@ async def refresh_rul(
         return {"success": True, **summary}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"RUL refresh failed: {exc}")
+
+
+@router.get("/rul/explain")
+async def explain_rul_prediction(
+    turbine_id: int = Query(..., description="风机 ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """RUL 预测可解释性视图 —— 多模型融合过程逐层展开。
+
+    返回内容包括：
+
+    - ``trajectory``        从 SCADA 抽取的 HI 退化轨迹（含每个时间窗的原始观测量）
+    - ``method_breakdown``  线性 / 指数 / 类比 / ISO 状态先验四个模型各自的
+      拟合优度（R²、RMSE）、融合权重、独立 RUL 预测值；不可用的模型给出
+      ``unavailable_reason``
+    - ``uncertainty_source`` 置信区间的统计来源（残差自助法、重采样次数、
+      置信水平、残差标准差、未纳入的不确定性来源）
+    - ``degraded`` / ``degraded_reason`` 数据不足以支撑某模型时的**诚实降级说明**
+
+    诚实声明：``r2``/``rmse`` 是退化轨迹的**样本内拟合优度**，不是 RUL 预测精度；
+    本系统数据库无 run-to-failure 真值，RUL 外部精度标注为 not_evaluated。
+    """
+    turbine = await db.get(Turbine, turbine_id)
+    if not turbine:
+        raise HTTPException(status_code=404, detail=f"Turbine {turbine_id} not found")
+
+    try:
+        return await predict_turbine_rul_detailed(turbine, db)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"RUL explain failed: {exc}")
+
+
+@router.get("/rul/model-info")
+async def rul_model_info():
+    """RUL 融合模型的静态元信息（模型卡的预测域摘要）。"""
+    return {
+        "model_version": RUL_MODEL_VERSION,
+        "ensemble": RUL_METHOD_CATALOG,
+        "fusion_strategy": "拟合优度(R²)加权模型平均；ISO 13381-1 状态先验以伪R²同台竞争",
+        "prior_pseudo_r2": RUL_PRIOR_PSEUDO_R2,
+        "uncertainty": {
+            "method": "residual_bootstrap",
+            "bootstrap_samples": RUL_BOOTSTRAP_SAMPLES,
+            "confidence_level": RUL_CONFIDENCE_LEVEL,
+        },
+        "honesty_note": (
+            "数据库中无 run-to-failure 真值标签，因此不报告 RUL 预测精度指标；"
+            "响应中的 R²/RMSE 仅为退化轨迹的样本内拟合优度。"
+        ),
+    }
 
 
 @router.get("/summary")
@@ -387,7 +444,10 @@ async def export_schedule_ics(
 
     start = date_type.today()
     if start_date:
-        start = date_type.fromisoformat(start_date)
+        try:
+            start = date_type.fromisoformat(start_date)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid start_date format, use YYYY-MM-DD")
 
     scheduled = auto_schedule(plan, start_date=start, max_days=max_days)
     ics_content = generate_ics(scheduled, title="风调预顺 运维计划")

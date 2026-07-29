@@ -64,13 +64,10 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
     "qwen-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-plus", "qwen-plus", QWEN_CONFIG["base_url"]),
     "qwen-turbo": AIModelConfig("通义千问 DashScope", "通义千问 qwen-turbo", "qwen-turbo", QWEN_CONFIG["base_url"]),
     "qwen3.6-flash": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.6-flash", "qwen3.6-flash", QWEN_CONFIG["base_url"]),
-    "qwen3.7-max-2026-05-17": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-max", "qwen3.7-max-2026-05-17", QWEN_CONFIG["base_url"]),
+    "qwen3.7-max-2026-05-20": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-max", "qwen3.7-max-2026-05-20", QWEN_CONFIG["base_url"]),
     "qwen3.7-plus-2026-05-26": AIModelConfig("通义千问 DashScope", "通义千问 qwen3.7-plus", "qwen3.7-plus-2026-05-26", QWEN_CONFIG["base_url"]),
     "qwen-vl-plus": AIModelConfig("通义千问 DashScope", "通义千问 qwen-vl-plus", "qwen-vl-plus", QWEN_CONFIG["base_url"]),
     "deepseek-v4-flash": AIModelConfig("DeepSeek", "DeepSeek deepseek-v4-flash", "deepseek-v4-flash", "https://api.deepseek.com"),
-    "deepseek-chat": AIModelConfig("DeepSeek", "DeepSeek deepseek-chat", "deepseek-chat", "https://api.deepseek.com"),
-    "deepseek-reasoner": AIModelConfig("DeepSeek", "DeepSeek deepseek-reasoner", "deepseek-reasoner", "https://api.deepseek.com"),
-    "deepseek-v3": AIModelConfig("DeepSeek", "DeepSeek deepseek-v3", "deepseek-chat", "https://api.deepseek.com"),
     "glm-5-flash": AIModelConfig("智谱GLM", "智谱 GLM-5-Flash", "glm-5-flash", "https://open.bigmodel.cn/api/paas/v4/"),
     "kimi-k2.6": AIModelConfig("Kimi Moonshot", "Kimi kimi-k2.6", "kimi-k2.6", "https://api.moonshot.cn/v1"),
     "gpt-4o-mini": AIModelConfig("OpenAI", "OpenAI gpt-4o-mini", "gpt-4o-mini", settings.OPENAI_BASE_URL),
@@ -84,7 +81,10 @@ MODEL_CATALOG: dict[str, AIModelConfig] = {
 
 MODEL_ALIASES = {
     "qwen3.5-flash": "qwen3.6-flash",
-    "deepseek-v3": "deepseek-chat",
+    "qwen3.7-max-2026-05-17": "qwen3.7-max-2026-05-20",
+    "deepseek-v3": "deepseek-v4-flash",
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-reasoner": "deepseek-v4-flash",
 }
 
 
@@ -690,7 +690,7 @@ def fallback_summary(page_type: str, page_data: dict | None = None) -> dict:
             conclusions.append("故障诊断模块需要接入风机SCADA数据进行分析")
         suggestions = [
             "建议48小时内安排针对性检查",
-            "检查相关备件库存，确认供应充足",
+            "在工单审核时确认所需备件、工具与人员",
         ]
         return {"conclusions": conclusions, "suggestions": suggestions}
 

@@ -159,7 +159,7 @@ export interface VibrationPreview {
   peak_frequencies: { frequency_hz: number; amplitude: number }[];
   fault_detected: boolean;
   algorithm_status: string;
-  message: string;
+  message?: string;
   source_dataset?: string | null;
 }
 
@@ -202,6 +202,7 @@ export interface WorkOrder {
   id: number;
   turbine_id: number;
   fault_id: number | null;
+  incident_id: number | null;
   title: string;
   description: string | null;
   status: string;
@@ -406,6 +407,32 @@ export interface DecisionSandbox {
   incident_id: string;
   plans: DecisionPlan[];
   recommended_index: number;
+}
+
+// One plan in the POST /incidents/{id}/generate-plans response
+// (serialized in backend/app/api/incidents.py generate_decision_plans)
+export interface GeneratedDecisionPlan {
+  id: string; // 'PLAN-xxxxxxxx'
+  plan_name: string;
+  strategy: string;
+  safety_risk: number;
+  repair_cost: number;
+  downtime_hours: number;
+  downtime_loss: number;
+  recovery_days: number;
+  personnel_feasible: boolean;
+  parts_feasible: boolean;
+  weather_feasible: boolean;
+  safety_score: number;
+  economic_score: number;
+  resource_score: number;
+  recovery_time_score?: number; // computed server-side but not currently serialized
+  total_score: number;
+  is_recommended: boolean;
+  is_feasible: boolean;
+  infeasible_reasons: string[];
+  score_confidence_interval: [number, number];
+  data_quality_warnings: string[];
 }
 
 export interface PolicyCheckRequest {

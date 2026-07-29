@@ -2,6 +2,9 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAuthStore } from '../../services/authStore';
 import api from '../../services/api';
+import ToastHost from '../Common/Toast';
+import OnboardingTour, { replayTour } from '../Common/OnboardingTour';
+import CopilotFAB from '../AIAssistant/CopilotFAB';
 import {
   applyPreferences,
   canShowDesktopDigest,
@@ -87,6 +90,22 @@ const navItems = [
   },
 ];
 
+// These pages provide live, domain-specific context to their own assistant
+// instance. Every other authenticated route receives the layout-level fallback.
+const PAGE_MANAGED_COPILOT_ROUTES = [
+  '/diagnosis',
+  '/drone-scheduler',
+  '/incident',
+  '/knowledge',
+  '/prediction',
+  '/settings',
+  '/turbine/',
+];
+
+function pageManagesCopilot(pathname: string): boolean {
+  return PAGE_MANAGED_COPILOT_ROUTES.some((route) => pathname.startsWith(route));
+}
+
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 340;
 const SIDEBAR_DEFAULT = 200;
@@ -104,6 +123,8 @@ export default function AppLayout() {
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const [desktopDigest, setDesktopDigest] = useState<DesktopDigestSummary | null>(null);
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'ok' | 'down'>('checking');
+  const [backendCheckedAt, setBackendCheckedAt] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
     return Number.isFinite(saved) && saved > 0 ? clampSidebarWidth(saved) : SIDEBAR_DEFAULT;
@@ -118,6 +139,33 @@ export default function AppLayout() {
     };
     window.addEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
     return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, handlePreferences);
+  }, []);
+
+  // 后端连通性探测：每 60 秒一次。指示灯必须反映真实探测结果，
+  // 演示途中后端挂掉时能立刻从侧边栏看出来，而不是永远显示绿灯。
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const { data } = await api.get('/health', { timeout: 8000 });
+        if (cancelled) return;
+        setBackendStatus(data?.status === 'ok' ? 'ok' : 'down');
+      } catch {
+        if (!cancelled) setBackendStatus('down');
+      } finally {
+        if (!cancelled) {
+          setBackendCheckedAt(
+            new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          );
+        }
+      }
+    };
+    void probe();
+    const timer = window.setInterval(probe, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -196,32 +244,63 @@ export default function AppLayout() {
           </div>
         </div>
 
-        <nav className="flex-1 py-5 px-3 space-y-1">
+        <nav className="flex-1 min-h-0 overflow-y-auto py-4 px-3 space-y-0.5" data-tour="nav" aria-label="主导航">
           <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-widest text-text-muted">导航菜单</p>
           {navItems.map((item) => {
             const active = location.pathname.startsWith(item.path);
             return (
               <NavLink key={item.path} to={item.path}
-                className={`sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  active ? 'text-[#F1F5F9]' : 'text-text-secondary hover:text-[#E2E8F0]'
+                aria-current={active ? 'page' : undefined}
+                title={item.label}
+                className={`sidebar-link flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 ${
+                  active ? 'text-[#F1F5F9]' : 'text-text-secondary hover:text-[#E2E8F0] hover:bg-bg-hover'
                 }`}
                 style={active ? { background: 'rgba(59,130,246,0.14)', boxShadow: '0 0 12px rgba(59,130,246,0.08)' } : {}}
               >
-                <span className={`flex-shrink-0 transition-colors duration-200 ${active ? 'text-[#3B82F6]' : ''}`}>{item.icon}</span>
-                <span>{item.label}</span>
+                <span className={`flex-shrink-0 transition-colors duration-200 ${active ? 'text-[#3B82F6]' : ''}`} aria-hidden="true">{item.icon}</span>
+                <span className="truncate">{item.label}</span>
                 {active && <span className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#3B82F6', boxShadow: '0 0 8px rgba(59,130,246,0.6)' }} />}
               </NavLink>
             );
           })}
         </nav>
 
-        <div className="px-4 py-3 mx-3 mb-3 rounded-xl" style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.08)' }}>
+        {/* 后端连通性指示：反映真实探测结果，不写死绿灯。
+            语义限定为"后端连接"，避免与顶栏的机组健康状态混淆。 */}
+        <div
+          className="px-4 py-3 mx-3 mb-3 rounded-xl"
+          style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.08)' }}
+          title={
+            backendStatus === 'ok'
+              ? `后端服务连通（最近探测 ${backendCheckedAt ?? '—'}）`
+              : backendStatus === 'down'
+                ? '后端服务无响应，页面数据可能为陈旧缓存'
+                : '正在探测后端服务'
+          }
+        >
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#10B981' }} />
-              <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: '#10B981' }} />
+              {backendStatus === 'ok' && (
+                <span
+                  className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                  style={{ background: 'var(--accent-green)' }}
+                />
+              )}
+              <span
+                className="relative inline-flex rounded-full h-2 w-2"
+                style={{
+                  background:
+                    backendStatus === 'ok'
+                      ? 'var(--accent-green)'
+                      : backendStatus === 'down'
+                        ? 'var(--accent-red)'
+                        : 'var(--text-muted)',
+                }}
+              />
             </span>
-            <span className="text-[11px] text-text-muted">系统运行正常</span>
+            <span className="text-[11px] text-text-muted">
+              {backendStatus === 'ok' ? '后端服务连通' : backendStatus === 'down' ? '后端服务无响应' : '正在探测后端…'}
+            </span>
           </div>
         </div>
 
@@ -232,8 +311,18 @@ export default function AppLayout() {
               {user?.username?.[0]?.toUpperCase() || 'A'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold truncate text-text-primary">{user?.username || 'admin'}</p>
-              <button onClick={logout} className="text-[10px] text-text-muted hover:text-accent-red transition-colors duration-150">退出登录</button>
+              <p className="text-xs font-semibold truncate text-text-primary" title={user?.username || 'admin'}>{user?.username || 'admin'}</p>
+              <div className="flex items-center gap-2">
+                <button onClick={logout} className="text-[10px] text-text-muted hover:text-accent-red transition-colors duration-150">退出登录</button>
+                <span className="text-[10px] text-text-muted/40">·</span>
+                <button
+                  onClick={replayTour}
+                  className="text-[10px] text-text-muted hover:text-accent-blue transition-colors duration-150"
+                  title="重新播放新手引导"
+                >
+                  新手引导
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -254,6 +343,10 @@ export default function AppLayout() {
         )}
         <Outlet />
       </main>
+
+      <ToastHost />
+      {!pageManagesCopilot(location.pathname) && <CopilotFAB />}
+      <OnboardingTour enabled={Boolean(user) && location.pathname.startsWith('/dashboard')} />
     </div>
   );
 }
@@ -288,13 +381,13 @@ function DesktopDigestToast({ summary, onClose }: { summary: DesktopDigestSummar
 
   return (
     <div
-      className={`fixed z-[900] w-[300px] rounded-lg border border-border-card bg-bg-panel/95 p-4 shadow-2xl backdrop-blur transition-shadow ${
+      className={`pointer-events-none fixed z-[900] w-[300px] rounded-lg border border-border-card bg-bg-panel/95 p-4 shadow-2xl backdrop-blur transition-shadow ${
         dragging ? 'shadow-[0_0_30px_rgba(59,130,246,0.3)] cursor-grabbing select-none' : 'cursor-auto'
       }`}
       style={{ left: position.x, top: position.y }}
     >
       <div
-        className="flex items-start justify-between gap-3 cursor-grab active:cursor-grabbing"
+        className="pointer-events-auto flex items-start justify-between gap-3 cursor-grab active:cursor-grabbing"
         onMouseDown={onMouseDown}
       >
         <div>

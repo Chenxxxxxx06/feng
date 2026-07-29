@@ -17,10 +17,17 @@ import os
 from datetime import datetime, timedelta, timezone
 import random
 
+# Windows consoles often default to GBK; keep the seed command Unicode-safe.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlalchemy import delete, select
-from app.database import async_session, engine, Base
+from app.database import async_session, database_url, engine, Base
 from app.config import get_offline_database_path
 from app.models import (
     Turbine, SCADARecord, Fault, FaultSignal, RULPrediction,
@@ -30,9 +37,13 @@ from app.core.security import hash_password
 
 
 def check_offline_dataset_exists() -> bool:
-    """Check if offline dataset database exists."""
+    """Check whether this process is actually connected to the offline database."""
     offline_db = get_offline_database_path()
-    return offline_db is not None
+    if offline_db is None:
+        return False
+    normalized_url = str(database_url).replace("\\", "/").lower()
+    normalized_path = str(offline_db.resolve()).replace("\\", "/").lower()
+    return normalized_path in normalized_url
 
 
 # 陕西省风场数据 — 真实地理坐标
@@ -121,6 +132,7 @@ async def check_existing_data() -> bool:
 
 async def seed():
     """Main seed function."""
+    random.seed(20260729)
     print("=" * 60)
     print("🌱 风调预顺 PHM系统 — 数据库初始化")
     print("=" * 60)

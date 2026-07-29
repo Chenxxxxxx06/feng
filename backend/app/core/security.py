@@ -4,6 +4,7 @@ Provides:
 - Password hashing (bcrypt)
 - JWT token creation and validation
 - OAuth2 password bearer scheme
+- API Key 静态加密（转发自 app.core.crypto，导入本模块即完成透明加密列挂载）
 """
 
 import logging
@@ -14,6 +15,20 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.config import get_settings
+
+# 导入即触发 API Key 透明加密列的挂载（写时加密 / 读时解密 / 明文向后兼容）。
+# app.core.security 被 app.api.auth 引用，而几乎所有路由都依赖 auth，
+# 因此挂载必然发生在任何 SQL 语句编译之前。
+from app.core.crypto import (  # noqa: F401
+    crypto_backend,
+    decrypt_secret,
+    encrypt_secret,
+    install_encrypted_columns,
+    is_encrypted,
+    key_source,
+    mark_secret_for_upgrade,
+    mask_secret,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

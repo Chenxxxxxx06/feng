@@ -271,6 +271,7 @@ class CostComparisonResponse(BaseModel):
 class WorkOrderCreate(BaseModel):
     turbine_id: int = Field(gt=0)
     fault_id: Optional[int] = None
+    incident_id: Optional[int] = None
     title: str = Field(min_length=1, max_length=128)
     description: Optional[str] = None
     assignee: Optional[str] = None
@@ -337,6 +338,7 @@ class WorkOrderResponse(BaseModel):
     id: int
     turbine_id: int
     fault_id: Optional[int] = None
+    incident_id: Optional[int] = None
     title: str
     description: Optional[str] = None
     status: str
@@ -368,6 +370,7 @@ class ThresholdConfigRequest(BaseModel):
     hi_threshold: float = Field(ge=0, le=100)
     email_enabled: bool = False
     email_address: Optional[str] = None
+    wechat_enabled: bool = False
 
     @field_validator("email_address")
     @classmethod
@@ -379,6 +382,7 @@ class ThresholdConfigResponse(BaseModel):
     hi_threshold: float
     email_enabled: bool
     email_address: Optional[str] = None
+    wechat_enabled: bool = False
 
     model_config = {"from_attributes": True}
 

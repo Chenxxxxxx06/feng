@@ -9,6 +9,8 @@ import {
   saveUserPreferences,
   type UserPreferences,
 } from '../../services/preferences';
+import { toast } from '../../components/Common/Toast';
+import { replayTour } from '../../components/Common/OnboardingTour';
 
 interface ThresholdConfig {
   id: number;
@@ -155,8 +157,6 @@ const aiModelOptions: AIModelOption[] = [
   { value: 'qwen-turbo', label: '通义千问 qwen-turbo', provider: '通义千问 DashScope', note: '更快更便宜，适合页面摘要', requiresKey: true },
   { value: 'qwen3.6-flash', label: '通义千问 qwen3.6-flash', provider: '通义千问 DashScope', note: '轻量快速模型', requiresKey: true },
   { value: 'deepseek-v4-flash', label: 'DeepSeek deepseek-v4-flash', provider: 'DeepSeek', note: '低成本通用对话', requiresKey: true },
-  { value: 'deepseek-chat', label: 'DeepSeek deepseek-chat', provider: 'DeepSeek', note: '历史稳定配置', requiresKey: true },
-  { value: 'deepseek-reasoner', label: 'DeepSeek deepseek-reasoner', provider: 'DeepSeek', note: '推理任务更强', requiresKey: true },
   { value: 'glm-5-flash', label: '智谱 GLM-5-Flash', provider: '智谱GLM', note: '中文场景低成本', requiresKey: true },
   { value: 'kimi-k2.6', label: 'Kimi kimi-k2.6', provider: 'Kimi Moonshot', note: '长上下文友好', requiresKey: true },
   { value: 'gpt-4o-mini', label: 'OpenAI gpt-4o-mini', provider: 'OpenAI', note: '轻量多用途', requiresKey: true },
@@ -172,20 +172,26 @@ const getModelOption = (model: string) => aiModelOptions.find((option) => option
 const normalizeModelPreference = (model?: string) => {
   const aliases: Record<string, string> = {
     'qwen3.5-flash': 'qwen3.6-flash',
-    'deepseek-v3': 'deepseek-chat',
+    'deepseek-v3': 'deepseek-v4-flash',
+    'deepseek-chat': 'deepseek-v4-flash',
+    'deepseek-reasoner': 'deepseek-v4-flash',
   };
   return aliases[model || ''] || model || 'qwen-plus';
 };
 
-const aiProviderTemplates: AIProviderTemplate[] = [
+// Local fallback copy of /settings/ai-provider-templates — the backend list is
+// fetched on mount and takes precedence; this copy is only used when the request fails.
+const defaultAIProviderTemplates: AIProviderTemplate[] = [
   { provider: 'dashscope', display_name: '通义千问 DashScope', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', default_model: 'qwen-plus', model_options: ['qwen-plus', 'qwen-turbo', 'qwen3.6-flash'], api_style: 'openai', requires_api_key: true },
-  { provider: 'deepseek', display_name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', default_model: 'deepseek-chat', model_options: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash'], api_style: 'openai', requires_api_key: true },
+  { provider: 'deepseek', display_name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', default_model: 'deepseek-v4-flash', model_options: ['deepseek-v4-flash'], api_style: 'openai', requires_api_key: true },
   { provider: 'glm', display_name: '智谱GLM', base_url: 'https://open.bigmodel.cn/api/paas/v4', default_model: 'glm-5-flash', model_options: ['glm-5-flash'], api_style: 'openai', requires_api_key: true },
   { provider: 'kimi', display_name: 'Kimi Moonshot', base_url: 'https://api.moonshot.cn/v1', default_model: 'kimi-k2.6', model_options: ['kimi-k2.6'], api_style: 'openai', requires_api_key: true },
   { provider: 'openai', display_name: 'OpenAI', base_url: 'https://api.openai.com/v1', default_model: 'gpt-4o-mini', model_options: ['gpt-4o-mini', 'gpt-4.1', 'gpt-4', 'gpt-3.5-turbo'], api_style: 'openai', requires_api_key: true },
   { provider: 'gemini', display_name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', default_model: 'gemini-2.5-flash', model_options: ['gemini-2.5-flash', 'gemini-3.5-flash'], api_style: 'openai', requires_api_key: true },
   { provider: 'ollama', display_name: 'Ollama本地模型', base_url: 'http://localhost:11434/v1', default_model: 'qwen2.5', model_options: ['qwen2.5', 'llama3.1', 'deepseek-r1'], api_style: 'openai', requires_api_key: false },
 ];
+
+let aiProviderTemplates: AIProviderTemplate[] = defaultAIProviderTemplates;
 
 const normalizeProviderKey = (provider: string) => {
   const key = provider.trim().toLowerCase();
@@ -330,6 +336,7 @@ export default function SettingsPage() {
   const [sendingAlertEmail, setSendingAlertEmail] = useState(false);
   const [alertEmailMessage, setAlertEmailMessage] = useState('');
   const [aiProviders, setAiProviders] = useState<AIProviderConfig[]>([]);
+  const [providerTemplates, setProviderTemplates] = useState<AIProviderTemplate[]>(aiProviderTemplates);
   const [aiProviderLoading, setAiProviderLoading] = useState(false);
   const [providerActionId, setProviderActionId] = useState<number | null>(null);
   const [providerMessage, setProviderMessage] = useState('');
@@ -357,8 +364,8 @@ export default function SettingsPage() {
   const [personnelLoading, setPersonnelLoading] = useState(false);
   const [personnelFilter, setPersonnelFilter] = useState('');
   const [personnelError, setPersonnelError] = useState('');
-  const [adminPwd, setAdminPwd] = useState('');
-  const [unlocked, setUnlocked] = useState(user?.role === 'admin');
+  // 后端创建人员时返回一次性初始密码，仅在此展示一次
+  const [newPersonCredential, setNewPersonCredential] = useState<{ name: string; password: string } | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [personForm, setPersonForm] = useState({ name: '', skills: '', region: '陕北', email: '' });
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -373,6 +380,10 @@ export default function SettingsPage() {
 
   const addLog = (action: string, result: string, level: ActivityLog['level'] = 'success') => {
     const tempId = -Date.now();
+    // 写操作结果同时以全局 Toast 提示，保证跨页面反馈一致
+    if (level === 'error') toast.error(action, result);
+    else if (level === 'info') toast.info(action, result);
+    else toast.success(action, result);
     setLogs((prev) => [
       { id: tempId, time: new Date().toLocaleString('zh-CN'), action, result, level },
       ...prev,
@@ -402,6 +413,7 @@ export default function SettingsPage() {
     refreshPipeline();
     refreshPersonnel();
     loadPreferences();
+    loadAIProviderTemplates();
     loadAIProviders();
   }, []);
 
@@ -414,22 +426,29 @@ export default function SettingsPage() {
       }));
       if (!getRememberedAIProvider()) {
         setProviderForm((prev) => (
-          prev.provider === 'deepseek' && prev.default_model === 'deepseek-chat'
+          prev.provider === 'deepseek' && prev.default_model === 'deepseek-v4-flash'
             ? createAIProviderForm(inferProviderFromModel(user.model_preference), user)
             : prev
         ));
       }
     }
-    if (user?.role === 'admin') setUnlocked(true);
   }, [user]);
 
+  // Personnel management is gated by the logged-in user's role (server-verified),
+  // engineer and above may edit — no client-side password "unlock".
+  const canManagePersonnel = ['engineer', 'approver', 'admin'].includes(user?.role || '');
+
   const loadThresholds = async () => {
-    const { data } = await api.get<ThresholdConfig[]>('/settings/thresholds');
-    if (data.length > 0) {
-      const config = data[0];
-      setHiThreshold(String(config.hi_threshold));
-      setEmailEnabled(config.email_enabled);
-      setEmailAddress(config.email_address || '');
+    try {
+      const { data } = await api.get<ThresholdConfig[]>('/settings/thresholds');
+      if (data.length > 0) {
+        const config = data[0];
+        setHiThreshold(String(config.hi_threshold));
+        setEmailEnabled(config.email_enabled);
+        setEmailAddress(config.email_address || '');
+      }
+    } catch {
+      addLog('加载告警规则', '告警规则加载失败，显示默认阈值', 'error');
     }
   };
 
@@ -458,6 +477,8 @@ export default function SettingsPage() {
     try {
       const { data } = await api.get('/settings/pipeline-status');
       setPipeline(data);
+    } catch {
+      addLog('刷新数据源状态', '数据源状态加载失败', 'error');
     } finally {
       setPipelineLoading(false);
     }
@@ -492,11 +513,17 @@ export default function SettingsPage() {
   };
 
   const saveThreshold = async () => {
-    const saved = await persistThresholdSettings();
-    if (!saved) return;
-    setThresholdSaved(true);
-    addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
-    setTimeout(() => setThresholdSaved(false), 2200);
+    try {
+      const saved = await persistThresholdSettings();
+      if (!saved) return;
+      setThresholdSaved(true);
+      addLog('保存告警规则', `HI阈值更新为 ${hiThreshold}`);
+      setTimeout(() => setThresholdSaved(false), 2200);
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setThresholdError(detail || '告警规则保存失败，请稍后重试');
+      addLog('保存告警规则', detail || '告警规则保存失败', 'error');
+    }
   };
 
   const sendThresholdAlertEmail = async () => {
@@ -562,6 +589,16 @@ export default function SettingsPage() {
       addLog('保存个人设置(本地)', `服务器不可用，已保存到本地`);
       setTimeout(() => setPersonalSaved(false), 2200);
     }
+  };
+
+  const loadAIProviderTemplates = async () => {
+    try {
+      const { data } = await api.get<AIProviderTemplate[]>('/settings/ai-provider-templates');
+      if (Array.isArray(data) && data.length > 0) {
+        aiProviderTemplates = data;
+        setProviderTemplates(data);
+      }
+    } catch { /* 后端不可用时沿用本地模板副本 */ }
   };
 
   const loadAIProviders = async () => {
@@ -706,19 +743,6 @@ export default function SettingsPage() {
     setTimeout(refreshPipeline, 500);
   };
 
-  const unlockPersonnel = async () => {
-    try {
-      const { data } = await api.post('/auth/login', { username: 'admin', password: adminPwd });
-      if (data.access_token) {
-        setUnlocked(true);
-        setPersonnelError('');
-        addLog('解锁人员管理', '管理员校验通过');
-      }
-    } catch {
-      setPersonnelError('管理员密码错误');
-    }
-  };
-
   const resetPersonForm = () => {
     setEditingId(null);
     setPersonForm({ name: '', skills: '', region: '陕北', email: '' });
@@ -741,15 +765,21 @@ export default function SettingsPage() {
       region: personForm.region,
       skills: parseSkills(personForm.skills),
     };
+    setNewPersonCredential(null);
     try {
       if (editingId) {
         await api.put(`/personnel/${editingId}`, payload);
         addLog('更新人员', `${payload.name} 信息已更新`);
+        resetPersonForm();
       } else {
-        await api.post('/personnel/', payload);
+        const { data } = await api.post('/personnel/', payload);
         addLog('新增人员', `${payload.name} 已加入维护人员`);
+        resetPersonForm();
+        // 后端仅在创建响应中返回一次初始密码，不再可查
+        if (data?.initial_password) {
+          setNewPersonCredential({ name: payload.name, password: String(data.initial_password) });
+        }
       }
-      resetPersonForm();
       setPersonnelError('');
       refreshPersonnel();
     } catch (error) {
@@ -759,6 +789,7 @@ export default function SettingsPage() {
   };
 
   const startEditPerson = (person: Personnel) => {
+    setNewPersonCredential(null);
     setEditingId(person.id);
     setPersonForm({
       name: person.name,
@@ -770,9 +801,15 @@ export default function SettingsPage() {
 
   const removePerson = async (person: Personnel) => {
     if (!window.confirm(`确认停用 ${person.name} 吗？`)) return;
-    await api.delete(`/personnel/${person.id}`);
-    addLog('停用人员', `${person.name} 已从可派工人员中移除`);
-    refreshPersonnel();
+    try {
+      await api.delete(`/personnel/${person.id}`);
+      addLog('停用人员', `${person.name} 已从可派工人员中移除`);
+      refreshPersonnel();
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      setPersonnelError(detail || `停用 ${person.name} 失败，请稍后重试`);
+      addLog('停用人员', detail || `${person.name} 停用失败`, 'error');
+    }
   };
 
   const connectedCount = pipeline?.sources.filter((s) => s.status === 'connected' || s.status === 'partial').length || 0;
@@ -784,7 +821,7 @@ export default function SettingsPage() {
   }, [personnel, personnelFilter]);
 
   return (
-    <div className="h-full overflow-hidden ops-page p-5">
+    <div className="h-full overflow-hidden ops-page page-enter p-5">
       <div className="h-full flex flex-col gap-4">
         <header className="ops-header">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -795,11 +832,21 @@ export default function SettingsPage() {
                 管理告警策略、数据接入、AI服务和维护人员，所有配置会同步到后端接口。
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <StatusMetric label="系统状态" value={pipeline?.overall_status === 'degraded' ? '部分降级' : '运行正常'} tone={pipeline?.overall_status === 'degraded' ? 'yellow' : 'green'} />
-              <StatusMetric label="数据源" value={`${connectedCount}/${pipeline?.sources.length || 4}`} tone={connectedCount >= 3 ? 'green' : 'yellow'} />
-              <StatusMetric label="HI阈值" value={hiThreshold} tone={Number(hiThreshold) < 65 ? 'red' : 'blue'} />
-              <StatusMetric label="人员" value={`${personnel.length}人`} tone={highLoadCount ? 'yellow' : 'blue'} />
+            <div className="flex flex-col items-stretch gap-2 lg:items-end">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <StatusMetric label="系统状态" value={pipeline?.overall_status === 'degraded' ? '部分降级' : '运行正常'} tone={pipeline?.overall_status === 'degraded' ? 'yellow' : 'green'} />
+                <StatusMetric label="数据源" value={`${connectedCount}/${pipeline?.sources.length || 4}`} tone={connectedCount >= 3 ? 'green' : 'yellow'} />
+                <StatusMetric label="HI阈值" value={hiThreshold} tone={Number(hiThreshold) < 65 ? 'red' : 'blue'} />
+                <StatusMetric label="人员" value={`${personnel.length}人`} tone={highLoadCount ? 'yellow' : 'blue'} />
+              </div>
+              <button
+                type="button"
+                onClick={replayTour}
+                className="btn btn-secondary btn-sm self-start lg:self-end"
+                title="重新播放系统首次访问引导"
+              >
+                重看新手引导
+              </button>
             </div>
           </div>
         </header>
@@ -850,6 +897,7 @@ export default function SettingsPage() {
               <AISettingsSection
                 user={user}
                 providers={aiProviders}
+                templates={providerTemplates}
                 loading={aiProviderLoading}
                 form={providerForm}
                 actionProviderId={providerActionId}
@@ -893,16 +941,15 @@ export default function SettingsPage() {
             {activeSection === 'personnel' && (
               <PersonnelSection
                 userRole={user?.role}
-                unlocked={unlocked}
-                adminPwd={adminPwd}
+                canManage={canManagePersonnel}
                 personnel={filteredPersonnel}
                 personnelLoading={personnelLoading}
                 personnelError={personnelError}
+                newPersonCredential={newPersonCredential}
+                onDismissCredential={() => setNewPersonCredential(null)}
                 personnelFilter={personnelFilter}
                 editingId={editingId}
                 personForm={personForm}
-                onAdminPwdChange={setAdminPwd}
-                onUnlock={unlockPersonnel}
                 onFilterChange={setPersonnelFilter}
                 onFormChange={setPersonForm}
                 onSubmit={submitPerson}
@@ -1219,6 +1266,7 @@ function PersonalSettingsSection({
 function AISettingsSection({
   user,
   providers,
+  templates,
   loading,
   form,
   actionProviderId,
@@ -1231,6 +1279,7 @@ function AISettingsSection({
 }: {
   user: CurrentUser | null;
   providers: AIProviderConfig[];
+  templates: AIProviderTemplate[];
   loading: boolean;
   form: AIProviderForm;
   actionProviderId: number | null;
@@ -1287,7 +1336,7 @@ function AISettingsSection({
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {aiProviderTemplates.map((template) => (
+              {templates.map((template) => (
                 <button
                   key={template.provider}
                   onClick={() => onApplyTemplate(template.provider)}
@@ -1829,16 +1878,15 @@ function PipelineSection({
 
 function PersonnelSection({
   userRole,
-  unlocked,
-  adminPwd,
+  canManage,
   personnel,
   personnelLoading,
   personnelError,
+  newPersonCredential,
+  onDismissCredential,
   personnelFilter,
   editingId,
   personForm,
-  onAdminPwdChange,
-  onUnlock,
   onFilterChange,
   onFormChange,
   onSubmit,
@@ -1847,16 +1895,15 @@ function PersonnelSection({
   onRemove,
 }: {
   userRole?: string;
-  unlocked: boolean;
-  adminPwd: string;
+  canManage: boolean;
   personnel: Personnel[];
   personnelLoading: boolean;
   personnelError: string;
+  newPersonCredential: { name: string; password: string } | null;
+  onDismissCredential: () => void;
   personnelFilter: string;
   editingId: number | null;
   personForm: { name: string; skills: string; region: string; email: string };
-  onAdminPwdChange: (value: string) => void;
-  onUnlock: () => void;
   onFilterChange: (value: string) => void;
   onFormChange: (value: { name: string; skills: string; region: string; email: string }) => void;
   onSubmit: () => void;
@@ -1880,21 +1927,12 @@ function PersonnelSection({
         </select>
       }
     >
-      {!unlocked ? (
+      {!canManage ? (
         <div className="rounded-lg border border-border-default bg-navy-900/60 p-4">
-          <p className="text-sm font-medium">需要管理员校验</p>
-          <p className="mt-1 text-xs text-text-muted">当前角色：{userRole || '-'}，请输入管理员密码后编辑人员信息。</p>
-          <div className="mt-4 flex max-w-md gap-2">
-            <input
-              type="password"
-              placeholder="管理员密码"
-              value={adminPwd}
-              onChange={(e) => onAdminPwdChange(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && onUnlock()}
-              className="industrial-input flex-1"
-            />
-            <button onClick={onUnlock} className="industrial-btn industrial-btn-primary">解锁</button>
-          </div>
+          <p className="text-sm font-medium">权限不足</p>
+          <p className="mt-1 text-xs text-text-muted">
+            当前角色：{userRole || '-'}，人员管理需要 engineer 及以上角色，请使用具备权限的账号登录或联系管理员调整角色。
+          </p>
           {personnelError && <p className="mt-2 text-xs text-accent-red">{personnelError}</p>}
         </div>
       ) : (
@@ -1934,6 +1972,18 @@ function PersonnelSection({
               {editingId && <button onClick={onCancelEdit} className="industrial-btn">取消</button>}
             </div>
             {personnelError && <p className="mt-3 text-xs text-accent-red">{personnelError}</p>}
+            {newPersonCredential && (
+              <div className="mt-3 rounded-lg border border-accent-yellow/50 bg-accent-yellow/10 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-medium text-accent-yellow">{newPersonCredential.name} 的初始登录密码</p>
+                  <button onClick={onDismissCredential} className="text-[11px] text-text-muted hover:text-text-primary">我已保存</button>
+                </div>
+                <p className="mt-2 select-all break-all font-mono text-sm text-text-primary">{newPersonCredential.password}</p>
+                <p className="mt-2 text-[11px] text-text-muted">
+                  请立即保存并转交本人，此密码不再显示；登录后请尽快修改密码。
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="min-w-0 rounded-lg border border-border-default bg-navy-900/60">

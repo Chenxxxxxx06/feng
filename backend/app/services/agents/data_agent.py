@@ -1,4 +1,4 @@
-"""Data Agent — queries real-time turbine data from DB."""
+"""Data Agent — queries the latest available turbine records from DB."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
@@ -41,7 +41,7 @@ class DataAgent(AgentBase):
         super().__init__(name="data_agent", system_prompt=DATA_AGENT_PROMPT, model=model, api_key=api_key, api_provider=api_provider, api_base_url=api_base_url)
 
     async def gather_context(self, turbine_id: int | None, db: AsyncSession) -> dict:
-        """Gather real-time data from DB for the agent to analyze."""
+        """Gather the latest available records from DB for the agent to analyze."""
         from app.models import Turbine, SCADARecord, Fault, RULPrediction
 
         ctx: dict = {"turbines": [], "scada_summary": [], "faults": [], "rul": []}

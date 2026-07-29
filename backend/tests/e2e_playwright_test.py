@@ -79,7 +79,10 @@ async def client():
 
 @pytest.fixture
 async def auth_client(client: E2EClient):
-    resp = await client.login()
+    try:
+        resp = await client.login()
+    except httpx.HTTPError as e:
+        pytest.skip(f"Backend not reachable at {client.base_url}: {e}")
     if resp.status_code != 200:
         pytest.skip(f"Cannot login: {resp.status_code} {resp.text}")
     return client

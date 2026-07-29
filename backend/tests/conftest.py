@@ -25,6 +25,13 @@ test_engine = create_async_engine(
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def dispose_test_engine_after_suite():
+    """Close aiosqlite worker resources so pytest exits cleanly on Windows."""
+    yield
+    await test_engine.dispose()
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create event loop for async tests."""

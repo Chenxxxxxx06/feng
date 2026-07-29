@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import * as echarts from 'echarts';
+import * as echarts from '../../services/echarts';
 import api from '../../services/api';
 import type { BladeDiagnosisResult, Fault, SCADAPoint, TurbineDetail, VibrationPreview, WeatherReplayPoint } from '../../types';
 import CopilotFAB from '../../components/AIAssistant/CopilotFAB';
 import { buildReplayClockState, formatReplayClock } from '../../services/replayClock';
+import { Skeleton, SkeletonCard } from '../../components/Common/Skeleton';
 
 type BladeReplayImage = {
   id: number | null;
@@ -79,8 +80,8 @@ type BladeModelRegion = {
 const MINUTES_PER_DAY = 1440;
 const SCADA_SLOT_MINUTES = 10;
 const SCADA_SLOTS_PER_DAY = MINUTES_PER_DAY / SCADA_SLOT_MINUTES;
-const WEATHER_REFRESH_MS = 60_000;
-const WEATHER_RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+const WEATHER_REFRESH_MS = 5 * 60_000;
+const WEATHER_RETRY_DELAYS_MS = [15_000];
 
 function rounded(value: number | null | undefined, digits: number) {
   return value == null ? null : Number(value.toFixed(digits));
@@ -310,6 +311,7 @@ export default function TurbineDetailPage() {
   const [scadaMissing, setScadaMissing] = useState(false);
   const [aiSummary, setAiSummary] = useState("");
   const [aiSummaryError, setAiSummaryError] = useState("");
+  const [aiSummaryNotice, setAiSummaryNotice] = useState("");
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [wind, setWind] = useState<WeatherReplayPoint | null>(null);
   const [windMissing, setWindMissing] = useState(false);
@@ -357,35 +359,79 @@ export default function TurbineDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    api.get(`/turbines/${id}`).then(({ data }) => setTurbine(data));
-    api.get(`/turbines/${id}/scada?hours=72`)
+    let cancelled = false;
+    const controller = new AbortController();
+    const requestConfig = { signal: controller.signal };
+    api.get(`/turbines/${id}`, requestConfig)
       .then(({ data }) => {
+        if (!cancelled) setTurbine(data);
+      })
+      .catch(() => { /* keep current view on failure */ });
+    api.get(`/turbines/${id}/scada?hours=24&max_points=144&compact=true`, requestConfig)
+      .then(({ data }) => {
+        if (cancelled) return;
         setScada(data);
         setScadaMissing(data.length === 0);
+        const latest = data[data.length - 1] as SCADAPoint | undefined;
+        if (
+          latest
+          && !hasWindDataRef.current
+          && (latest.wind_speed_ms != null || latest.ambient_temp_c != null)
+        ) {
+          // Paint the imported on-site observation immediately; the current
+          // Open-Meteo observation replaces it in the background when ready.
+          hasWindDataRef.current = true;
+          setWind({
+            wind_speed_ms: latest.wind_speed_ms,
+            wind_gust_ms: null,
+            wind_direction_deg: latest.nacelle_direction_deg ?? null,
+            turbulence_intensity: null,
+            air_temperature_c: latest.ambient_temp_c ?? null,
+            air_pressure_hpa: null,
+            source_dataset: latest.source_dataset,
+          });
+          setWindMissing(false);
+        }
       })
       .catch(() => {
+        if (cancelled) return;
         setScada([]);
         setScadaMissing(true);
       });
     setAiSummaryLoading(true);
     setAiSummaryError('');
-    api.post('/ai/summary', { turbine_id: Number(id), page_type: 'turbine_detail' }, { timeout: 60000 })
+    setAiSummaryNotice('');
+    api.post(
+      '/ai/summary',
+      { turbine_id: Number(id), page_type: 'turbine_detail' },
+      { timeout: 15000, signal: controller.signal },
+    )
       .then(({ data }) => {
-        if (data?.status === 'error') {
+        if (cancelled) return;
+        const parts: string[] = [];
+        if (data?.conclusions?.length) {
+          parts.push('【关键结论】', ...data.conclusions.map((c: string) => `  • ${c}`));
+        }
+        if (data?.suggestions?.length) {
+          parts.push('', '【建议措施】', ...data.suggestions.map((s: string) => `  • ${s}`));
+        }
+        if (parts.length > 0) {
+          setAiSummary(parts.join('\n'));
+          setAiSummaryError('');
+          setAiSummaryNotice(
+            data?.status === 'fallback'
+              ? '远程 AI 暂不可用，已即时生成本地诊断'
+              : '',
+          );
+        } else if (data?.status === 'error') {
           setAiSummaryError(data?.error_message || 'AI分析失败');
           setAiSummary('');
         } else {
-          const parts: string[] = [];
-          if (data?.conclusions?.length) {
-            parts.push('【关键结论】', ...data.conclusions.map((c: string) => `  • ${c}`));
-          }
-          if (data?.suggestions?.length) {
-            parts.push('', '【建议措施】', ...data.suggestions.map((s: string) => `  • ${s}`));
-          }
-          setAiSummary(parts.length > 0 ? parts.join('\n') : '');
+          setAiSummary('');
         }
       })
       .catch((err: any) => {
+        if (cancelled) return;
         const status = err?.response?.status;
         if (status === 401 || status === 403) {
           setAiSummaryError('AI服务鉴权失败，请在系统设置中配置API KEY。');
@@ -394,20 +440,34 @@ export default function TurbineDetailPage() {
         }
         setAiSummary('');
       })
-      .finally(() => setAiSummaryLoading(false));
-    api.get(`/diagnosis/faults?turbine_id=${id}`).then(({ data }) => setFaults(data));
-    api.get(`/diagnosis/vibration?turbine_id=${id}&component=blade`)
+      .finally(() => {
+        if (!cancelled) setAiSummaryLoading(false);
+      });
+    api.get(`/diagnosis/faults?turbine_id=${id}`, requestConfig)
       .then(({ data }) => {
+        if (!cancelled) setFaults(data);
+      })
+      .catch(() => {
+        if (!cancelled) setFaults([]);
+      });
+    api.get(`/diagnosis/vibration?turbine_id=${id}&component=blade&max_points=1024`, requestConfig)
+      .then(({ data }) => {
+        if (cancelled) return;
         setVibration(data);
         setVibrationMissing(false);
       })
       .catch(() => {
+        if (cancelled) return;
         setVibration(null);
         setVibrationMissing(true);
       });
-    api.get(`/diagnosis/blade-images?turbine_id=${id}`)
-      .then(({ data }) => setBladeImages(data))
-      .catch(() => setBladeImages([]));
+    api.get(`/diagnosis/blade-images?turbine_id=${id}`, requestConfig)
+      .then(({ data }) => {
+        if (!cancelled) setBladeImages(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBladeImages([]);
+      });
     setSelectedBladeImagePath(null);
     setBladeModelResults({});
     setBladeAnnotationRegions({});
@@ -417,6 +477,10 @@ export default function TurbineDetailPage() {
     setBladeImageOffset({ x: 0, y: 0 });
     setBladeImageDrag(null);
     setBladeImageNaturalSize({ width: 0, height: 0 });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [id]);
 
   useEffect(() => {
@@ -424,13 +488,16 @@ export default function TurbineDetailPage() {
 
     let cancelled = false;
     const retryTimers: number[] = [];
+    const requestControllers = new Set<AbortController>();
     hasWindDataRef.current = false;
     setWind(null);
     setWindMissing(false);
 
     const fetchWind = async (retryIndex = 0) => {
+      const controller = new AbortController();
+      requestControllers.add(controller);
       try {
-        const { data } = await api.get(`/turbines/${id}/wind`);
+        const { data } = await api.get(`/turbines/${id}/wind`, { signal: controller.signal });
         if (cancelled) return;
         hasWindDataRef.current = true;
         setWind(data);
@@ -444,6 +511,8 @@ export default function TurbineDetailPage() {
           return;
         }
         setWindMissing(!hasWindDataRef.current);
+      } finally {
+        requestControllers.delete(controller);
       }
     };
 
@@ -454,6 +523,7 @@ export default function TurbineDetailPage() {
       cancelled = true;
       window.clearInterval(refreshTimer);
       retryTimers.forEach((timer) => window.clearTimeout(timer));
+      requestControllers.forEach((controller) => controller.abort());
     };
   }, [id]);
 
@@ -464,9 +534,13 @@ export default function TurbineDetailPage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const scadaReplaySlot = Math.floor(replayNow.getTime() / (SCADA_SLOT_MINUTES * 60_000));
   const scadaReplay = useMemo(() => {
-    return buildScadaReplayDay(scada, replayNow);
-  }, [scada, replayNow]);
+    return buildScadaReplayDay(
+      scada,
+      new Date(scadaReplaySlot * SCADA_SLOT_MINUTES * 60_000),
+    );
+  }, [scada, scadaReplaySlot]);
 
   useEffect(() => {
     if (!chartRef.current || !scadaReplay.daySeries.length) return;
@@ -876,14 +950,34 @@ export default function TurbineDetailPage() {
     link.click();
     link.remove();
   };
-  if (!turbine) return <div className="p-8 text-text-muted text-sm">加载中...</div>;
+  if (!turbine) {
+    return (
+      <>
+        <div className="ops-page page-enter h-full overflow-hidden p-6" role="status" aria-label="单机画像加载中">
+          <div className="space-y-2 border-b pb-4" style={{ borderColor: 'var(--border-subtle)' }}>
+            <Skeleton className="skeleton-text" width={96} height={9} />
+            <Skeleton width={200} height={16} radius={5} />
+          </div>
+          <div className="mt-4 premium-card space-y-3 rounded-2xl p-4">
+            <Skeleton className="skeleton-title" width={140} height={13} />
+            <Skeleton height={220} radius={12} />
+          </div>
+          <div className="mt-4 grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
+            <SkeletonCard lines={4} />
+            <SkeletonCard lines={4} />
+          </div>
+        </div>
+        <CopilotFAB pageContext={{ turbine_id: id ? Number(id) : undefined }} />
+      </>
+    );
+  }
 
   return (
-    <div className="h-full flex ops-page">
-      <div className="flex-1 overflow-auto p-6 space-y-5">
+    <div className="h-full flex ops-page page-enter">
+      <div className="ops-content flex-1 overflow-auto space-y-4">
         <div className="ops-header flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Link to="/dashboard" data-action="back" className="ops-btn px-3 py-1.5 text-xs">返回</Link>
+            <Link to="/dashboard" data-action="back" className="btn btn-secondary btn-sm" aria-label="返回风场监控">返回</Link>
             <div>
               <p className="ops-eyebrow">单机运行画像</p>
               <h2 className="ops-title gradient-text">{turbine.name}</h2>
@@ -1174,9 +1268,14 @@ export default function TurbineDetailPage() {
         <div className="premium-card rounded-2xl p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-medium">🤖 AI 智能诊断总结</h3>
-            {aiSummaryLoading && (
-              <span className="text-[10px] text-accent-blue animate-pulse">分析中...</span>
-            )}
+            <div className="flex items-center gap-2">
+              {aiSummaryNotice && !aiSummaryLoading && (
+                <span className="text-[10px] text-accent-yellow">{aiSummaryNotice}</span>
+              )}
+              {aiSummaryLoading && (
+                <span className="text-[10px] text-accent-blue animate-pulse">分析中...</span>
+              )}
+            </div>
           </div>
           {aiSummary ? (
             <div className="text-xs text-text-secondary leading-relaxed space-y-2 max-h-[400px] overflow-y-auto whitespace-pre-wrap">

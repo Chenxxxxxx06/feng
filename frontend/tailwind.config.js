@@ -40,7 +40,8 @@ export default {
         text: {
           primary: '#F1F5F9',
           secondary: '#94A3B8',
-          muted: '#64748B',
+          // 与 global.css 的 --text-muted 保持一致（对比度 5.1:1，满足 WCAG AA）
+          muted: '#7C8CA5',
         },
         bg: {
           primary: '#071A35',

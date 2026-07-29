@@ -1,7 +1,12 @@
-"""OPC UA digital shadow — minimal but real industrial connectivity.
+"""OPC UA digital shadow — address-space prototype simulator.
 
-Provides:
-- Simulated OPC UA server (asyncua-based when available, fallback otherwise)
+【状态】未接线的原型模拟器：本模块用伪随机数据（random.uniform/gauss）模拟
+OPC UA 服务端行为，**未连接任何真实工业设备**，当前**未被任何路由引用**。
+保留它的目的是给出接入真实 SCADA/OPC UA 时的地址空间与语义映射蓝本；
+其输出不可用作实验结果或真实工况证据。
+
+Provides (all in-process, no network / no asyncua dependency):
+- Simulated OPC UA server behaviour driven by pseudo-random value generators
 - 6-10 turbine nodes with realistic address space
 - Address space browsing
 - Node semantic mapping (OPC UA node → platform concept)

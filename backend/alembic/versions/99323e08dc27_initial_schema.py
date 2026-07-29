@@ -1,12 +1,9 @@
-"""initial_schema — baseline revision anchor.
+"""initial_schema — idempotent baseline revision.
 
-All tables already exist in the database (created by Base.metadata.create_all
-in main.py). This revision serves as the Alembic version anchor so future
-autogenerate migrations can detect schema drift incrementally.
-
-For existing databases: `alembic stamp head`
-For empty databases: run the application once (creates tables via create_all),
-  then `alembic stamp head`
+Existing deployments historically created tables through
+``Base.metadata.create_all`` before Alembic was introduced. Keep that behavior
+for compatibility, but also create missing tables here so a clean database can
+be upgraded from zero without requiring an application startup first.
 
 Revision ID: 99323e08dc27
 Revises:
@@ -15,7 +12,9 @@ Create Date: 2026-07-24 17:51:48.807709
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
+
+from app.database import Base
+from app import models as _models  # noqa: F401 - register all tables in metadata
 
 # revision identifiers
 revision: str = "99323e08dc27"
@@ -25,8 +24,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """No-op: tables already exist in the database."""
-    pass
+    """Create the baseline schema without changing tables that already exist."""
+    Base.metadata.create_all(bind=op.get_bind(), checkfirst=True)
 
 
 def downgrade() -> None:

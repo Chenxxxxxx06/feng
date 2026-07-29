@@ -6,7 +6,7 @@ See .env.example for required variables.
 
 from pathlib import Path
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "风调预顺 - PHM预测性运维系统"
     DEBUG: bool = False
+
+    # Deployment environment: dev | production (used by startup SECRET_KEY guard)
+    ENV: str = "dev"
 
     # Security - MUST be set in production via env var
     # Default is FIXED for development (not random — avoids breaking all tokens on restart)
@@ -36,11 +39,6 @@ class Settings(BaseSettings):
     DB_PRIORITY: str = "sqlite"
     
     # PostgreSQL connection pool settings (used when DATABASE_URL starts with postgresql)
-    DB_POOL_SIZE: int = 20
-    DB_MAX_OVERFLOW: int = 10
-    DB_POOL_RECYCLE: int = 3600
-
-    # PostgreSQL specific settings (used when DATABASE_URL starts with postgresql)
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_RECYCLE: int = 3600
@@ -83,10 +81,11 @@ class Settings(BaseSettings):
                 return False
         return value
 
-    class Config:
-        env_file = (ROOT_DIR / ".env", BACKEND_DIR / ".env")
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=(ROOT_DIR / ".env", BACKEND_DIR / ".env"),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
 
 
 @lru_cache

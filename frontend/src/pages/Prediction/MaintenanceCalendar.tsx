@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { rulColor } from '../../hooks/useECharts';
 import api from '../../services/api';
 import type { RULPrediction, WorkOrder } from '../../types';
+import { toast, describeError } from '../../components/Common/Toast';
 
 // ── Types ──
 interface ScheduledTask {
@@ -133,7 +134,7 @@ export default function MaintenanceCalendar({
   }, [workOrders, rulDates, scheduledTasks, conflicts]);
 
   const getEvents = useCallback((d: Date) => eventMap.get(dateKey(d)) || { wos: [], ruls: [], tasks: [], conflicts: [] }, [eventMap]);
-  const getWeather = useCallback((d: Date) => weather.find(w => w.date === d.toISOString().slice(0, 10)), [weather]);
+  const getWeather = useCallback((d: Date) => weather.find(w => w.date === dateKey(d)), [weather]);
 
   // ── Navigation ──
   const nav = (dir: number) => {
@@ -149,13 +150,18 @@ export default function MaintenanceCalendar({
     `${cursor.getFullYear()}年${cursor.getMonth() + 1}月${cursor.getDate()}日`;
 
   // ── Export ICS ──
-  const handleExport = () => {
-    const token = localStorage.getItem('token');
-    if (token) {
+  const handleExport = async () => {
+    try {
+      const { data } = await api.get('/prediction/schedule/export-ics', { responseType: 'blob' });
+      const url = URL.createObjectURL(data);
       const a = document.createElement('a');
-      a.href = `/api/prediction/schedule/export-ics?token=${token}`;
+      a.href = url;
       a.download = 'fengdiao_schedule.ics';
       a.click();
+      URL.revokeObjectURL(url);
+      toast.success('日程已导出', '已生成 fengdiao_schedule.ics');
+    } catch (e: any) {
+      if (!e?.isAuthRedirect) toast.error('ICS 导出失败', describeError(e, '请稍后重试'));
     }
   };
 

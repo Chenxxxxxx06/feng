@@ -114,6 +114,7 @@ def _serialize_workorder(order: WorkOrder | None, turbine: Turbine | None = None
         "turbine_id": order.turbine_id,
         "turbine_name": turbine.name if turbine else None,
         "fault_id": order.fault_id,
+        "incident_id": order.incident_id,
         "title": order.title,
         "description": order.description,
         "status": order.status,

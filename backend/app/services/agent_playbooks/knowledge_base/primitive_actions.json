@@ -14,133 +14,273 @@
       "id": "resolve_turbine_by_ref",
       "type": "read",
       "description": "按风机编号/名称解析标准风机实体。",
-      "inputs": ["turbine_ref"],
-      "outputs": ["turbine", "candidate_turbines"],
+      "inputs": [
+        "turbine_ref"
+      ],
+      "outputs": [
+        "turbine",
+        "candidate_turbines"
+      ],
       "implemented_by": "app.services.agent_entities.resolve_turbine_by_ref"
     },
     {
       "id": "resolve_workorder_by_ref",
       "type": "read",
       "description": "按WO编号或上下文解析工单。",
-      "inputs": ["workorder_ref"],
-      "outputs": ["workorder", "candidate_workorders"],
+      "inputs": [
+        "workorder_ref"
+      ],
+      "outputs": [
+        "workorder",
+        "candidate_workorders"
+      ],
       "implemented_by": "app.services.agent_entities.resolve_workorder_by_ref"
     },
     {
       "id": "resolve_fault_by_id_or_context",
       "type": "read",
       "description": "按故障ID、风机、故障类型、最新活跃故障解析故障记录。",
-      "inputs": ["fault_ref", "turbine_ref", "fault_keyword"],
-      "outputs": ["fault", "candidate_faults"],
+      "inputs": [
+        "fault_ref",
+        "turbine_ref",
+        "fault_keyword"
+      ],
+      "outputs": [
+        "fault",
+        "candidate_faults"
+      ],
       "implemented_by": "app.services.agent_data_tools.resolve_fault_by_context",
-      "available_api": ["GET /api/agent-tools/entities/fault/resolve"]
+      "available_api": [
+        "GET /api/agent-tools/entities/fault/resolve"
+      ]
     },
     {
       "id": "resolve_personnel_by_name",
       "type": "read",
       "description": "解析维修人员或technician用户。",
-      "inputs": ["assignee_name"],
-      "outputs": ["personnel", "candidate_personnel"],
+      "inputs": [
+        "assignee_name"
+      ],
+      "outputs": [
+        "personnel",
+        "candidate_personnel"
+      ],
       "implemented_by": "app.services.agent_entities.resolve_personnel_by_name"
     },
     {
       "id": "query_fleet_overview",
       "type": "read",
       "description": "读取风场总览、状态分布、区域分布和健康指数概览。",
-      "inputs": ["region", "status", "model", "hi_range"],
-      "outputs": ["fleet_summary", "turbines"],
-      "available_api": ["GET /api/turbines/", "GET /api/turbines/monitoring-metrics", "GET /api/agent-tools/context/fleet"]
+      "inputs": [
+        "region",
+        "status",
+        "model",
+        "hi_range"
+      ],
+      "outputs": [
+        "fleet_summary",
+        "turbines"
+      ],
+      "available_api": [
+        "GET /api/turbines/",
+        "GET /api/turbines/monitoring-metrics",
+        "GET /api/agent-tools/context/fleet"
+      ]
     },
     {
       "id": "query_turbine_detail",
       "type": "read",
       "description": "读取单台风机基础信息、SCADA、健康指数、风况和故障摘要。",
-      "inputs": ["turbine_id"],
-      "outputs": ["turbine_detail"],
-      "available_api": ["GET /api/turbines/{turbine_id}", "GET /api/turbines/{turbine_id}/scada", "GET /api/turbines/{turbine_id}/health", "GET /api/turbines/{turbine_id}/wind", "GET /api/agent-tools/context/turbine/{turbine_id}"]
+      "inputs": [
+        "turbine_id"
+      ],
+      "outputs": [
+        "turbine_detail"
+      ],
+      "available_api": [
+        "GET /api/turbines/{turbine_id}",
+        "GET /api/turbines/{turbine_id}/scada",
+        "GET /api/turbines/{turbine_id}/health",
+        "GET /api/turbines/{turbine_id}/wind",
+        "GET /api/agent-tools/context/turbine/{turbine_id}"
+      ]
     },
     {
       "id": "query_turbine_fault_context",
       "type": "read",
       "description": "读取单台风机近期故障、活跃故障和置信度上下文。",
-      "inputs": ["turbine_id"],
-      "outputs": ["fault_context"],
+      "inputs": [
+        "turbine_id"
+      ],
+      "outputs": [
+        "fault_context"
+      ],
       "implemented_by": "app.services.agent_workflows.query_turbine_fault_context",
-      "available_api": ["GET /api/diagnosis/faults?turbine_id={id}", "GET /api/agent-tools/context/faults"]
+      "available_api": [
+        "GET /api/diagnosis/faults?turbine_id={id}",
+        "GET /api/agent-tools/context/faults"
+      ]
     },
     {
       "id": "query_faulty_turbines",
       "type": "read",
       "description": "读取当前故障风机列表，合并登记故障记录和CARE状态推导的页面级故障。",
-      "inputs": ["status", "limit"],
-      "outputs": ["faulty_turbines"],
+      "inputs": [
+        "status",
+        "limit"
+      ],
+      "outputs": [
+        "faulty_turbines"
+      ],
       "implemented_by": "app.services.agent_read_tasks._query_faulty_turbines",
-      "available_api": ["POST /api/agent-tools/read/answer", "GET /api/diagnosis/faults"]
+      "available_api": [
+        "POST /api/agent-tools/read/answer",
+        "GET /api/diagnosis/faults"
+      ]
     },
     {
       "id": "query_vibration_context",
       "type": "read",
       "description": "读取振动波形、RMS、主频峰值和频谱上下文。",
-      "inputs": ["turbine_id", "component", "window_hours"],
-      "outputs": ["vibration_preview"],
-      "available_api": ["GET /api/diagnosis/vibration-preview", "GET /api/diagnosis/vibration", "GET /api/agent-tools/context/vibration"]
+      "inputs": [
+        "turbine_id",
+        "component",
+        "window_hours"
+      ],
+      "outputs": [
+        "vibration_preview"
+      ],
+      "available_api": [
+        "GET /api/diagnosis/vibration-preview",
+        "GET /api/diagnosis/vibration",
+        "GET /api/agent-tools/context/vibration"
+      ]
     },
     {
       "id": "query_blade_image_context",
       "type": "read",
       "description": "读取叶片巡检图像和历史图像诊断结果。",
-      "inputs": ["turbine_id"],
-      "outputs": ["blade_images"],
-      "available_api": ["GET /api/diagnosis/blade-images", "GET /api/agent-tools/context/blade-images"]
+      "inputs": [
+        "turbine_id"
+      ],
+      "outputs": [
+        "blade_images"
+      ],
+      "available_api": [
+        "GET /api/diagnosis/blade-images",
+        "GET /api/agent-tools/context/blade-images"
+      ]
     },
     {
       "id": "query_rul_predictions",
       "type": "read",
       "description": "读取部件剩余寿命和置信区间。",
-      "inputs": ["turbine_id", "component"],
-      "outputs": ["rul_predictions"],
-      "available_api": ["GET /api/prediction/rul", "GET /api/prediction/summary", "GET /api/agent-tools/context/rul"]
+      "inputs": [
+        "turbine_id",
+        "component"
+      ],
+      "outputs": [
+        "rul_predictions"
+      ],
+      "available_api": [
+        "GET /api/prediction/rul",
+        "GET /api/prediction/summary",
+        "GET /api/agent-tools/context/rul"
+      ]
     },
     {
       "id": "query_maintenance_plan",
       "type": "read",
       "description": "读取维护建议、计划窗口和天气窗口。",
-      "inputs": ["top_n", "region", "priority"],
-      "outputs": ["maintenance_plan"],
-      "available_api": ["GET /api/prediction/maintenance-plan", "GET /api/prediction/weather-windows", "GET /api/agent-tools/context/maintenance-plan"]
+      "inputs": [
+        "top_n",
+        "region",
+        "priority"
+      ],
+      "outputs": [
+        "maintenance_plan"
+      ],
+      "available_api": [
+        "GET /api/prediction/maintenance-plan",
+        "GET /api/prediction/weather-windows",
+        "GET /api/agent-tools/context/maintenance-plan"
+      ]
     },
     {
       "id": "resolve_batch_turbines",
       "type": "read",
       "description": "按区域、状态、HI区间或显式风机列表解析批量风机范围。",
-      "inputs": ["scope", "region", "status", "hi_range", "turbine_refs"],
-      "outputs": ["turbines", "affected_count"],
+      "inputs": [
+        "scope",
+        "region",
+        "status",
+        "hi_range",
+        "turbine_refs"
+      ],
+      "outputs": [
+        "turbines",
+        "affected_count"
+      ],
       "implemented_by": "app.services.agent_data_tools.resolve_batch_turbines",
-      "available_api": ["GET /api/agent-tools/entities/batch-turbines"]
+      "available_api": [
+        "GET /api/agent-tools/entities/batch-turbines"
+      ]
     },
     {
       "id": "query_workorder_context",
       "type": "read",
       "description": "读取工单列表、详情、进度记录和通知记录。",
-      "inputs": ["workorder_ref", "turbine_id", "status", "assignee"],
-      "outputs": ["workorders", "workorder_detail"],
-      "available_api": ["GET /api/workorders/", "GET /api/workorders/{workorder_id}", "GET /api/agent-tools/context/workorders"]
+      "inputs": [
+        "workorder_ref",
+        "turbine_id",
+        "status",
+        "assignee"
+      ],
+      "outputs": [
+        "workorders",
+        "workorder_detail"
+      ],
+      "available_api": [
+        "GET /api/workorders/",
+        "GET /api/workorders/{workorder_id}",
+        "GET /api/agent-tools/context/workorders"
+      ]
     },
     {
       "id": "query_knowledge_context",
       "type": "read",
       "description": "读取故障知识节点、知识图谱和相似案例。",
-      "inputs": ["fault_type", "category", "query"],
-      "outputs": ["knowledge_nodes", "knowledge_graph"],
-      "available_api": ["GET /api/knowledge-base", "GET /api/knowledge-base/search", "GET /api/knowledge-graph", "GET /api/agent-tools/context/knowledge"]
+      "inputs": [
+        "fault_type",
+        "category",
+        "query"
+      ],
+      "outputs": [
+        "knowledge_nodes",
+        "knowledge_graph"
+      ],
+      "available_api": [
+        "GET /api/knowledge-base",
+        "GET /api/knowledge-base/search",
+        "GET /api/knowledge-graph",
+        "GET /api/agent-tools/context/knowledge"
+      ]
     },
     {
       "id": "query_ai_provider_config",
       "type": "read",
       "description": "读取AI供应商配置摘要，不包含API KEY明文。",
-      "inputs": ["provider", "provider_id"],
-      "outputs": ["ai_provider_config"],
-      "available_api": ["GET /api/settings/ai-providers", "GET /api/agent-tools/context/settings"],
+      "inputs": [
+        "provider",
+        "provider_id"
+      ],
+      "outputs": [
+        "ai_provider_config"
+      ],
+      "available_api": [
+        "GET /api/settings/ai-providers",
+        "GET /api/agent-tools/context/settings"
+      ],
       "implemented_by": "app.services.agent_data_tools.query_settings_context"
     },
     {
@@ -148,531 +288,989 @@
       "type": "read",
       "description": "读取HI阈值和通知渠道配置。",
       "inputs": [],
-      "outputs": ["threshold_config"],
-      "available_api": ["GET /api/settings/thresholds", "GET /api/agent-tools/context/settings"],
+      "outputs": [
+        "threshold_config"
+      ],
+      "available_api": [
+        "GET /api/settings/thresholds",
+        "GET /api/agent-tools/context/settings"
+      ],
       "implemented_by": "app.services.agent_data_tools.query_settings_context"
     },
     {
       "id": "query_data_source_status",
       "type": "read",
       "description": "读取数据源连接状态和流水线状态。",
-      "inputs": ["source_type"],
-      "outputs": ["data_source_status", "pipeline_status"],
-      "available_api": ["GET /api/settings/data-sources", "GET /api/settings/pipeline-status", "GET /api/agent-tools/context/settings"],
+      "inputs": [
+        "source_type"
+      ],
+      "outputs": [
+        "data_source_status",
+        "pipeline_status"
+      ],
+      "available_api": [
+        "GET /api/settings/data-sources",
+        "GET /api/settings/pipeline-status",
+        "GET /api/agent-tools/context/settings"
+      ],
       "implemented_by": "app.services.agent_data_tools.query_settings_context"
     },
     {
       "id": "resolve_data_source",
       "type": "read",
       "description": "按source_type或名称解析数据源。",
-      "inputs": ["source_type", "name"],
-      "outputs": ["data_source"],
+      "inputs": [
+        "source_type",
+        "name"
+      ],
+      "outputs": [
+        "data_source"
+      ],
       "implemented_by": "app.services.agent_data_tools.resolve_data_source",
-      "available_api": ["GET /api/agent-tools/entities/data-source/resolve"]
+      "available_api": [
+        "GET /api/agent-tools/entities/data-source/resolve"
+      ]
     },
     {
       "id": "draft_workorder_fields",
       "type": "infer",
       "description": "根据风机、故障上下文和用户指令草拟工单标题、优先级、故障类型和描述。",
-      "inputs": ["turbine", "fault_context", "raw_message", "assignee"],
-      "outputs": ["workorder_draft"],
+      "inputs": [
+        "turbine",
+        "fault_context",
+        "raw_message",
+        "assignee"
+      ],
+      "outputs": [
+        "workorder_draft"
+      ],
       "implemented_by": "app.services.agent_workflows.draft_create_workorder_fields",
-      "available_api": ["POST /api/agent-tools/drafts/workorder"]
+      "available_api": [
+        "POST /api/agent-tools/drafts/workorder"
+      ]
     },
     {
       "id": "draft_maintenance_record",
       "type": "infer",
       "description": "根据用户说明、工单状态和故障上下文草拟维护进度记录。",
-      "inputs": ["workorder", "raw_message"],
-      "outputs": ["maintenance_record_draft"],
+      "inputs": [
+        "workorder",
+        "raw_message"
+      ],
+      "outputs": [
+        "maintenance_record_draft"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._extract_record_content"
     },
     {
       "id": "draft_notification_content",
       "type": "infer",
       "description": "根据工单、故障和用户要求草拟通知主题与正文。",
-      "inputs": ["workorder", "fault_context", "raw_message"],
-      "outputs": ["notification_draft"],
+      "inputs": [
+        "workorder",
+        "fault_context",
+        "raw_message"
+      ],
+      "outputs": [
+        "notification_draft"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "draft_knowledge_node",
       "type": "infer",
       "description": "从故障、处理记录或用户文本中草拟知识节点。",
-      "inputs": ["fault", "workorder", "raw_message"],
-      "outputs": ["knowledge_node_draft"],
+      "inputs": [
+        "fault",
+        "workorder",
+        "raw_message"
+      ],
+      "outputs": [
+        "knowledge_node_draft"
+      ],
       "implemented_by": "app.services.knowledge_extractor.extract_from_text"
     },
     {
       "id": "validate_assignment",
       "type": "validate",
       "description": "校验工单是否可派工、人员是否可用、是否覆盖已有负责人。",
-      "inputs": ["workorder", "personnel"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "workorder",
+        "personnel"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "app.services.agent_actions.workorder"
     },
     {
       "id": "validate_workorder_draft",
       "type": "validate",
       "description": "校验工单草稿必填项、标题长度、优先级、故障类型和负责人。",
-      "inputs": ["workorder_draft"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "workorder_draft"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "app.services.agent_actions.workorder"
     },
     {
       "id": "validate_workorder_patch",
       "type": "validate",
       "description": "校验工单字段修改请求。",
-      "inputs": ["workorder", "patch_fields"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "workorder",
+        "patch_fields"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_workorder_status_transition",
       "type": "validate",
       "description": "校验工单状态是否允许按状态机推进或回退。",
-      "inputs": ["workorder", "target_status"],
-      "outputs": ["validation_result"],
+      "inputs": [
+        "workorder",
+        "target_status"
+      ],
+      "outputs": [
+        "validation_result"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._validate_workorder_transition"
     },
     {
       "id": "validate_workorder_cancel",
       "type": "validate",
       "description": "校验工单取消或删除请求，检查状态、原因和活跃关联。",
-      "inputs": ["workorder", "reason"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "workorder",
+        "reason"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_maintenance_record",
       "type": "validate",
       "description": "校验维护记录内容、成本、停机时长和状态联动。",
-      "inputs": ["workorder", "maintenance_record_draft"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "workorder",
+        "maintenance_record_draft"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._plan_add_maintenance_record"
     },
     {
       "id": "validate_notification_payload",
       "type": "validate",
       "description": "校验通知收件人、渠道、主题和正文。",
-      "inputs": ["workorder", "notification_draft", "recipients"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "workorder",
+        "notification_draft",
+        "recipients"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_detection_input",
       "type": "validate",
       "description": "校验单机故障检测输入、数据窗口和数据可用性。",
-      "inputs": ["turbine", "component", "window_hours", "data_source"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "turbine",
+        "component",
+        "window_hours",
+        "data_source"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_batch_detection_scope",
       "type": "validate",
       "description": "校验批量故障检测范围和影响风机数量。",
-      "inputs": ["turbines", "scope", "component"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "turbines",
+        "scope",
+        "component"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_fault_payload",
       "type": "validate",
       "description": "校验故障创建参数、置信度范围和重复活跃故障。",
-      "inputs": ["turbine", "fault_type", "confidence", "priority"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "turbine",
+        "fault_type",
+        "confidence",
+        "priority"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_fault_patch",
       "type": "validate",
       "description": "校验故障字段修改请求。",
-      "inputs": ["fault", "patch_fields"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "fault",
+        "patch_fields"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_fault_status_transition",
       "type": "validate",
       "description": "校验故障处理状态、关闭原因、关联工单是否完整。",
-      "inputs": ["fault", "target_processing_status", "closure_reason"],
-      "outputs": ["validation_result"],
+      "inputs": [
+        "fault",
+        "target_processing_status",
+        "closure_reason"
+      ],
+      "outputs": [
+        "validation_result"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._plan_fault_processing_status"
     },
     {
       "id": "validate_fault_delete",
       "type": "validate",
       "description": "校验故障删除请求，检查原因、关联工单和权限。",
-      "inputs": ["fault", "reason"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "fault",
+        "reason"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_image_upload",
       "type": "validate",
       "description": "校验叶片图像文件类型、大小和风机关联。",
-      "inputs": ["turbine", "image_file"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "turbine",
+        "image_file"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_rul_refresh_scope",
       "type": "validate",
       "description": "校验RUL刷新范围、部件和数据可用性。",
-      "inputs": ["scope", "component", "turbines"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "scope",
+        "component",
+        "turbines"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._plan_refresh_rul_predictions"
     },
     {
       "id": "validate_schedule_scope",
       "type": "validate",
       "description": "校验维护排程范围、是否创建工单、时间窗口和影响数量。",
-      "inputs": ["scope", "maintenance_plan", "create_work_orders"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "scope",
+        "maintenance_plan",
+        "create_work_orders"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_knowledge_payload",
       "type": "validate",
       "description": "校验知识节点草稿、重复节点、来源和验证状态。",
-      "inputs": ["knowledge_node_draft"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "knowledge_node_draft"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_knowledge_review",
       "type": "validate",
       "description": "校验知识节点审核动作。",
-      "inputs": ["knowledge_node", "review_action", "reason"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "knowledge_node",
+        "review_action",
+        "reason"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_knowledge_delete",
       "type": "validate",
       "description": "校验知识节点删除请求。",
-      "inputs": ["knowledge_node", "reason"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "knowledge_node",
+        "reason"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_threshold_payload",
       "type": "validate",
       "description": "校验HI阈值、通知渠道、邮件地址和管理员权限。",
-      "inputs": ["threshold_payload", "user"],
-      "outputs": ["validation_result"],
+      "inputs": [
+        "threshold_payload",
+        "user"
+      ],
+      "outputs": [
+        "validation_result"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_ai_provider_delete",
       "type": "validate",
       "description": "校验AI供应商删除请求，检查所属用户和历史会话影响。",
-      "inputs": ["ai_provider_config"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "ai_provider_config"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._plan_delete_ai_provider"
     },
     {
       "id": "validate_ai_provider_payload",
       "type": "validate",
       "description": "校验AI供应商、base_url、api_style、模型列表和API KEY存在性。",
-      "inputs": ["provider_payload"],
-      "outputs": ["validation_result"],
+      "inputs": [
+        "provider_payload"
+      ],
+      "outputs": [
+        "validation_result"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_data_source_payload",
       "type": "validate",
       "description": "校验数据源类型、连接参数和敏感字段脱敏。",
-      "inputs": ["data_source_payload"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "data_source_payload"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_personnel_payload",
       "type": "validate",
       "description": "校验维护人员姓名、邮箱、技能、区域和重复记录。",
-      "inputs": ["personnel_payload"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "personnel_payload"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_personnel_delete",
       "type": "validate",
       "description": "校验维护人员删除或禁用请求，检查活跃工单。",
-      "inputs": ["personnel", "active_workorders", "reason"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "personnel",
+        "active_workorders",
+        "reason"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "validate_health_refresh_scope",
       "type": "validate",
       "description": "校验HI刷新范围、影响风机数量和数据源可用性。",
-      "inputs": ["scope", "turbines", "data_sources"],
-      "outputs": ["validation_result", "warnings"],
+      "inputs": [
+        "scope",
+        "turbines",
+        "data_sources"
+      ],
+      "outputs": [
+        "validation_result",
+        "warnings"
+      ],
       "implemented_by": "planned"
     },
     {
       "id": "require_confirmation",
       "type": "guard",
       "description": "生成确认卡片并等待用户确认。所有写动作必须经过此步骤。",
-      "inputs": ["before_state", "after_state", "warnings"],
-      "outputs": ["request_id"],
+      "inputs": [
+        "before_state",
+        "after_state",
+        "warnings"
+      ],
+      "outputs": [
+        "request_id"
+      ],
       "implemented_by": "app.services.agent_actions"
     },
     {
       "id": "create_workorder_record",
       "type": "write",
       "description": "创建单条维修工单。",
-      "inputs": ["workorder_draft"],
-      "outputs": ["workorder"],
-      "available_api": ["POST /api/workorders/"],
+      "inputs": [
+        "workorder_draft"
+      ],
+      "outputs": [
+        "workorder"
+      ],
+      "available_api": [
+        "POST /api/workorders/"
+      ],
       "implemented_by": "app.services.agent_actions.workorder"
     },
     {
       "id": "assign_workorder",
       "type": "write",
       "description": "将工单分配给维修人员，必要时从pending推进到assigned。",
-      "inputs": ["workorder_id", "assignee_id"],
-      "outputs": ["workorder"],
-      "available_api": ["PUT /api/workorders/{workorder_id}"],
+      "inputs": [
+        "workorder_id",
+        "assignee_id"
+      ],
+      "outputs": [
+        "workorder"
+      ],
+      "available_api": [
+        "PUT /api/workorders/{workorder_id}"
+      ],
       "implemented_by": "app.services.agent_actions.workorder"
     },
     {
       "id": "update_workorder_record",
       "type": "write",
       "description": "更新工单标题、描述、优先级、故障类型、成本、负责人等字段。",
-      "inputs": ["workorder_id", "patch"],
-      "outputs": ["workorder"],
-      "available_api": ["PUT /api/workorders/{workorder_id}"]
+      "inputs": [
+        "workorder_id",
+        "patch"
+      ],
+      "outputs": [
+        "workorder"
+      ],
+      "available_api": [
+        "PUT /api/workorders/{workorder_id}"
+      ]
     },
     {
       "id": "advance_workorder_status",
       "type": "write",
       "description": "按状态机推进工单状态。",
-      "inputs": ["workorder_id", "target_status"],
-      "outputs": ["workorder"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "workorder_id",
+        "target_status"
+      ],
+      "outputs": [
+        "workorder"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_advance_workorder_status"
     },
     {
       "id": "cancel_workorder_record",
       "type": "write",
       "description": "软删除或取消工单。",
-      "inputs": ["workorder_id", "reason"],
-      "outputs": ["workorder"],
-      "available_api": ["DELETE /api/workorders/{workorder_id}"]
+      "inputs": [
+        "workorder_id",
+        "reason"
+      ],
+      "outputs": [
+        "workorder"
+      ],
+      "available_api": [
+        "DELETE /api/workorders/{workorder_id}"
+      ]
     },
     {
       "id": "add_maintenance_record",
       "type": "write",
       "description": "向工单追加维护记录或状态说明。",
-      "inputs": ["workorder_id", "record_payload"],
-      "outputs": ["maintenance_record"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "workorder_id",
+        "record_payload"
+      ],
+      "outputs": [
+        "maintenance_record"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_add_maintenance_record"
     },
     {
       "id": "send_workorder_notification",
       "type": "write",
       "description": "向工单相关人员发送邮件通知，并记录通知日志。",
-      "inputs": ["workorder_id", "recipient_user_ids", "recipient_emails", "content"],
-      "outputs": ["notification_log"],
-      "available_api": ["POST /api/workorders/{workorder_id}/send-email"]
+      "inputs": [
+        "workorder_id",
+        "recipient_user_ids",
+        "recipient_emails",
+        "content"
+      ],
+      "outputs": [
+        "notification_log"
+      ],
+      "available_api": [
+        "POST /api/workorders/{workorder_id}/send-email"
+      ]
     },
     {
       "id": "run_auto_fault_detection",
       "type": "write",
       "description": "执行单机自动故障检测，可能生成或更新故障记录。",
-      "inputs": ["turbine_id", "component", "window_hours", "data_source"],
-      "outputs": ["fault_detection_result"],
-      "available_api": ["POST /api/diagnosis/auto-detect"]
+      "inputs": [
+        "turbine_id",
+        "component",
+        "window_hours",
+        "data_source"
+      ],
+      "outputs": [
+        "fault_detection_result"
+      ],
+      "available_api": [
+        "POST /api/diagnosis/auto-detect"
+      ]
     },
     {
       "id": "run_batch_fault_detection",
       "type": "write",
       "description": "对一批风机执行自动故障检测。",
-      "inputs": ["turbine_ids", "region", "status", "component", "window_hours"],
-      "outputs": ["batch_fault_records"],
-      "available_api": ["POST /api/diagnosis/auto-detect/batch"]
+      "inputs": [
+        "turbine_ids",
+        "region",
+        "status",
+        "component",
+        "window_hours"
+      ],
+      "outputs": [
+        "batch_fault_records"
+      ],
+      "available_api": [
+        "POST /api/diagnosis/auto-detect/batch"
+      ]
     },
     {
       "id": "create_fault_record",
       "type": "write",
       "description": "创建故障记录。",
-      "inputs": ["turbine_id", "fault_type", "confidence", "priority", "details"],
-      "outputs": ["fault"],
-      "available_api": ["POST /api/diagnosis/faults"]
+      "inputs": [
+        "turbine_id",
+        "fault_type",
+        "confidence",
+        "priority",
+        "details"
+      ],
+      "outputs": [
+        "fault"
+      ],
+      "available_api": [
+        "POST /api/diagnosis/faults"
+      ]
     },
     {
       "id": "update_fault_record",
       "type": "write",
       "description": "更新故障类型、置信度、优先级、详情。",
-      "inputs": ["fault_id", "patch"],
-      "outputs": ["fault"],
-      "available_api": ["PUT /api/diagnosis/faults/{fault_id}"]
+      "inputs": [
+        "fault_id",
+        "patch"
+      ],
+      "outputs": [
+        "fault"
+      ],
+      "available_api": [
+        "PUT /api/diagnosis/faults/{fault_id}"
+      ]
     },
     {
       "id": "update_fault_processing_status",
       "type": "write",
       "description": "推进故障处理状态。",
-      "inputs": ["fault_id", "processing_status", "handler", "status_note"],
-      "outputs": ["fault"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "fault_id",
+        "processing_status",
+        "handler",
+        "status_note"
+      ],
+      "outputs": [
+        "fault"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_update_fault_processing_status"
     },
     {
       "id": "delete_fault_record",
       "type": "write",
       "description": "删除故障记录。",
-      "inputs": ["fault_id"],
-      "outputs": ["deleted_fault"],
-      "available_api": ["DELETE /api/diagnosis/faults/{fault_id}"]
+      "inputs": [
+        "fault_id"
+      ],
+      "outputs": [
+        "deleted_fault"
+      ],
+      "available_api": [
+        "DELETE /api/diagnosis/faults/{fault_id}"
+      ]
     },
     {
       "id": "upload_blade_image_diagnosis",
       "type": "write",
       "description": "上传叶片图像并执行诊断，保存图像诊断结果。",
-      "inputs": ["turbine_id", "image_file"],
-      "outputs": ["blade_diagnosis_result"],
-      "available_api": ["POST /api/diagnosis/blade-diagnosis/upload"]
+      "inputs": [
+        "turbine_id",
+        "image_file"
+      ],
+      "outputs": [
+        "blade_diagnosis_result"
+      ],
+      "available_api": [
+        "POST /api/diagnosis/blade-diagnosis/upload"
+      ]
     },
     {
       "id": "refresh_rul_predictions",
       "type": "write",
       "description": "刷新RUL预测结果。",
-      "inputs": ["turbine_id", "component"],
-      "outputs": ["rul_predictions"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "turbine_id",
+        "component"
+      ],
+      "outputs": [
+        "rul_predictions"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_refresh_rul_predictions"
     },
     {
       "id": "generate_maintenance_schedule",
       "type": "write",
       "description": "生成维护排程，可选择同时生成工单。",
-      "inputs": ["top_n", "create_work_orders"],
-      "outputs": ["maintenance_schedule", "created_workorders"],
-      "available_api": ["POST /api/prediction/schedule"]
+      "inputs": [
+        "top_n",
+        "create_work_orders"
+      ],
+      "outputs": [
+        "maintenance_schedule",
+        "created_workorders"
+      ],
+      "available_api": [
+        "POST /api/prediction/schedule"
+      ]
     },
     {
       "id": "upsert_knowledge_node",
       "type": "write",
       "description": "创建或更新故障知识节点。",
-      "inputs": ["knowledge_payload"],
-      "outputs": ["knowledge_node"],
-      "available_api": ["POST /api/knowledge-base", "PATCH /api/knowledge-base/{node_id}"]
+      "inputs": [
+        "knowledge_payload"
+      ],
+      "outputs": [
+        "knowledge_node"
+      ],
+      "available_api": [
+        "POST /api/knowledge-base",
+        "PATCH /api/knowledge-base/{node_id}"
+      ]
     },
     {
       "id": "verify_knowledge_node",
       "type": "write",
       "description": "标记知识节点为已验证。",
-      "inputs": ["node_id"],
-      "outputs": ["knowledge_node"],
-      "available_api": ["PATCH /api/knowledge-base/{node_id}/verify"]
+      "inputs": [
+        "node_id"
+      ],
+      "outputs": [
+        "knowledge_node"
+      ],
+      "available_api": [
+        "PATCH /api/knowledge-base/{node_id}/verify"
+      ]
     },
     {
       "id": "reject_knowledge_node",
       "type": "write",
       "description": "标记知识节点为拒绝或不可信。",
-      "inputs": ["node_id", "reason"],
-      "outputs": ["knowledge_node"],
-      "available_api": ["PATCH /api/knowledge-base/{node_id}/reject"]
+      "inputs": [
+        "node_id",
+        "reason"
+      ],
+      "outputs": [
+        "knowledge_node"
+      ],
+      "available_api": [
+        "PATCH /api/knowledge-base/{node_id}/reject"
+      ]
     },
     {
       "id": "delete_knowledge_node",
       "type": "write",
       "description": "删除知识节点。",
-      "inputs": ["node_id"],
-      "outputs": ["deleted_node"],
-      "available_api": ["DELETE /api/knowledge-base/{node_id}"]
+      "inputs": [
+        "node_id"
+      ],
+      "outputs": [
+        "deleted_node"
+      ],
+      "available_api": [
+        "DELETE /api/knowledge-base/{node_id}"
+      ]
     },
     {
       "id": "upsert_ai_provider_config",
       "type": "write",
       "description": "新增或更新AI供应商配置。",
-      "inputs": ["provider_payload"],
-      "outputs": ["ai_provider_config"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "provider_payload"
+      ],
+      "outputs": [
+        "ai_provider_config"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_upsert_ai_provider_config"
     },
     {
       "id": "test_ai_provider_connection",
       "type": "write",
       "description": "测试AI供应商连接并写入测试状态。",
-      "inputs": ["provider_id", "model"],
-      "outputs": ["ai_provider_test_result"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "provider_id",
+        "model"
+      ],
+      "outputs": [
+        "ai_provider_test_result"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_test_ai_provider_connection"
     },
     {
       "id": "delete_ai_provider_config",
       "type": "write",
       "description": "删除AI供应商配置。",
-      "inputs": ["provider_id"],
-      "outputs": ["deleted_provider"],
-      "available_api": ["POST /api/agent-actions/{request_id}/confirm"],
+      "inputs": [
+        "provider_id"
+      ],
+      "outputs": [
+        "deleted_provider"
+      ],
+      "available_api": [
+        "POST /api/agent-actions/{request_id}/confirm"
+      ],
       "implemented_by": "app.services.agent_actions.workorder._confirm_delete_ai_provider_config"
     },
     {
       "id": "update_threshold_config",
       "type": "write",
       "description": "更新HI阈值和通知渠道配置。",
-      "inputs": ["threshold_payload"],
-      "outputs": ["threshold_config"],
-      "available_api": ["PUT /api/settings/thresholds"]
+      "inputs": [
+        "threshold_payload"
+      ],
+      "outputs": [
+        "threshold_config"
+      ],
+      "available_api": [
+        "PUT /api/settings/thresholds"
+      ]
     },
     {
       "id": "update_user_preferences",
       "type": "write",
       "description": "更新用户偏好设置。",
-      "inputs": ["preferences_payload"],
-      "outputs": ["preferences"],
-      "available_api": ["PUT /api/settings/preferences"]
+      "inputs": [
+        "preferences_payload"
+      ],
+      "outputs": [
+        "preferences"
+      ],
+      "available_api": [
+        "PUT /api/settings/preferences"
+      ]
     },
     {
       "id": "upsert_personnel",
       "type": "write",
       "description": "新增或更新维护人员。",
-      "inputs": ["personnel_payload"],
-      "outputs": ["personnel"],
-      "available_api": ["POST /api/personnel/", "PUT /api/personnel/{personnel_id}"]
+      "inputs": [
+        "personnel_payload"
+      ],
+      "outputs": [
+        "personnel"
+      ],
+      "available_api": [
+        "POST /api/personnel/",
+        "PUT /api/personnel/{personnel_id}"
+      ]
     },
     {
       "id": "delete_personnel",
       "type": "write",
       "description": "删除维护人员。",
-      "inputs": ["personnel_id"],
-      "outputs": ["deleted_personnel"],
-      "available_api": ["DELETE /api/personnel/{personnel_id}"]
+      "inputs": [
+        "personnel_id"
+      ],
+      "outputs": [
+        "deleted_personnel"
+      ],
+      "available_api": [
+        "DELETE /api/personnel/{personnel_id}"
+      ]
     },
     {
       "id": "test_data_source_connection",
       "type": "write",
       "description": "测试数据源连接，可能更新连接状态或返回诊断信息。",
-      "inputs": ["source_type", "connection_params"],
-      "outputs": ["data_source_test_result"],
-      "available_api": ["POST /api/settings/data-sources/test"]
+      "inputs": [
+        "source_type",
+        "connection_params"
+      ],
+      "outputs": [
+        "data_source_test_result"
+      ],
+      "available_api": [
+        "POST /api/settings/data-sources/test"
+      ]
     },
     {
       "id": "refresh_health_indexes",
       "type": "write",
       "description": "刷新风机健康指数。",
-      "inputs": ["turbine_ids", "region"],
-      "outputs": ["health_index_result"],
-      "available_api": ["POST /api/turbines/refresh-health"]
+      "inputs": [
+        "turbine_ids",
+        "region"
+      ],
+      "outputs": [
+        "health_index_result"
+      ],
+      "available_api": [
+        "POST /api/turbines/refresh-health"
+      ]
     },
     {
       "id": "verify_written_entity",
       "type": "verify",
       "description": "写入后回读实体并校验关键字段。",
-      "inputs": ["entity_type", "entity_id", "expected_state"],
-      "outputs": ["verification_result"]
+      "inputs": [
+        "entity_type",
+        "entity_id",
+        "expected_state"
+      ],
+      "outputs": [
+        "verification_result"
+      ]
     },
     {
       "id": "present_result",
       "type": "verify",
       "description": "准备导航、打开实体、消息摘要等展示结果。",
-      "inputs": ["entity_type", "entity_id", "display_target"],
-      "outputs": ["display_payload"]
+      "inputs": [
+        "entity_type",
+        "entity_id",
+        "display_target"
+      ],
+      "outputs": [
+        "display_payload"
+      ]
+    },
+    {
+      "id": "query_production_plan",
+      "type": "read",
+      "description": "查询当前检修排产方案、损失电量与优化改善率。",
+      "inputs": [
+        "period"
+      ],
+      "outputs": [
+        "plan_no",
+        "objective",
+        "schedule_preview"
+      ],
+      "implemented_by": "app.services.agent_domain_read_tasks._answer_production_plan"
+    },
+    {
+      "id": "query_power_forecast",
+      "type": "read",
+      "description": "查询未来风功率预测曲线与低风检修窗口。",
+      "inputs": [
+        "hours",
+        "turbine_ref"
+      ],
+      "outputs": [
+        "forecast_points",
+        "low_wind_windows"
+      ],
+      "implemented_by": "app.services.power_forecast_service.forecast_farm_power"
     }
   ]
 }

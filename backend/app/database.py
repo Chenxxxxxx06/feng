@@ -15,10 +15,15 @@ from app.config import get_settings, is_sqlite_url, is_postgresql_url, get_offli
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./fengdiao_phm.db"
 
 # Check for offline database
 offline_db_path = get_offline_database_path()
-if offline_db_path and is_sqlite_url(settings.DATABASE_URL):
+if (
+    offline_db_path
+    and is_sqlite_url(settings.DATABASE_URL)
+    and settings.DATABASE_URL == DEFAULT_DATABASE_URL
+):
     # Use offline database if available and using SQLite
     database_url = f"sqlite+aiosqlite:///{offline_db_path}"
     logger.info(f"Using offline dataset database: {offline_db_path}")

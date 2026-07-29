@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 export interface Message {
+  id?: string;
   role: 'user' | 'assistant' | 'error';
   content: string;
   _progress?: boolean;
@@ -46,7 +47,7 @@ interface CopilotState {
 
 const GREETING: Message = {
   role: 'assistant',
-  content: '你好！我是风调预顺AI助手。\n\n**我能做什么:**\n- 查询风机实时数据 (HI、RUL、SCADA)\n- 诊断故障原因 + 匹配知识库\n- 生成维修建议和排查步骤\n- 截图分析当前页面\n\n请描述你的问题，或点击 **Agent任务** 进行深度分析。',
+      content: '你好！我是风调预顺AI助手。\n\n**我能做什么:**\n- 查询风机当前可用数据 (HI、RUL、历史SCADA)\n- 诊断故障原因 + 匹配知识库\n- 生成维修建议和排查步骤\n- 截图分析当前页面\n\n请描述你的问题，或点击 **Agent任务** 进行深度分析。',
 };
 
 const STORAGE_KEY = 'copilot.sessions.v2';
@@ -89,6 +90,18 @@ const persistSessions = (sessions: CopilotSession[], currentSessionId: string) =
   if (!win) return;
   win.localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   win.localStorage.setItem(CURRENT_SESSION_KEY, currentSessionId);
+};
+
+// Streaming deltas call updateMessage on every chunk; throttle persistence to
+// avoid a localStorage write storm. The trailing timer reads the latest state.
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+const schedulePersist = (get: () => { sessions: CopilotSession[]; currentSessionId: string }) => {
+  if (persistTimer !== null) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    const s = get();
+    persistSessions(s.sessions, s.currentSessionId);
+  }, 500);
 };
 
 const isEmptySession = (session?: CopilotSession | null) => (
@@ -147,7 +160,8 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     return { sessions, currentSessionId: current.id, messages: current.messages?.length ? current.messages : [GREETING] };
   }),
   addMessage: (msg) => set((s) => {
-    const messages = [...s.messages, msg];
+    const withId = msg.id ? msg : { ...msg, id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+    const messages = [...s.messages, withId];
     const sessions = s.sessions.map((session) => (
       session.id === s.currentSessionId
         ? {
@@ -175,7 +189,13 @@ export const useCopilotStore = create<CopilotState>((set, get) => ({
     const sessions = s.sessions.map((session) => (
       session.id === s.currentSessionId ? { ...session, messages, updatedAt: nowIso() } : session
     ));
-    persistSessions(sessions, s.currentSessionId);
+    if (patch._progress === false) {
+      // Stream finished (or errored): flush the final content immediately.
+      if (persistTimer !== null) { clearTimeout(persistTimer); persistTimer = null; }
+      persistSessions(sessions, s.currentSessionId);
+    } else {
+      schedulePersist(get);
+    }
     return { messages, sessions };
   }),
   setInput: (val) => set({ input: val }),

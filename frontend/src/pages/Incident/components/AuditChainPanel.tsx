@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react';
 import { getAuditChain, verifyAuditChain } from '../../../services/incidentService';
+import StateBlock from '../../../components/Common/StateBlock';
+import { Skeleton, SkeletonList } from '../../../components/Common/Skeleton';
+import { toast, describeError } from '../../../components/Common/Toast';
 
 interface Props {
   incidentId: number;
 }
+
+const DECISION_LABEL: Record<string, string> = {
+  allowed: '允许',
+  denied: '拒绝',
+  requires_approval: '需审批',
+};
 
 export default function AuditChainPanel({ incidentId }: Props) {
   const [chain, setChain] = useState<any>(null);
@@ -12,11 +21,19 @@ export default function AuditChainPanel({ incidentId }: Props) {
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const load = () => {
+    setLoading(true); setError(null);
+    getAuditChain(incidentId)
+      .then(setChain)
+      .catch(e => setError(describeError(e, '审计链加载失败')))
+      .finally(() => setLoading(false));
+  };
+
   useEffect(() => {
     setLoading(true); setError(null);
     getAuditChain(incidentId)
       .then(setChain)
-      .catch(e => setError(e?.response?.data?.detail || '加载失败'))
+      .catch(e => setError(describeError(e, '审计链加载失败')))
       .finally(() => setLoading(false));
   }, [incidentId]);
 
@@ -25,102 +42,133 @@ export default function AuditChainPanel({ incidentId }: Props) {
     try {
       const result = await verifyAuditChain(incidentId);
       setVerification(result);
+      if (result?.chain_valid) toast.success('链完整性验证通过', `共校验 ${result.total_entries} 个区块`);
+      else toast.error('链完整性验证失败', '检测到哈希链断裂，请查看下方详情');
     } catch (e: any) {
-      setError(e?.response?.data?.detail || '验证失败');
+      const message = describeError(e, '审计链验证失败');
+      setError(message);
+      toast.error('审计链验证失败', message);
     } finally { setVerifying(false); }
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-500">加载审计链...</div>;
-  if (error) return <div className="p-4 text-red-400 bg-red-950/20 rounded-lg">⚠ {error}</div>;
-  if (!chain) return <div className="p-8 text-center text-slate-500">暂无审计链数据</div>;
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Skeleton className="skeleton-title" width={140} height={14} />
+          <Skeleton width={110} height={26} radius={8} />
+        </div>
+        <SkeletonList rows={6} />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="surface-card">
+        <StateBlock kind="error" title="审计链加载失败" desc={error} onRetry={load} />
+      </div>
+    );
+  }
+  if (!chain) {
+    return (
+      <div className="surface-card">
+        <StateBlock kind="empty" title="暂无审计链数据" desc="事件尚未产生受策略引擎管控的 Agent 操作。" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🔗</span>
-            <span className="font-semibold text-white">审计链</span>
-            {verification?.chain_valid && (
-              <span className="text-xs px-2 py-0.5 bg-emerald-600 text-white rounded">✓ 可检测篡改</span>
-            )}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="section-title">审计链</h3>
+            {verification?.chain_valid && <span className="badge badge-success">可检测篡改</span>}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
-            {chain.total_entries} 个区块 · 根哈希: <code className="text-slate-400 text-xs">{chain.root_hash}</code>
-          </div>
+          <p className="mt-1 text-[10px] text-text-muted">
+            <span className="num">{chain.total_entries}</span> 个区块 · 根哈希
+            <code className="num ml-1 truncate-cell inline-block max-w-[280px] align-bottom" title={chain.root_hash}>{chain.root_hash}</code>
+          </p>
         </div>
-        <button onClick={handleVerify} disabled={verifying}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded transition-colors">
-          {verifying ? '验证中...' : '🔒 验证完整链'}
+        <button onClick={handleVerify} disabled={verifying} className="btn btn-primary btn-sm">
+          {verifying && <span className="btn-spinner" aria-hidden="true" />}
+          {verifying ? '验证中…' : '验证完整链'}
         </button>
       </div>
 
       {/* Verification result */}
       {verification && (
-        <div className={`p-4 rounded-lg border ${
-          verification.chain_valid
-            ? 'bg-emerald-950/20 border-emerald-700/30'
-            : 'bg-red-950/20 border-red-700/30'
-        }`}>
-          <div className="font-semibold text-white">
-            {verification.chain_valid ? '✅ 链完整性验证通过' : '❌ 链完整性验证失败'}
-          </div>
-          <div className="text-sm text-slate-400 mt-1">
-            总区块: {verification.total_entries} ·
-            签名验证: {verification.key_available ? (verification.signature_valid ? '✅' : '❌') : '⚠ 密钥未配置'} ·
-            根哈希: <code className="text-xs">{verification.root_hash}</code>
-          </div>
+        <div
+          className="surface-card p-4"
+          style={verification.chain_valid
+            ? { background: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.28)' }
+            : { background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.30)' }}
+          role="status"
+        >
+          <p className="flex items-center gap-2 section-title">
+            <span className={`dot ${verification.chain_valid ? 'dot-success' : 'dot-danger'}`} aria-hidden="true" />
+            {verification.chain_valid ? '链完整性验证通过' : '链完整性验证失败'}
+          </p>
+          <p className="mt-1.5 text-[11px] text-text-secondary">
+            总区块 <span className="num">{verification.total_entries}</span> · 签名验证{' '}
+            {verification.key_available ? (verification.signature_valid ? '通过' : '未通过') : '密钥未配置'} · 根哈希{' '}
+            <code className="num" title={verification.root_hash}>{String(verification.root_hash || '').slice(0, 24)}…</code>
+          </p>
           {verification.tampered_entries?.length > 0 && (
-            <div className="text-sm text-red-400 mt-2">
-              ⚠ 检测到篡改: 区块 #{verification.tampered_entries.join(', #')}
-              {verification.first_broken_at && ` (首次断裂: #${verification.first_broken_at})`}
-            </div>
+            <p className="mt-2 text-[11px]" style={{ color: 'var(--accent-red)' }}>
+              检测到篡改：区块 #{verification.tampered_entries.join(', #')}
+              {verification.first_broken_at && `（首次断裂：#${verification.first_broken_at}）`}
+            </p>
           )}
           {verification.error_message && (
-            <div className="text-xs text-slate-500 mt-2">{verification.error_message}</div>
+            <p className="mt-2 text-[10px] text-text-muted">{verification.error_message}</p>
           )}
         </div>
       )}
 
       {/* Entry list */}
-      <div className="space-y-1 max-h-96 overflow-y-auto">
-        {chain.entries?.map((entry: any) => (
-          <div key={entry.seq} className="flex items-center gap-3 p-2 bg-slate-800/30 rounded hover:bg-slate-800/50 transition-colors text-xs">
-            <span className="text-slate-600 w-8 text-right tabular-nums">#{entry.seq}</span>
-            <span className="text-slate-300 w-32 truncate">{entry.action_type}</span>
-            <span className="text-slate-500 w-16 truncate">{entry.agent}</span>
-            {entry.decision && (
-              <span className={`px-1.5 py-0.5 rounded text-xs ${
-                entry.decision === 'denied' ? 'bg-red-600/30 text-red-300' :
-                entry.decision === 'allowed' ? 'bg-emerald-600/30 text-emerald-300' :
-                'bg-slate-600/30 text-slate-300'
-              }`}>
-                {entry.decision}
-              </span>
-            )}
-            <code className="text-slate-600 text-xs flex-1 text-right truncate" title={entry.current_hash}>
-              {entry.current_hash?.substring(0, 16)}...
-            </code>
-          </div>
-        ))}
-      </div>
+      {chain.entries?.length > 0 && (
+        <div className="table-scroll max-h-96 space-y-px">
+          {chain.entries.map((entry: any) => (
+            <div
+              key={entry.seq}
+              className="flex items-center gap-3 rounded-md px-2.5 py-1.5 text-[10px] transition-colors hover:bg-bg-hover"
+              style={{ background: 'rgba(59,130,246,0.03)' }}
+            >
+              <span className="num w-8 flex-shrink-0 text-right text-text-muted">#{entry.seq}</span>
+              <span className="w-32 flex-shrink-0 truncate text-text-primary" title={entry.action_type}>{entry.action_type}</span>
+              <span className="w-16 flex-shrink-0 truncate text-text-muted" title={entry.agent}>{entry.agent}</span>
+              {entry.decision && (
+                <span className={`badge ${entry.decision === 'denied' ? 'badge-danger' : entry.decision === 'allowed' ? 'badge-success' : 'badge-warning'}`}>
+                  {DECISION_LABEL[entry.decision] || entry.decision}
+                </span>
+              )}
+              <code className="num flex-1 truncate text-right text-text-muted" title={entry.current_hash}>
+                {entry.current_hash?.substring(0, 16)}…
+              </code>
+            </div>
+          ))}
+        </div>
+      )}
 
       {chain.entries?.length === 0 && (
-        <div className="p-8 text-center text-slate-500">
-          <div className="text-3xl mb-2">📭</div>
-          <div>暂无可审计的Agent操作记录</div>
-          <div className="text-xs text-slate-600 mt-1">启动自主调查后自动生成审计链</div>
+        <div className="surface-card">
+          <StateBlock
+            kind="empty"
+            title="暂无可审计的 Agent 操作记录"
+            desc="启动「自主调查」后，每一次受管控的动作都会写入审计链。"
+          />
         </div>
       )}
 
       {/* Signature status */}
-      <div className="text-xs text-slate-600 p-3 bg-slate-800/20 rounded border border-slate-700/30">
-        <span className="font-semibold">关于审计链</span>:
-        SHA-256哈希链提供<strong>可检测篡改</strong>证据。
-        {chain.signed ? ' 根哈希已使用Ed25519签名。' : ' 签名密钥未配置，仅验证哈希链连续性。'}
-        这不是区块链，不提供分布式共识。
-      </div>
+      <p className="surface-inset p-3 text-[10px] leading-relaxed text-text-muted">
+        <span className="font-semibold text-text-secondary">关于审计链：</span>
+        SHA-256 哈希链提供<strong className="text-text-secondary">可检测篡改</strong>的证据。
+        {chain.signed ? ' 根哈希已使用 Ed25519 签名。' : ' 签名密钥未配置，当前仅验证哈希链连续性。'}
+        本机制不是区块链，不提供分布式共识。
+      </p>
     </div>
   );
 }

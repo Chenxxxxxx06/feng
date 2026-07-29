@@ -1,8 +1,8 @@
 """Resource-constrained maintenance decision twin.
 
 Replaces fixed-template plans with dynamic multi-criteria decision analysis
-using real resource lookups: RUL, power, electricity price, personnel skills,
-spare parts inventory, weather windows, and historical success rates.
+using resource lookups: RUL, power, electricity price, personnel skills,
+maintenance knowledge, weather windows, and historical success rates.
 
 Algorithm:
 1. Snap real resource state
@@ -42,6 +42,7 @@ from app.models import (
     Turbine,
     WorkOrder,
 )
+from app.services.fault_type_resolver import resolve_fault_type
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,8 @@ class DecisionTwinService:
     async def _snapshot_resources(self, incident: Incident) -> ResourceSnapshot:
         """Capture complete resource state for decision-making."""
         snapshot = ResourceSnapshot(captured_at=datetime.now(timezone.utc))
+        snapshot.fault_severity = (incident.severity or "medium").lower()
+        snapshot.fault_type = resolve_fault_type(incident.title) or ""
 
         # RUL
         await self._snapshot_rul(incident, snapshot)
@@ -237,31 +240,51 @@ class DecisionTwinService:
     async def _snapshot_spare_parts(
         self, incident: Incident, snap: ResourceSnapshot
     ) -> None:
-        # Query fault knowledge for required spare parts
-        fault_knowledge = await self.db.execute(
-            select(
-                FaultKnowledgeNode.spare_parts,
-                FaultKnowledgeNode.fault_type,
-            )
-            .where(
-                FaultKnowledgeNode.fault_type.contains(
-                    (incident.title or "").split(" ")[0]
+        fault_type = resolve_fault_type(snap.fault_type or incident.title)
+        if not fault_type:
+            snap.parts_status = "manual_review"
+            snap.parts_summary = "未识别故障类型，执行前需人工确认备件与工具"
+            return
+
+        knowledge = (
+            await self.db.execute(
+                select(FaultKnowledgeNode).where(
+                    FaultKnowledgeNode.fault_type == fault_type
                 )
             )
-            .limit(5)
-        )
-        rows = fault_knowledge.fetchall()
+        ).scalars().first()
+        raw_parts = knowledge.spare_parts if knowledge else []
+        normalized: list[dict[str, Any]] = []
+        for item in raw_parts or []:
+            if isinstance(item, dict):
+                name = str(
+                    item.get("name") or item.get("part") or item.get("part_no") or ""
+                ).strip()
+                if name:
+                    normalized.append(
+                        {
+                            "name": name,
+                            "quantity": int(item.get("quantity") or item.get("qty") or 1),
+                            "source": "fault_knowledge",
+                        }
+                    )
+            elif str(item).strip():
+                normalized.append(
+                    {
+                        "name": str(item).strip(),
+                        "quantity": 1,
+                        "source": "fault_knowledge",
+                    }
+                )
 
-        snap.spare_parts = []
-        for row in rows:
-            parts = row[0] or []
-            for part in parts[:3]:
-                snap.spare_parts.append({
-                    "part_name": part if isinstance(part, str) else part.get("name", ""),
-                    "fault_type": row[1],
-                    "status": "unknown",  # Would need real inventory system
-                    "source": "fault_knowledge",
-                })
+        snap.spare_parts = normalized
+        snap.parts_status = "manual_review"
+        snap.parts_summary = (
+            f"知识库列出 {len(normalized)} 项所需备件；"
+            "库存可用性未接入，必须在工单审核时人工确认"
+        )
+        snap.parts_earliest_ready_date = None
+        snap.parts_source_type = "knowledge"
 
     async def _snapshot_weather(self, snap: ResourceSnapshot) -> None:
         # Minimal: check if any weather data exists
@@ -305,16 +328,18 @@ class DecisionTwinService:
     async def _snapshot_history(
         self, incident: Incident, snap: ResourceSnapshot
     ) -> None:
-        # Count past work orders for this turbine
-        count = await self.db.execute(
-            select(func.count(WorkOrder.id)).where(
+        result = await self.db.execute(
+            select(WorkOrder.status, func.count(WorkOrder.id))
+            .where(
                 WorkOrder.turbine_id == incident.turbine_id,
-                WorkOrder.status == "completed",
+                WorkOrder.status.in_(["completed", "closed", "cancelled"]),
             )
+            .group_by(WorkOrder.status)
         )
-        total = count.scalar() or 0
-        # Simplified: assume 80% success rate if history exists
-        snap.historical_success_rate = 0.80 if total > 0 else None
+        counts = {str(status): int(count) for status, count in result.all()}
+        total = sum(counts.values())
+        successful = counts.get("completed", 0) + counts.get("closed", 0)
+        snap.historical_success_rate = successful / total if total else None
 
     async def _assess_data_quality(self, snap: ResourceSnapshot) -> None:
         missing = []
@@ -324,7 +349,7 @@ class DecisionTwinService:
             missing.append("power")
         if not snap.personnel_available:
             missing.append("personnel")
-        if not snap.spare_parts:
+        if not snap.spare_parts or snap.parts_status in ("unknown", "manual_review"):
             missing.append("spare_parts")
         if "weather_data_not_available" in snap.weather_restrictions:
             missing.append("weather")
@@ -469,9 +494,18 @@ class DecisionTwinService:
 
         # Spare parts
         if plan.strategy in ("immediate_repair",):
-            plan.parts_feasible = len(snap.spare_parts) > 0
+            plan.parts_feasible = snap.parts_status == "ready"
             if not plan.parts_feasible:
-                reasons.append("No spare parts information available")
+                if snap.parts_status == "transfer_needed":
+                    reasons.append(
+                        f"Spare parts require transfer; earliest ready {snap.parts_earliest_ready_date or 'unknown'}"
+                    )
+                elif snap.parts_status == "shortage":
+                    reasons.append(
+                        f"Spare parts shortage; earliest ready {snap.parts_earliest_ready_date or 'unknown'}"
+                    )
+                else:
+                    reasons.append("Spare-parts readiness requires human approval")
         else:
             plan.parts_feasible = True
 
@@ -609,8 +643,8 @@ class DecisionTwinService:
             missing.append("Current power")
         if not snap.personnel_available:
             missing.append("Personnel availability")
-        if not snap.spare_parts:
-            missing.append("Spare parts inventory")
+        if not snap.spare_parts or snap.parts_status == "manual_review":
+            missing.append("Spare parts readiness approval")
         if "weather_data_not_available" in snap.weather_restrictions:
             missing.append("Weather data")
         if snap.historical_success_rate is None:
@@ -622,7 +656,15 @@ class DecisionTwinService:
     async def _persist_plans(
         self, incident: Incident, plans: list[MaintenancePlan]
     ) -> None:
-        """Persist generated plans to DecisionPlan table."""
+        """Persist generated plans to DecisionPlan table.
+
+        NOTE on provenance: the legacy column ``DecisionPlan.llm_explanation`` is
+        filled with deterministic rule-engine text assembled from the scores
+        computed above — no LLM is called here. The column name is kept for
+        schema compatibility; the stored text carries an explicit source prefix
+        so downstream readers (task package, health passport, UI) cannot mistake
+        it for model-generated content.
+        """
         for plan in plans:
             dp = DecisionPlan(
                 incident_id=incident.id,
@@ -637,7 +679,9 @@ class DecisionTwinService:
                 weather_compatible=plan.weather_feasible,
                 total_score=plan.total_score,
                 is_recommended=plan.is_recommended,
+                # Rule-engine text, not an LLM completion (see docstring above).
                 llm_explanation=(
+                    "依据规则引擎的评分说明： "
                     f"Feasible: {plan.is_feasible}. "
                     f"Safety: {plan.safety_score:.0f}, "
                     f"Economic: {plan.economic_score:.0f}, "

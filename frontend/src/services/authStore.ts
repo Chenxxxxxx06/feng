@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import api from './api';
 
-interface User {
+export interface User {
   id: number;
   username: string;
   email: string;
@@ -10,6 +10,16 @@ interface User {
   api_provider: string | null;
   api_base_url: string | null;
   model_preference: string;
+}
+
+function loadStoredUser(): User | null {
+  try {
+    const raw = localStorage.getItem('user');
+    return raw ? JSON.parse(raw) as User : null;
+  } catch {
+    localStorage.removeItem('user');
+    return null;
+  }
 }
 
 interface AuthState {
@@ -25,7 +35,8 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   token: localStorage.getItem('token'),
-  user: null,
+  // Keep role-aware controls stable during the initial /auth/me refresh.
+  user: loadStoredUser(),
   initialized: false,
   loading: false,
 

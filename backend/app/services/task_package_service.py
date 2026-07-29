@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    AlarmRecord,
     DecisionPlan,
     EvidenceNode,
     FaultKnowledgeNode,
@@ -32,6 +33,7 @@ from app.models import (
     MaintenancePersonnel,
     WorkOrder,
 )
+from app.services.fault_type_resolver import resolve_fault_type
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,8 @@ class ProcedureStep:
 class TaskPackage:
     """Complete proof-carrying maintenance task package."""
     work_order_id: int = 0
+    work_order_link_source: str = "none"
+    work_order_link_confidence: float = 0.0
     incident_id: str = ""
     turbine_id: int = 0
     title: str = ""
@@ -98,8 +102,102 @@ class TaskPackageService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def resolve_work_order(
+        self,
+        incident: Incident,
+        requested_work_order_id: Optional[int] = None,
+    ) -> tuple[Optional[WorkOrder], str, float]:
+        """Resolve a work order without silently binding an unrelated record."""
+        if requested_work_order_id is not None:
+            work_order = await self.db.get(WorkOrder, requested_work_order_id)
+            if work_order is None:
+                raise ValueError(f"工单不存在: {requested_work_order_id}")
+            if work_order.turbine_id != incident.turbine_id:
+                raise ValueError("指定工单与事件风机不一致")
+            if work_order.incident_id not in (None, incident.id):
+                raise ValueError("指定工单已关联到其他事件")
+            return work_order, "explicit", 1.0
+
+        direct_result = await self.db.execute(
+            select(WorkOrder)
+            .where(
+                WorkOrder.incident_id == incident.id,
+                WorkOrder.deleted_at.is_(None),
+            )
+            .order_by(WorkOrder.created_at.desc())
+            .limit(1)
+        )
+        direct = direct_result.scalar_one_or_none()
+        if direct:
+            return direct, "incident_relation", 1.0
+
+        fault_ids_result = await self.db.execute(
+            select(AlarmRecord.fault_id).where(
+                AlarmRecord.incident_id == incident.id,
+                AlarmRecord.fault_id.is_not(None),
+            )
+        )
+        fault_ids = {int(value) for value in fault_ids_result.scalars().all() if value}
+        if fault_ids:
+            result = await self.db.execute(
+                select(WorkOrder)
+                .where(
+                    WorkOrder.turbine_id == incident.turbine_id,
+                    WorkOrder.fault_id.in_(fault_ids),
+                    WorkOrder.deleted_at.is_(None),
+                )
+                .order_by(WorkOrder.created_at.desc())
+                .limit(1)
+            )
+            linked = result.scalar_one_or_none()
+            if linked:
+                return linked, "fault_relation", 1.0
+
+        incident_fault_type = resolve_fault_type(incident.title)
+        if not incident_fault_type:
+            return None, "none", 0.0
+
+        verified_knowledge = await self.db.execute(
+            select(FaultKnowledgeNode.id).where(
+                FaultKnowledgeNode.fault_type == incident_fault_type,
+                FaultKnowledgeNode.verified == True,
+            )
+        )
+        if verified_knowledge.scalar_one_or_none() is None:
+            return None, "none", 0.0
+
+        result = await self.db.execute(
+            select(WorkOrder)
+            .where(
+                WorkOrder.turbine_id == incident.turbine_id,
+                WorkOrder.deleted_at.is_(None),
+            )
+            .order_by(WorkOrder.created_at.desc())
+            .limit(50)
+        )
+        opened_at = _as_utc(incident.opened_at or incident.created_at)
+        candidates: list[tuple[float, WorkOrder]] = []
+        for work_order in result.scalars().all():
+            if resolve_fault_type(work_order.fault_type) != incident_fault_type:
+                continue
+            created_at = _as_utc(work_order.created_at)
+            if opened_at is None or created_at is None:
+                continue
+            distance = abs((created_at - opened_at).total_seconds())
+            if distance <= timedelta(minutes=15).total_seconds():
+                candidates.append((distance, work_order))
+        if not candidates:
+            return None, "none", 0.0
+        _, linked = min(candidates, key=lambda item: (item[0], -item[1].id))
+        return linked, "fault_and_time", 0.85
+
     async def build_package(
-        self, incident: Incident, work_order: Optional[WorkOrder] = None
+        self,
+        incident: Incident,
+        work_order: Optional[WorkOrder] = None,
+        *,
+        work_order_link_source: str = "none",
+        work_order_link_confidence: float = 0.0,
     ) -> TaskPackage:
         """Build a complete maintenance task package for an incident."""
 
@@ -112,6 +210,8 @@ class TaskPackageService:
 
         if work_order:
             pkg.work_order_id = work_order.id
+            pkg.work_order_link_source = work_order_link_source
+            pkg.work_order_link_confidence = work_order_link_confidence
             pkg.title = work_order.title
             pkg.description = work_order.description or ""
             pkg.risk_level = work_order.priority or "medium"
@@ -204,12 +304,12 @@ class TaskPackageService:
 
     async def _collect_resources(self, incident: Incident, pkg: TaskPackage) -> None:
         # Skills from fault knowledge
+        fault_type = resolve_fault_type(incident.title)
         knowledge = await self.db.execute(
             select(FaultKnowledgeNode)
             .where(
-                FaultKnowledgeNode.fault_type.contains(
-                    (incident.title or "").split(" ")[0]
-                )
+                FaultKnowledgeNode.fault_type == fault_type,
+                FaultKnowledgeNode.verified == True,
             )
             .limit(3)
         )
@@ -299,12 +399,12 @@ class TaskPackageService:
         self, incident: Incident, pkg: TaskPackage
     ) -> None:
         """Build procedure steps from knowledge base or defaults."""
+        fault_type = resolve_fault_type(incident.title)
         knowledge = await self.db.execute(
             select(FaultKnowledgeNode)
             .where(
-                FaultKnowledgeNode.fault_type.contains(
-                    (incident.title or "").split(" ")[0]
-                )
+                FaultKnowledgeNode.fault_type == fault_type,
+                FaultKnowledgeNode.verified == True,
             )
             .limit(1)
         )
@@ -350,3 +450,9 @@ class TaskPackageService:
             "告警复发计数",
             "健康指数变化",
         ]
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)

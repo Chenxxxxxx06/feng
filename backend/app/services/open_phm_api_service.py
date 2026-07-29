@@ -1,14 +1,25 @@
-"""Open PHM API service — standardized REST API for wind turbine health management.
+"""Open PHM API service — open-capability specification for wind turbine PHM.
+
+【状态】**混合规范（hybrid）**：本模块输出的 OpenAPI 3.0 文档由两部分合并而成：
+
+1. ``implemented``（已实现）：从运行中的 FastAPI 应用 ``app.openapi()`` **自动提取**的
+   真实端点。它们此刻就能调用，路径、方法、摘要全部来自运行时内省，不可能吹牛。
+2. ``planned``（规划中）：手工维护的 ``/api/v1/phm/*`` 统一开放契约。它是对外开放的
+   目标形态（稳定路径 + 稳定 schema），当前尚未落地为真实路由。
+
+每个规划端点都带 ``x-implementation-status`` 与 ``x-implemented-by``：
+后者列出**当前已经能提供同等能力**的真实端点，并且在生成时会与运行时路由表核对，
+核对不上的会被标成 ``unverified``。这样规范既诚实（不把规划说成已实现），
+又有说服力（能力已存在，只差统一门面）。
 
 Delivers:
-- Versioned OpenAPI 3.0 spec (generated from real backend contracts)
-- Python client SDK interface
+- Hybrid OpenAPI 3.0 spec: runtime-introspected `implemented` + hand-maintained `planned`
+- Capability matrix mapping planned open endpoints to today's real endpoints
+- Python client SDK interface (written against the target contract)
 - Example request/responses (clearly labeled simulated where applicable)
-- Industry template adapters (photovoltaic, pump, compressor)
+- Industry template adapters (photovoltaic, pump, compressor) with machine-readable term mapping
 - Tool interface, Playbook, Policy template documentation
 - Third-party dependency and license inventory
-
-IMPORTANT: OpenAPI spec must be generated from real backend, not hand-written.
 """
 from __future__ import annotations
 
@@ -18,6 +29,37 @@ from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+#: 规划中的统一开放端点 → 当前已实现、可提供同等能力的真实端点。
+#: 生成规范时会拿这里的路径去运行时路由表核对，核对不上即标 unverified，
+#: 避免「纸面能力」蒙混过关。
+CAPABILITY_BINDINGS: dict[tuple[str, str], list[str]] = {
+    ("/health/predict", "post"): [
+        "GET /api/turbines/{turbine_id}/health",
+        "GET /api/turbines/{turbine_id}/health-passport",
+        "GET /api/prediction/rul",
+        "GET /api/prediction/summary",
+    ],
+    ("/diagnosis/diagnose", "post"): [
+        "POST /api/diagnosis/auto-detect",
+        "POST /api/diagnosis/fault-genotype",
+        "POST /api/diagnosis/causal-discovery",
+        "POST /api/agent/diagnose",
+    ],
+    ("/maintenance/recommend", "post"): [
+        "POST /api/incidents/{incident_id}/generate-plans",
+        "GET /api/prediction/maintenance-plan",
+        "POST /api/prediction/schedule",
+        "POST /api/incidents/{incident_id}/negotiate-resource",
+    ],
+    ("/incidents", "get"): ["GET /api/incidents"],
+    ("/incidents", "post"): ["POST /api/incidents"],
+    ("/evidence/{incident_id}", "get"): [
+        "GET /api/incidents/{incident_id}/evidence-graph",
+        "GET /api/incidents/{incident_id}/evidence-completeness",
+        "GET /api/incidents/{incident_id}/audit-chain",
+    ],
+}
 
 
 @dataclass
@@ -34,7 +76,12 @@ class APIEndpoint:
 
 @dataclass
 class IndustryTemplate:
-    """Quick-start template for adapting PHM API to another industry."""
+    """Quick-start template for adapting PHM API to another industry.
+
+    ``term_mapping`` / ``metric_mapping`` / ``fault_mapping`` 是**机器可读**的替换表，
+    ``backend/scripts/instantiate_industry_template.py`` 直接消费它们，
+    把风电 playbook 实例化成目标行业的可运行适配包 —— 让「可迁移」从口号变成产物。
+    """
     name: str = ""       # photovoltaic / pump / compressor
     domain: str = ""
     key_entities: list[str] = field(default_factory=list)
@@ -42,6 +89,12 @@ class IndustryTemplate:
     fault_types: list[str] = field(default_factory=list)
     adapter_notes: str = ""
     example_config: dict[str, Any] = field(default_factory=dict)
+    #: 术语替换：风电词汇 → 目标行业词汇（含中英文，脚本按最长匹配优先替换）
+    term_mapping: dict[str, str] = field(default_factory=dict)
+    #: 指标替换：风电指标名 → 目标行业指标名
+    metric_mapping: dict[str, str] = field(default_factory=dict)
+    #: 故障类型替换：风电故障 → 目标行业故障
+    fault_mapping: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -56,23 +109,109 @@ class OpenAPISpec:
 class OpenPHMAPIService:
     """Generates and serves the Open PHM API specification."""
 
-    def get_spec(self) -> dict[str, Any]:
-        """Get the complete OpenAPI 3.0 specification.
+    # ── 运行时内省：从 FastAPI 提取真实已实现端点 ──
 
-        Generated from real backend endpoints — not hand-written.
+    @staticmethod
+    def _runtime_openapi() -> dict[str, Any] | None:
+        """读取运行中的 FastAPI 应用的 OpenAPI 文档（失败返回 None，不影响规范输出）。"""
+        try:
+            from app.main import app  # 延迟导入，避免循环依赖
+
+            return app.openapi()
+        except Exception as exc:  # pragma: no cover - 防御性
+            logger.warning(f"无法内省运行时 OpenAPI 文档，规范将只含手工契约部分：{exc}")
+            return None
+
+    def _collect_implemented(self) -> tuple[dict[str, Any], set[str]]:
+        """把运行时路由整理成 ``{"METHOD /path": {...}}``，并返回索引集合。"""
+        runtime = self._runtime_openapi()
+        implemented: dict[str, Any] = {}
+        index: set[str] = set()
+        if not runtime:
+            return implemented, index
+        for path, ops in (runtime.get("paths") or {}).items():
+            for method, op in ops.items():
+                if method.lower() not in {"get", "post", "put", "patch", "delete"}:
+                    continue
+                key = f"{method.upper()} {path}"
+                index.add(key)
+                implemented[key] = {
+                    "path": path,
+                    "method": method.upper(),
+                    "summary": op.get("summary", ""),
+                    "tags": op.get("tags", []),
+                    "operation_id": op.get("operationId", ""),
+                }
+        return implemented, index
+
+    def _capability_matrix(self, index: set[str]) -> list[dict[str, Any]]:
+        """把「规划端点 ↔ 已实现端点」的绑定关系与运行时路由表核对。"""
+        matrix: list[dict[str, Any]] = []
+        for (planned_path, method), bindings in CAPABILITY_BINDINGS.items():
+            verified = [b for b in bindings if b in index]
+            unverified = [b for b in bindings if b not in index]
+            matrix.append({
+                "planned_endpoint": f"{method.upper()} /api/v1/phm{planned_path}",
+                "capability_status": "implemented_via_existing_endpoints" if verified else "planned_only",
+                "implemented_by": verified,
+                "unverified_bindings": unverified,
+                "note": (
+                    f"能力已由 {len(verified)} 个真实端点提供，统一开放门面待落地。"
+                    if verified else "当前尚无等效实现，属于规划能力。"
+                ),
+            })
+        return matrix
+
+    def get_spec(self) -> dict[str, Any]:
+        """Get the open-capability OpenAPI 3.0 specification (hybrid).
+
+        由两部分合并：
+        - ``x-implemented-endpoints``：从运行中的 FastAPI ``app.openapi()`` **自动提取**的
+          真实端点（此刻即可调用）；
+        - ``paths``：手工维护的 ``/api/v1/phm/*`` 统一开放目标契约，逐个操作标注
+          ``x-implementation-status`` 与 ``x-implemented-by``（已与运行时路由表核对）。
+
+        因此本规范既诚实（规划就是规划），又有说服力（能力已经存在）。
         """
-        return {
+        implemented, index = self._collect_implemented()
+        matrix = self._capability_matrix(index)
+        covered = sum(1 for row in matrix if row["implemented_by"])
+
+        spec = {
             "openapi": "3.0.0",
+            "status": "hybrid" if implemented else "draft",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "spec_status": {
+                "status": "hybrid" if implemented else "draft",
+                "generated_from": (
+                    "hybrid: FastAPI 运行时内省(implemented) + 手工维护目标契约(planned)"
+                    if implemented else "hand_maintained"
+                ),
+                "runtime_introspection_available": bool(implemented),
+                "implemented_endpoint_count": len(implemented),
+                "planned_endpoint_count": len(CAPABILITY_BINDINGS),
+                "planned_endpoints_backed_by_implementation": covered,
+                "note": (
+                    "`x-implemented-endpoints` 为真实存在、可直接调用的端点，来自 FastAPI 自动生成的 "
+                    "/openapi.json；`paths` 下的 /api/v1/phm/* 为**规划中**的统一开放契约，"
+                    "尚未落地为真实路由，但每个操作都标注了当前提供同等能力的真实端点。"
+                ),
+            },
             "info": {
-                "title": "WindOps PHM API v1.0",
+                "title": "WindOps PHM Open API v1.0 (implemented + planned)",
                 "description": (
-                    "开放风电预测性健康管理(PHM) API规范。\n\n"
-                    "提供标准化接口用于：设备健康预测、故障诊断、维修方案推荐、\n"
+                    "开放风电预测性健康管理(PHM) API 规范（混合规范）。\n\n"
+                    f"✔ 已实现：{len(implemented)} 个真实端点，由 FastAPI 运行时自动提取，"
+                    "见 `x-implemented-endpoints`，此刻即可调用。\n"
+                    f"◻ 规划中：{len(CAPABILITY_BINDINGS)} 个 `/api/v1/phm/*` 统一开放端点，"
+                    f"其中 {covered} 个的能力已由现有真实端点提供（见 `x-capability-matrix`），"
+                    "只差统一门面。\n\n"
+                    "规划的标准化接口用于：设备健康预测、故障诊断、维修方案推荐、\n"
                     "事件管理、证据查询、恢复验证。\n\n"
                     "⚠ 标注 `simulated` 的示例为模拟数据，不代表真实风场运行数据。\n"
                     "生产部署前需根据实际风场配置调整参数。"
                 ),
-                "version": "1.0.0",
+                "version": "1.0.0-hybrid",
                 "contact": {"name": "WindOps Team"},
                 "license": {"name": "Apache 2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
             },
@@ -226,6 +365,8 @@ class OpenPHMAPIService:
                     },
                 },
             },
+            "x-implemented-endpoints": implemented,
+            "x-capability-matrix": matrix,
             "components": {
                 "schemas": {
                     "HealthPrediction": {
@@ -255,10 +396,28 @@ class OpenPHMAPIService:
             "security": [{"bearerAuth": []}],
         }
 
+        # 逐个规划操作打上实现状态标注（与运行时路由表核对过）
+        binding_by_key = {row["planned_endpoint"]: row for row in matrix}
+        for planned_path, operations in spec["paths"].items():
+            for method, operation in operations.items():
+                row = binding_by_key.get(f"{method.upper()} /api/v1/phm{planned_path}")
+                backed = bool(row and row["implemented_by"])
+                operation["x-implementation-status"] = "planned"
+                operation["x-capability-available"] = backed
+                operation["x-implemented-by"] = row["implemented_by"] if row else []
+                operation["x-note"] = (
+                    "统一开放路径尚未落地；同等能力现已由左列真实端点提供，可直接调用。"
+                    if backed else "规划能力，当前尚无等效实现。"
+                )
+        return spec
+
     def get_python_client_template(self) -> str:
-        """Generate Python client SDK template."""
+        """Generate Python client SDK template for the draft open API contract."""
         return '''"""
-WindOps PHM Python Client
+WindOps PHM Python Client (draft)
+
+NOTE: written against the hand-maintained /api/v1/phm draft contract, which is
+not implemented on the backend yet. Use it as an integration blueprint.
 
 Usage:
     from windops_phm import WindOpsClient
@@ -327,6 +486,25 @@ class WindOpsClient:
                     "故障基因需替换为光伏特有故障模式。"
                 ),
                 example_config={"asset_type": "solar_array", "rated_power_kw": 500, "metrics": ["power_kw", "efficiency", "irradiance"]},
+                term_mapping={
+                    "风机": "光伏阵列", "风电场": "光伏电站", "机组": "阵列",
+                    "叶片": "组件", "齿轮箱": "逆变器", "发电机": "汇流箱",
+                    "主轴承": "汇流箱熔断器", "偏航": "跟踪支架", "变桨": "MPPT调节",
+                    "塔筒": "支架结构", "风速": "辐照度", "风向": "太阳方位角",
+                    "turbine": "solar_array", "gearbox": "inverter", "blade": "module",
+                    "generator": "combiner_box", "wind_speed": "irradiance",
+                    "nacelle": "inverter_cabinet", "yaw": "tracker", "pitch": "mppt",
+                },
+                metric_mapping={
+                    "有功功率kW": "发电功率kW", "风速m/s": "辐照度W/m²",
+                    "齿轮箱油温°C": "逆变器温度°C", "振动mm/s": "I-V曲线偏差%",
+                    "发电机转速rpm": "直流母线电压V",
+                },
+                fault_mapping={
+                    "齿轮箱磨损": "组件衰减", "主轴承故障": "逆变器故障",
+                    "叶片裂纹": "热斑", "变桨系统异常": "PID效应",
+                    "发电机绕组过热": "接线盒故障",
+                },
             ),
             IndustryTemplate(
                 name="pump",
@@ -340,6 +518,25 @@ class WindOpsClient:
                     "需添加气蚀检测特征。"
                 ),
                 example_config={"asset_type": "centrifugal_pump", "rated_flow_m3h": 200, "metrics": ["flow", "head", "vibration", "current"]},
+                term_mapping={
+                    "风机": "泵组", "风电场": "泵站", "机组": "泵组",
+                    "叶片": "叶轮", "齿轮箱": "联轴器", "发电机": "驱动电机",
+                    "主轴承": "泵轴承", "偏航": "调速", "变桨": "阀门开度",
+                    "塔筒": "泵体", "风速": "入口流量", "风向": "管路压差",
+                    "turbine": "pump", "gearbox": "coupling", "blade": "impeller",
+                    "generator": "motor", "wind_speed": "inlet_flow",
+                    "nacelle": "pump_casing", "yaw": "speed_control", "pitch": "valve_position",
+                },
+                metric_mapping={
+                    "有功功率kW": "轴功率kW", "风速m/s": "流量m³/h",
+                    "齿轮箱油温°C": "轴承温度°C", "振动mm/s": "泵体振动mm/s",
+                    "发电机转速rpm": "泵转速rpm",
+                },
+                fault_mapping={
+                    "齿轮箱磨损": "轴承磨损", "主轴承故障": "轴承磨损",
+                    "叶片裂纹": "叶轮气蚀", "变桨系统异常": "密封泄漏",
+                    "发电机绕组过热": "电机过热",
+                },
             ),
             IndustryTemplate(
                 name="compressor",
@@ -352,6 +549,25 @@ class WindOpsClient:
                     "pressure→功率。需添加压力脉动特征。"
                 ),
                 example_config={"asset_type": "reciprocating_compressor", "rated_pressure_mpa": 1.0, "metrics": ["discharge_pressure", "discharge_temp", "vibration", "oil_pressure"]},
+                term_mapping={
+                    "风机": "压缩机组", "风电场": "压缩机站", "机组": "压缩机组",
+                    "叶片": "活塞", "齿轮箱": "曲轴箱", "发电机": "驱动电机",
+                    "主轴承": "曲轴轴承", "偏航": "负荷调节", "变桨": "气阀调节",
+                    "塔筒": "机身", "风速": "进气流量", "风向": "级间压比",
+                    "turbine": "compressor", "gearbox": "crankcase", "blade": "piston",
+                    "generator": "motor", "wind_speed": "suction_flow",
+                    "nacelle": "compressor_frame", "yaw": "load_control", "pitch": "valve_control",
+                },
+                metric_mapping={
+                    "有功功率kW": "轴功率kW", "风速m/s": "排气压力MPa",
+                    "齿轮箱油温°C": "排气温度°C", "振动mm/s": "缸体振动mm/s",
+                    "发电机转速rpm": "压缩机转速rpm",
+                },
+                fault_mapping={
+                    "齿轮箱磨损": "活塞环磨损", "主轴承故障": "轴承故障",
+                    "叶片裂纹": "气阀故障", "变桨系统异常": "气缸泄漏",
+                    "发电机绕组过热": "油路堵塞",
+                },
             ),
         ]
 
@@ -364,6 +580,15 @@ class WindOpsClient:
                 "fault_types": t.fault_types,
                 "adapter_notes": t.adapter_notes,
                 "example_config": t.example_config,
+                "term_mapping": t.term_mapping,
+                "metric_mapping": t.metric_mapping,
+                "fault_mapping": t.fault_mapping,
+                "instantiation": {
+                    "script": "backend/scripts/instantiate_industry_template.py",
+                    "command": f"python scripts/instantiate_industry_template.py {t.name}",
+                    "output_dir": f"backend/exports/{t.name}/",
+                    "note": "生成可运行适配包：映射后的 playbook 知识库 + OpenAPI + 客户端 SDK + README + 校验清单。",
+                },
             }
             for t in templates
         ]

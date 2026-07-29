@@ -44,8 +44,11 @@ api.interceptors.response.use(
         // Use replace to avoid back-button returning to broken state
         window.location.replace('/login');
 
-        // Never resolve — we're navigating away
-        return new Promise(() => {});
+        // Reject with a marked error so in-flight callers can settle their
+        // loading state; callers may check isAuthRedirect to stay silent
+        // (the page is already navigating to /login).
+        (err as { isAuthRedirect?: boolean }).isAuthRedirect = true;
+        return Promise.reject(err);
       }
     }
 

@@ -9,10 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from typing import Any, Optional
 
 from app.database import get_db
-from app.models import FaultKnowledgeNode, Turbine, Fault, WorkOrder
-from app.api.auth import get_current_user
-
-from app.api.auth import get_current_user
+from app.models import FaultKnowledgeNode, Turbine, Fault, WorkOrder, User
+from app.api.auth import get_current_user, require_role
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -119,7 +117,11 @@ async def search(q: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/knowledge-base")
-async def create_knowledge_node(data: KnowledgeNodeCreate, db: AsyncSession = Depends(get_db)):
+async def create_knowledge_node(
+    data: KnowledgeNodeCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("operator")),
+):
     existing = await db.execute(
         select(FaultKnowledgeNode).where(FaultKnowledgeNode.fault_type == data.fault_type)
     )
@@ -138,6 +140,17 @@ async def create_knowledge_node(data: KnowledgeNodeCreate, db: AsyncSession = De
     return _node_to_dict(node)
 
 
+@router.get("/knowledge-base/categories")
+async def get_categories(db: AsyncSession = Depends(get_db)):
+    """获取分类统计"""
+    result = await db.execute(select(FaultKnowledgeNode))
+    nodes = result.scalars().all()
+    cats: dict[str, int] = {}
+    for n in nodes:
+        cats[n.category] = cats.get(n.category, 0) + 1
+    return {"categories": [{"name": k, "count": v} for k, v in cats.items()]}
+
+
 @router.get("/knowledge-base/{node_id}")
 async def get_detail(node_id: int, db: AsyncSession = Depends(get_db)):
     """获取单个故障详情"""
@@ -150,19 +163,12 @@ async def get_detail(node_id: int, db: AsyncSession = Depends(get_db)):
     return _node_to_dict(node)
 
 
-@router.get("/knowledge-base/categories")
-async def get_categories(db: AsyncSession = Depends(get_db)):
-    """获取分类统计"""
-    result = await db.execute(select(FaultKnowledgeNode))
-    nodes = result.scalars().all()
-    cats: dict[str, int] = {}
-    for n in nodes:
-        cats[n.category] = cats.get(n.category, 0) + 1
-    return {"categories": [{"name": k, "count": v} for k, v in cats.items()]}
-
-
 @router.patch("/knowledge-base/{node_id}/verify")
-async def verify_node(node_id: int, db: AsyncSession = Depends(get_db)):
+async def verify_node(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("engineer")),
+):
     node = await db.get(FaultKnowledgeNode, node_id)
     if not node:
         raise HTTPException(404, "节点不存在")
@@ -173,7 +179,11 @@ async def verify_node(node_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/knowledge-base/{node_id}/reject")
-async def reject_node(node_id: int, db: AsyncSession = Depends(get_db)):
+async def reject_node(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("engineer")),
+):
     node = await db.get(FaultKnowledgeNode, node_id)
     if not node:
         raise HTTPException(404, "Knowledge node not found")
@@ -187,6 +197,7 @@ async def update_knowledge_node(
     node_id: int,
     data: KnowledgeNodeUpdate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("operator")),
 ):
     node = await db.get(FaultKnowledgeNode, node_id)
     if not node:
@@ -215,7 +226,11 @@ async def update_knowledge_node(
 
 
 @router.delete("/knowledge-base/{node_id}")
-async def delete_knowledge_node(node_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_knowledge_node(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("engineer")),
+):
     node = await db.get(FaultKnowledgeNode, node_id)
     if not node:
         raise HTTPException(404, "节点不存在")
@@ -408,42 +423,68 @@ async def get_knowledge_graph(
 
             # ── Symptoms ──
             for s in (fn.symptoms or []):
-                sid = f"symptom_{fn.id}_{s['indicator'][:20]}"
-                add_node(sid, s["indicator"], "symptom", "🔍", 24,
+                if not isinstance(s, dict):
+                    s = {"indicator": str(s)}
+                indicator = str(s.get("indicator") or "")
+                if not indicator:
+                    continue
+                sid = f"symptom_{fn.id}_{indicator[:20]}"
+                add_node(sid, indicator, "symptom", "🔍", 24,
                          {"threshold": s.get("threshold", ""), "unit": s.get("unit", "")})
                 add_edge(fid, sid, s.get("threshold", ""))
 
             # ── Root causes ──
             for rc in (fn.root_causes or []):
+                if not isinstance(rc, str):
+                    rc = str(rc)
                 rid = f"rootcause_{fn.id}_{rc[:20]}"
                 add_node(rid, rc, "root_cause", "🎯", 24)
                 add_edge(fid, rid, "导致")
 
             # ── Solutions ──
             for sol in (fn.solutions or []):
-                sid2 = f"solution_{fn.id}_{sol['action'][:20]}"
+                if not isinstance(sol, dict):
+                    sol = {"action": str(sol)}
+                action = str(sol.get("action") or "")
+                if not action:
+                    continue
+                sid2 = f"solution_{fn.id}_{action[:20]}"
                 diff = sol.get("difficulty", "")
-                add_node(sid2, sol["action"], "solution", "🔧", 26,
+                add_node(sid2, action, "solution", "🔧", 26,
                          {"difficulty": diff, "downtime_hours": sol.get("downtime_hours", 0)})
                 add_edge(fid, sid2, f"{diff} · {sol.get('downtime_hours', 0)}h")
 
             # ── Spare parts ──
             for sp in (fn.spare_parts or []):
-                spid = f"part_{sp['name'][:24]}"
-                add_node(spid, sp["name"], "spare_part", "📦", 24,
+                if not isinstance(sp, dict):
+                    sp = {"name": str(sp)}
+                sp_name = str(sp.get("name") or "")
+                if not sp_name:
+                    continue
+                spid = f"part_{sp_name[:24]}"
+                add_node(spid, sp_name, "spare_part", "📦", 24,
                          {"quantity": sp.get("quantity", 1), "est_cost": sp.get("est_cost", 0)})
                 add_edge(fid, spid, f"x{sp.get('quantity', 1)}")
 
             # ── Related faults ──
             for rf in (fn.related_faults or []):
+                if not isinstance(rf, dict):
+                    continue
                 target_id = name_to_id.get(rf.get("name", ""))
                 if target_id and target_id != fid:
-                    add_edge(fid, target_id, f"伴生{int(rf['probability'] * 100)}%")
+                    prob = rf.get("probability")
+                    label = f"伴生{int(prob * 100)}%" if isinstance(prob, (int, float)) else "伴生"
+                    add_edge(fid, target_id, label)
 
             # ── Historical cases ──
             for c in (fn.cases or []):
-                cid = f"case_{fn.id}_{c['turbine'][:12]}"
-                add_node(cid, f"{c['turbine']}\n{c['date']}", "case_record", "📖", 24,
+                if not isinstance(c, dict):
+                    continue
+                c_turbine = str(c.get("turbine") or "")
+                if not c_turbine:
+                    continue
+                cid = f"case_{fn.id}_{c_turbine[:12]}"
+                add_node(cid, f"{c_turbine}\n{c.get('date', '')}", "case_record", "📖", 24,
                          {"resolution": c.get("resolution", ""),
                           "total_cost": c.get("total_cost", 0),
                           "downtime_days": c.get("downtime_days", 0)})

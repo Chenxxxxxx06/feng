@@ -5,9 +5,15 @@
 # --- Environment ---
 .env
 .env.local
+.env.*
 .env.*.local
 *.env
+**/.env
+**/.env.*
+version/**/.env
+version/**/.env.*
 !.env.example
+!**/.env.example
 backend/.env
 
 # --- Python ---
@@ -115,4 +121,11 @@ handoff_packages/
 API_KEYS_PLACEHOLDER.txt
 *.pem
 *.key
+*.p12
+*.pfx
+*.jks
 frontend/tsconfig.tsbuildinfo
+
+# --- W3: 运行时生成的密钥与导出产物 ---
+backend/.keys/
+backend/exports/playbook/

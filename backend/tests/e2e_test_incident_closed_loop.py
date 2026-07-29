@@ -8,8 +8,12 @@ Each test is designed to be idempotent and produce stable results across
 consecutive runs.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import AsyncClient
+
+from app.models import Incident, SCADARecord, WorkOrder
 
 
 class TestIncidentClosedLoop:
@@ -17,7 +21,8 @@ class TestIncidentClosedLoop:
 
     @pytest.mark.asyncio
     async def test_full_closed_loop(
-        self, client: AsyncClient, auth_headers, test_turbine
+        self, client: AsyncClient, auth_headers, test_turbine,
+        test_rul_prediction, db_session
     ):
         """Complete demo scenario: event enters, gets diagnosed, decisions made,
         policy enforced, resolved, and replayed."""
@@ -39,6 +44,37 @@ class TestIncidentClosedLoop:
         assert inc["stage"] == "detected"
         assert inc["status"] == "open"
         assert inc["severity"] == "high"
+
+        # Recovery verification must use an actual completed maintenance order.
+        # Backdate this historical E2E scenario so a full observation window exists.
+        now = datetime.now(timezone.utc)
+        incident_row = await db_session.get(Incident, incident_db_id)
+        incident_row.opened_at = now - timedelta(hours=30)
+        db_session.add(WorkOrder(
+            turbine_id=test_turbine.id,
+            incident_id=incident_db_id,
+            title="齿轮箱轴承维修 - E2E测试",
+            status="completed",
+            priority="high",
+            completed_at=now - timedelta(hours=25),
+        ))
+        maintenance_end = now - timedelta(hours=25)
+        for hours, gearbox_temp, bearing_temp, power_kw in [
+            (-36, 72.0, 65.0, 1500.0),
+            (-12, 70.0, 63.0, 1520.0),
+            (6, 56.0, 50.0, 1800.0),
+            (24, 55.0, 49.0, 1820.0),
+        ]:
+            db_session.add(
+                SCADARecord(
+                    turbine_id=test_turbine.id,
+                    timestamp=maintenance_end + timedelta(hours=hours),
+                    gearbox_temperature_c=gearbox_temp,
+                    bearing_temperature_c=bearing_temp,
+                    power_kw=power_kw,
+                )
+            )
+        await db_session.commit()
 
         # ── Step 2: Alarm storm compression ──
         r = await client.post(
@@ -285,8 +321,15 @@ class TestIncidentClosedLoop:
         assert r.status_code == 201
         inc_id = r.json()["id"]
 
-        # Advance through stages to verifying
-        for target in ("awaiting_approval", "executing", "verifying"):
+        # Advance through every legal stage to verifying
+        for target in (
+            "correlated",
+            "diagnosing",
+            "decision_ready",
+            "awaiting_approval",
+            "executing",
+            "verifying",
+        ):
             r = await client.post(
                 f"/api/incidents/{inc_id}/transition",
                 headers=auth_headers,

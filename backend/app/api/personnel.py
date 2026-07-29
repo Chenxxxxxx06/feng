@@ -3,6 +3,8 @@
 Provides CRUD operations for maintenance personnel.
 """
 
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, or_, select
@@ -10,7 +12,7 @@ from sqlalchemy import func, or_, select
 from app.database import get_db
 from app.models import User, WorkOrder
 from app.schemas import PersonnelCreate, PersonnelUpdate, PersonnelResponse
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_role
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -107,12 +109,13 @@ async def list_personnel(
     return personnel
 
 
-@router.post("/", response_model=PersonnelResponse, status_code=201)
+@router.post("/", status_code=201)
 async def create_personnel(
     data: PersonnelCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("engineer")),
 ):
-    """Create new personnel (user with technician role)."""
+    """Create new personnel (user with technician role). Requires engineer+ role."""
     existing = await db.execute(
         select(User).where(or_(User.username == data.name, User.email == data.email))
     )
@@ -120,10 +123,12 @@ async def create_personnel(
         raise HTTPException(status_code=400, detail="Personnel name or email already exists")
 
     from app.core.security import hash_password
+    # Random one-time password; returned once in the response and never stored in plain text
+    initial_password = secrets.token_urlsafe(9)
     user = User(
         username=data.name,
         email=data.email,
-        password_hash=hash_password("temp123"),  # Default password
+        password_hash=hash_password(initial_password),
         role="technician",
     )
     _set_personnel_profile(user, skills=data.skills, region=data.region)
@@ -131,7 +136,8 @@ async def create_personnel(
     await db.commit()
     await db.refresh(user)
 
-    return await _to_personnel_response(user, db)
+    response = await _to_personnel_response(user, db)
+    return {**response.model_dump(), "initial_password": initial_password}
 
 
 @router.put("/{personnel_id}", response_model=PersonnelResponse)
@@ -139,8 +145,9 @@ async def update_personnel(
     personnel_id: int,
     data: PersonnelUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("engineer")),
 ):
-    """Update personnel information."""
+    """Update personnel information. Requires engineer+ role."""
     result = await db.execute(
         select(User).where(User.id == personnel_id, User.role == "technician")
     )
@@ -178,8 +185,9 @@ async def update_personnel(
 async def delete_personnel(
     personnel_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("engineer")),
 ):
-    """Deactivate personnel (soft delete)."""
+    """Deactivate personnel (soft delete). Requires engineer+ role."""
     result = await db.execute(
         select(User).where(User.id == personnel_id, User.role == "technician")
     )

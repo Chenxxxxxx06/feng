@@ -67,10 +67,24 @@ async def resolve_turbine_by_ref(db: AsyncSession, turbine_ref: str | None) -> E
     if not normalized:
         return EntityResolution(entity=None, candidates=[], normalized_ref=None, reason="missing_turbine_ref")
 
-    exact = await db.execute(select(Turbine).where(Turbine.name == normalized))
-    found = exact.scalar_one_or_none()
-    if found:
-        return EntityResolution(entity=found, candidates=[found], normalized_ref=normalized, reason="exact")
+    exact = await db.execute(
+        select(Turbine).where(Turbine.name == normalized).order_by(Turbine.id.asc())
+    )
+    exact_matches = list(exact.scalars().all())
+    if len(exact_matches) == 1:
+        return EntityResolution(
+            entity=exact_matches[0],
+            candidates=exact_matches,
+            normalized_ref=normalized,
+            reason="exact",
+        )
+    if len(exact_matches) > 1:
+        return EntityResolution(
+            entity=None,
+            candidates=exact_matches[:5],
+            normalized_ref=normalized,
+            reason="ambiguous",
+        )
 
     all_result = await db.execute(select(Turbine).order_by(Turbine.name.asc()))
     turbines = list(all_result.scalars().all())

@@ -1,4 +1,11 @@
-"""Agent red team testing suite — inject anomalies, auto-score responses.
+"""Agent red team scenario assessment suite — auto-score responses to failure modes.
+
+【状态】evaluation-only（`injection_mode = "assessment_only"`）：本套件**不会真的向
+运行系统注入故障**。每个场景只记录一组"如果发生会是什么样"的注入参数
+(`injection_params`)，随后基于数据库中**真实留存**的 trace span、事件状态、证据节点、
+策略判定与告警记录来判定系统是否已表现出期望行为并打分。
+因此它衡量的是"系统当前对该失效模式的应对证据"，而非一次真实的破坏性演练。
+真实注入需要沙箱化的可写演练环境，属于后续工作。
 
 8+ scenarios covering industrial Agent failure modes:
 - Sensor offline
@@ -11,11 +18,12 @@
 - Insufficient data
 
 Each scenario:
-1. Saves execution snapshot
-2. Injects anomaly into sandbox context
+1. Saves execution snapshot (incident stage/status/verification)
+2. Records the scenario's injection parameters — descriptive only, nothing is
+   written to the running system
 3. Records expected vs actual behavior
 4. Auto-scores from trace/state/output
-5. Auto-restores environment state
+5. Environment restore is a no-op (nothing was mutated)
 6. Generates reproducible report
 
 Scores are computed from real system behavior, not hardcoded.
@@ -57,7 +65,9 @@ class RedTeamSession:
     incident_id: str = ""
     # Pre-injection snapshot
     pre_snapshot: dict[str, Any] = field(default_factory=dict)
-    # Injection
+    # Injection — descriptive only. "assessment_only" means the parameters below
+    # describe the scenario but are NOT written into the running system.
+    injection_mode: str = "assessment_only"
     injected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     injection_params: dict[str, Any] = field(default_factory=dict)
     # Post-injection observation
@@ -77,6 +87,7 @@ class RedTeamSession:
 class RedTeamReport:
     """Complete red team test report."""
     report_id: str = field(default_factory=lambda: f"RTR-{uuid.uuid4().hex[:8]}")
+    injection_mode: str = "assessment_only"
     sessions: list[RedTeamSession] = field(default_factory=list)
     total_score: int = 0
     max_total_score: int = 0
@@ -252,7 +263,12 @@ class RedTeamService:
     async def run_scenario(
         self, incident_id: str, scenario_key: str
     ) -> RedTeamSession:
-        """Run one red team scenario against an incident."""
+        """Assess one red team scenario against an incident.
+
+        Assessment-only: the scenario's injection parameters are recorded for
+        traceability, but no fault is written into the running system. Scoring
+        reads the incident's real persisted behaviour (see `_evaluate_rule`).
+        """
         scenario = RED_TEAM_SCENARIOS.get(scenario_key)
         if scenario is None:
             raise ValueError(f"Unknown scenario: {scenario_key}")
@@ -266,13 +282,14 @@ class RedTeamService:
             # 1. Save pre-injection snapshot
             session.pre_snapshot = await self._save_snapshot(incident_id)
 
-            # 2. Inject anomaly (simulated — modifies context for scoring)
+            # 2. Record the scenario's injection parameters — descriptive only,
+            #    nothing is written into the running system (assessment_only).
             session.injection_params = self._get_injection_params(scenario_key)
 
             # 3. Score the scenario based on expected behaviors
             session = await self._score_scenario(session, scenario)
 
-            # 4. Restore (no-op for read-only scenarios)
+            # 4. Restore is a no-op: no state was mutated
             session.restored = True
 
         except Exception as e:
@@ -333,7 +350,11 @@ class RedTeamService:
         return {}
 
     def _get_injection_params(self, scenario_key: str) -> dict[str, Any]:
-        """Get injection parameters for a scenario."""
+        """Describe the anomaly a scenario stands for.
+
+        These values document the hypothetical fault; they are reported for
+        traceability and are never applied to sensors, LLM calls or inventory.
+        """
         params = {
             "sensor_offline": {"sensor": "gearbox_vibration_rms", "action": "remove"},
             "conflicting_sensors": {"sensor_a_value": 4.5, "sensor_b_value": 14.8},

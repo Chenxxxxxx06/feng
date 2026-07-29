@@ -39,6 +39,7 @@ from app.models import (
     SCADARecord,
     Turbine,
     VibrationData,
+    WorkOrder,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,37 @@ class RecoveryVerificationService:
 
         # Determine time windows
         now = datetime.now(timezone.utc)
-        maintenance_end = incident.updated_at or now
+        work_order = await self._resolve_completed_work_order(incident, now)
+        if work_order is None:
+            missing_link_metric = MetricComparison(
+                metric_name="Completed Work Order Link",
+                unit="boolean",
+                pre_value=None,
+                post_value=None,
+                threshold=1.0,
+                passed=False,
+            )
+            incident.verification_status = VerificationStatus.INSUFFICIENT_DATA.value
+            await self.db.flush()
+            return RecoveryCertificate(
+                certificate_id=certificate_id,
+                incident_id=incident.incident_id,
+                verification_status=VerificationStatus.INSUFFICIENT_DATA,
+                baseline_window=None,
+                observation_window=None,
+                metrics=[missing_link_metric],
+                algorithm="robust_zscore_mad",
+                algorithm_version="1.1.0",
+                data_sources=[],
+                observation_hours=0.0,
+                minimum_hours_required=float(observation_hours),
+                remaining_risks=[
+                    "事件未关联已完成工单，无法确定维护完成时间并建立前后对比窗口。"
+                ],
+                evidence_hash=self._compute_certificate_hash([missing_link_metric]),
+            )
+
+        maintenance_end = work_order.completed_at
         # Normalize to aware datetime (SQLite stores naive UTC)
         if maintenance_end.tzinfo is None:
             maintenance_end = maintenance_end.replace(tzinfo=timezone.utc)
@@ -153,7 +184,7 @@ class RecoveryVerificationService:
             observation_window=(observation_start, observation_end),
             metrics=metrics,
             algorithm="robust_zscore_mad",
-            algorithm_version="1.0.0",
+            algorithm_version="1.1.0",
             data_sources=["scada", "vibration", "rul", "health_index"],
             observation_hours=observation_actual_hours,
             minimum_hours_required=float(observation_hours),
@@ -168,6 +199,30 @@ class RecoveryVerificationService:
         return certificate
 
     # ── Metric comparisons ──
+
+    async def _resolve_completed_work_order(
+        self,
+        incident: Incident,
+        now: datetime,
+    ) -> Optional[WorkOrder]:
+        """Resolve only an explicitly incident-linked, completed work order."""
+        opened_at = incident.opened_at or incident.created_at
+        stmt = (
+            select(WorkOrder)
+            .where(
+                WorkOrder.incident_id == incident.id,
+                WorkOrder.turbine_id == incident.turbine_id,
+                WorkOrder.status.in_(["completed", "closed"]),
+                WorkOrder.completed_at.is_not(None),
+                WorkOrder.completed_at <= now,
+                WorkOrder.deleted_at.is_(None),
+            )
+            .order_by(WorkOrder.completed_at.desc())
+            .limit(1)
+        )
+        if opened_at is not None:
+            stmt = stmt.where(WorkOrder.completed_at >= opened_at)
+        return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def _compare_vibration(
         self,
@@ -464,8 +519,21 @@ class RecoveryVerificationService:
         required_hours: int,
     ) -> VerificationStatus:
         """Determine overall verification status."""
-        # Check data availability
+        # A recovery decision needs at least one paired physical signal from
+        # before and after maintenance. Current HI/RUL and a zero recurrence
+        # count alone are not proof of recovery.
         if not metrics or all(m.pre_value is None and m.post_value is None for m in metrics):
+            return VerificationStatus.INSUFFICIENT_DATA
+        paired_physical_metrics = [
+            metric
+            for metric in metrics
+            if metric.pre_value is not None
+            and metric.post_value is not None
+            and metric.metric_name.startswith(
+                ("Vibration RMS", "Gearbox Temperature", "Bearing Temperature", "Power Output")
+            )
+        ]
+        if not paired_physical_metrics:
             return VerificationStatus.INSUFFICIENT_DATA
 
         # Count failures

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../services/api';
 import type { AISummary } from '../../types';
+import ExecutionChainPanel from '../AgentCockpit/ExecutionChainPanel';
 
 interface Props {
   pageType: string;
@@ -19,9 +20,6 @@ interface AIProviderConfig {
 }
 
 function fallbackProviderModels(provider?: AIProviderConfig | null) {
-  const key = provider?.provider?.toLowerCase() || '';
-  if (key === 'qwen' || key === 'dashscope') return ['qwen-plus', 'qwen-turbo', 'qwen3.6-flash'];
-  if (key === 'deepseek') return ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash'];
   return [provider?.default_model].filter(Boolean) as string[];
 }
 
@@ -40,6 +38,9 @@ const SUMMARY_ERROR_TITLES: Record<string, string> = {
   network_error: '无法连接AI供应商',
   upstream_unknown: 'AI调用失败',
 };
+
+/** 双栏阈值：容器宽度达到该值才并排显示对话与执行链 */
+const TWO_COLUMN_MIN_WIDTH = 560;
 
 function buildClientSummaryError(error: any, provider?: AIProviderConfig | null, model?: string): AISummary {
   const responseData = error?.response?.data || {};
@@ -72,6 +73,22 @@ export default function AIPanel({ pageType, pageData }: Props) {
   const [providers, setProviders] = useState<AIProviderConfig[]>([]);
   const [providerId, setProviderId] = useState('');
   const [model, setModel] = useState('');
+
+  // 玻璃驾驶舱：窄容器降级为分页签，宽容器并排双栏
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [isWide, setIsWide] = useState(false);
+  const [activeView, setActiveView] = useState<'summary' | 'chain'>('summary');
+
+  useEffect(() => {
+    const element = shellRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect?.width || 0;
+      setIsWide(width >= TWO_COLUMN_MIN_WIDTH);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const availableProviders = useMemo(() => providers.filter((provider) => (
     provider.enabled && provider.last_test_status !== 'error' && (provider.has_api_key || provider.provider === 'ollama')
@@ -133,8 +150,8 @@ export default function AIPanel({ pageType, pageData }: Props) {
       .finally(() => setLoading(false));
   }, [pageType, pageData, providerId, model, selectedProvider]);
 
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden p-3">
+  const summaryColumn = (
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex shrink-0 items-center gap-1.5">
         <span className="text-accent-cyan text-xs">⚡</span>
         <h4 className="text-xs font-medium text-text-secondary">AI 智能总结</h4>
@@ -158,7 +175,9 @@ export default function AIPanel({ pageType, pageData }: Props) {
           disabled={!selectedProvider && modelOptions.length === 0}
           className="min-w-0 rounded border border-border-default bg-bg-secondary px-2 py-1 text-[10px] text-text-primary focus:border-accent-cyan focus:outline-none disabled:opacity-50"
         >
-          {modelOptions.length === 0 && <option value="">默认模型</option>}
+          {modelOptions.length === 0 && (
+            <option value="">{selectedProvider ? '未配置模型，请在AI设置中配置' : '默认模型'}</option>
+          )}
           {modelOptions.map((item) => (
             <option key={item} value={item}>{item}</option>
           ))}
@@ -166,62 +185,98 @@ export default function AIPanel({ pageType, pageData }: Props) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-      {!triggered ? (
-        <button
-          onClick={fetchSummary}
-          className="w-full rounded border border-accent-cyan/40 bg-accent-cyan/10 px-3 py-2 text-xs text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
-        >
-          生成 AI 总结
-        </button>
-      ) : loading ? (
-        <p className="text-xs text-text-muted animate-pulse">分析中...</p>
-      ) : summary ? (
-        <div className="space-y-2">
-          {summary.status === 'error' && (
-            <div className="rounded border border-accent-red/30 bg-accent-red/10 p-2 text-[10px] text-text-secondary">
-              <p className="mb-1 font-medium text-accent-red">
-                {SUMMARY_ERROR_TITLES[summary.error_code || ''] || 'AI总结生成失败'}
-              </p>
-              <p className="leading-4 text-accent-red/90">{summary.error_message || '未返回具体错误原因。'}</p>
-              <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[9px] text-text-muted">
-                <span>错误码</span><span>{summary.error_code || '-'}</span>
-                <span>模型</span><span className="truncate">{summary.model_status?.model || model || '-'}</span>
-                <span>供应商</span><span className="truncate">{summary.model_status?.provider || selectedProvider?.display_name || selectedProvider?.provider || '-'}</span>
-                <span>密钥</span><span>{summary.model_status?.has_api_key === false ? '未配置' : '已配置/未知'}</span>
+        {!triggered ? (
+          <button
+            onClick={fetchSummary}
+            className="w-full rounded border border-accent-cyan/40 bg-accent-cyan/10 px-3 py-2 text-xs text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
+          >
+            生成 AI 总结
+          </button>
+        ) : loading ? (
+          <p className="text-xs text-text-muted animate-pulse">分析中...</p>
+        ) : summary ? (
+          <div className="space-y-2">
+            {summary.status === 'error' && (
+              <div className="rounded border border-accent-red/30 bg-accent-red/10 p-2 text-[10px] text-text-secondary">
+                <p className="mb-1 font-medium text-accent-red">
+                  {SUMMARY_ERROR_TITLES[summary.error_code || ''] || 'AI总结生成失败'}
+                </p>
+                <p className="leading-4 text-accent-red/90">{summary.error_message || '未返回具体错误原因。'}</p>
+                <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[9px] text-text-muted">
+                  <span>错误码</span><span>{summary.error_code || '-'}</span>
+                  <span>模型</span><span className="truncate">{summary.model_status?.model || model || '-'}</span>
+                  <span>供应商</span><span className="truncate">{summary.model_status?.provider || selectedProvider?.display_name || selectedProvider?.provider || '-'}</span>
+                  <span>密钥</span><span>{summary.model_status?.has_api_key === false ? '未配置' : '已配置/未知'}</span>
+                </div>
+                <p className="mt-2 text-[10px] text-text-muted">以下为本地规则临时总结。</p>
               </div>
-              <p className="mt-2 text-[10px] text-text-muted">以下为本地规则临时总结。</p>
+            )}
+            <div>
+              <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">关键结论</p>
+              <ul className="space-y-1">
+                {summary.conclusions.map((c, i) => (
+                  <li key={i} className="text-xs text-text-primary flex gap-1.5">
+                    <span className="text-accent-blue flex-shrink-0">{i + 1}.</span>
+                    {c}
+                  </li>
+                ))}
+              </ul>
             </div>
-          )}
-          <div>
-            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">关键结论</p>
-            <ul className="space-y-1">
-              {summary.conclusions.map((c, i) => (
-                <li key={i} className="text-xs text-text-primary flex gap-1.5">
-                  <span className="text-accent-blue flex-shrink-0">{i + 1}.</span>
-                  {c}
-                </li>
-              ))}
-            </ul>
+            <div>
+              <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">可执行建议</p>
+              <ul className="space-y-1">
+                {summary.suggestions.map((s, i) => (
+                  <li key={i} className="text-xs text-accent-yellow flex gap-1.5">
+                    <span>▸</span>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">可执行建议</p>
-            <ul className="space-y-1">
-              {summary.suggestions.map((s, i) => (
-                <li key={i} className="text-xs text-accent-yellow flex gap-1.5">
-                  <span>▸</span>
-                  {s}
-                </li>
-              ))}
-            </ul>
+        ) : (
+          <div className="rounded border border-accent-red/30 bg-accent-red/10 p-2 text-[10px] text-accent-red">
+            <p className="font-medium">AI总结生成失败</p>
+            <p className="mt-1">未收到后端响应，请检查登录状态、后端服务和网络连接。</p>
           </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const chainColumn = (
+    <ExecutionChainPanel pageType={pageType} pageContext={{ page_type: pageType }} />
+  );
+
+  return (
+    <div ref={shellRef} className="flex h-full min-h-0 flex-col overflow-hidden p-3">
+      {isWide ? (
+        <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
+          <div className="min-h-0 overflow-hidden">{summaryColumn}</div>
+          <div className="min-h-0 overflow-hidden border-l border-border-subtle pl-3">{chainColumn}</div>
         </div>
       ) : (
-        <div className="rounded border border-accent-red/30 bg-accent-red/10 p-2 text-[10px] text-accent-red">
-          <p className="font-medium">AI总结生成失败</p>
-          <p className="mt-1">未收到后端响应，请检查登录状态、后端服务和网络连接。</p>
-        </div>
+        <>
+          <div className="mb-2 flex shrink-0 gap-1 rounded border border-border-default bg-bg-secondary/50 p-0.5">
+            {([['summary', '⚡ AI总结'], ['chain', '🛰 执行链']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setActiveView(key)}
+                className={`flex-1 rounded px-2 py-1 text-[10px] transition-colors ${
+                  activeView === key
+                    ? 'bg-accent-blue/20 text-accent-blue'
+                    : 'text-text-muted hover:text-text-secondary'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {activeView === 'summary' ? summaryColumn : chainColumn}
+          </div>
+        </>
       )}
-      </div>
     </div>
   );
 }

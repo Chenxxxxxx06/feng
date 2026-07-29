@@ -4,10 +4,12 @@ Provides REST API for wind turbine health management.
 """
 
 import logging
+import posixpath
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -112,11 +114,34 @@ async def _ensure_sqlite_column(conn, table_name: str, column_name: str, definit
 app = FastAPI(
     title=settings.APP_NAME,
     version="2.0.0",
+    # 开放 API 文档为有意设计（开放PHM API供第三方复用）
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,
 )
-app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
+
+# /data 下仅开放前端 <img> 等直接 URL 引用的图片子目录（无法携带 Authorization 头），
+# 其余子目录（数据集原始文件、模型权重 *.pt、*.nc 等）一律 403。
+_PUBLIC_DATA_PREFIXES = (
+    "blade_images/",
+    "curated_datasets/raw/blade_images/",
+    "drone_inspection/",
+    "model_outputs/blade_yolo/",
+    "uploads/blade_diagnosis/",
+)
+
+
+class ProtectedDataFiles(StaticFiles):
+    """StaticFiles that only serves whitelisted UI image subdirectories under /data."""
+
+    async def get_response(self, path: str, scope):
+        normalized = posixpath.normpath(path.replace("\\", "/")).lstrip("/")
+        if not normalized.startswith(_PUBLIC_DATA_PREFIXES):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return await super().get_response(path, scope)
+
+
+app.mount("/data", ProtectedDataFiles(directory=DATA_DIR), name="data")
 
 # CORS configuration
 ALLOWED_ORIGINS = [
@@ -137,11 +162,15 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler with logging."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    """Global exception handler: log details server-side, return generic message + error ID."""
+    error_id = uuid.uuid4().hex[:12]
+    logger.error(
+        f"Unhandled exception [{error_id}] on {request.method} {request.url.path}: {exc}",
+        exc_info=True,
+    )
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error", "message": str(exc)}
+        content={"detail": "Internal server error", "error_id": error_id}
     )
 
 
@@ -160,6 +189,7 @@ from app.api import (
     auth, turbines, diagnosis, prediction,
     workorders, settings as settings_api, ai, personnel, knowledge,
     agent, agent_actions, agent_tools, agent_tasks, incidents, drone,
+    production, audit_demo, competition_demo,
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证管理"])
@@ -177,6 +207,12 @@ app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
 app.include_router(personnel.router, prefix="/api/personnel", tags=["人员管理"])
 app.include_router(incidents.router, prefix="/api", tags=["事件指挥"])
 app.include_router(drone.router, prefix="/api/drone", tags=["无人机巡检"])
+# 维护窗口规划
+app.include_router(production.router, prefix="/api/production", tags=["维护排程"])
+# 负责任 AI：模型卡（模型来源/指标/局限/禁用场景的公开披露）
+# 安全合规与可追溯：审计链篡改检测演示（只读，不修改数据库）
+app.include_router(audit_demo.router, prefix="/api", tags=["审计链演示"])
+app.include_router(competition_demo.router, prefix="/api", tags=["比赛演示"])
 
 # --- Frontend SPA serving (production) ---
 if FRONTEND_DIST.exists():
@@ -190,6 +226,9 @@ if FRONTEND_DIST.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def frontend_spa_fallback(full_path: str):
+        # Unknown /api/* paths must 404 as JSON, never fall back to index.html
+        if full_path == "api" or full_path.startswith("api/"):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
         requested_file = (FRONTEND_DIST / full_path).resolve()
         frontend_root = FRONTEND_DIST.resolve()
         if requested_file.is_relative_to(frontend_root) and requested_file.is_file():

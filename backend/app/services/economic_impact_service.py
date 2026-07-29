@@ -101,8 +101,18 @@ class EconomicImpactService:
             impact.rated_power_kw = (turbine.power_mw or 0) * 1000
 
         # Try to get actual power reading
-        actual_power = await self._get_actual_power(incident.turbine_id)
+        actual_power, power_is_per_unit = await self._get_actual_power(incident.turbine_id)
         if actual_power is not None and impact.rated_power_kw is not None:
+            if power_is_per_unit:
+                # CARE dataset stores per-unit normalized power; convert to kW
+                # using rated power before computing the gap. Per-unit values can be
+                # slightly negative (idle/parked turbines draw power), which would
+                # otherwise push power_gap above rated power — clamp at 0.
+                actual_power = max(0.0, actual_power * impact.rated_power_kw)
+                assumptions.append(
+                    "Actual power is per-unit normalized (CARE dataset); "
+                    f"converted to kW via rated power {impact.rated_power_kw:.0f} kW."
+                )
             impact.actual_power_kw = actual_power
             impact.power_gap_kw = max(0, impact.rated_power_kw - actual_power)
             impact.power_source = "actual_power_reading"
@@ -143,15 +153,23 @@ class EconomicImpactService:
 
         return impact
 
-    async def _get_actual_power(self, turbine_id: int) -> Optional[float]:
-        """Get the most recent actual power reading."""
+    async def _get_actual_power(self, turbine_id: int) -> tuple[Optional[float], bool]:
+        """Get the most recent actual power reading and whether it is per-unit."""
         result = await self.db.execute(
-            select(SCADARecord.power_kw)
+            select(SCADARecord)
             .where(SCADARecord.turbine_id == turbine_id)
             .order_by(SCADARecord.timestamp.desc())
             .limit(1)
         )
-        return result.scalar_one_or_none()
+        record = result.scalar_one_or_none()
+        if record is None or record.power_kw is None:
+            return None, False
+        extra = dict(record.extra or {})
+        is_per_unit = (
+            extra.get("source_dataset") == "care_to_compare_v6"
+            and abs(record.power_kw) <= 1.5
+        )
+        return record.power_kw, is_per_unit
 
     async def _calc_failure_probability(
         self,

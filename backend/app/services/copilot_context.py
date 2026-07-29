@@ -16,8 +16,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    AgentTrace,
+    DecisionPlan,
+    EvidenceNode,
     Fault,
     FaultKnowledgeNode,
+    Incident,
     RULPrediction,
     SCADARecord,
     Turbine,
@@ -47,6 +51,7 @@ class ToolSpec:
 CONTEXT_CATALOG: dict[str, ContextSpec] = {
     "dashboard": ContextSpec("dashboard", "风场监控", "风机总览、区域状态、风机运行概况"),
     "diagnosis": ContextSpec("diagnosis", "故障诊断", "活跃故障、疑似故障、振动与SCADA异常"),
+    "incident": ContextSpec("incident", "事件指挥", "当前事件阶段、证据、决策方案与执行闭环"),
     "prediction": ContextSpec("prediction", "预测决策", "RUL预测、维护优先级、预测性维修计划"),
     "workorder": ContextSpec("workorder", "维修工单", "工单状态、派工、维修闭环进展"),
     "knowledge": ContextSpec("knowledge", "知识库", "故障根因、处理方案、备件与案例知识"),
@@ -58,6 +63,7 @@ TOOL_CATALOG: dict[str, ToolSpec] = {
     "region_status_summary": ToolSpec("region_status_summary", "区域状态", "按区域汇总风机状态分布", ("dashboard",)),
     "turbine_status_list": ToolSpec("turbine_status_list", "风机状态列表", "读取风机名称、区域、状态和健康指数", ("dashboard", "diagnosis", "prediction", "workorder")),
     "current_turbine_status": ToolSpec("current_turbine_status", "当前风机状态", "读取当前风机基础信息和健康指数", ("current_turbine", "diagnosis", "prediction", "workorder")),
+    "incident_summary": ToolSpec("incident_summary", "当前事件摘要", "读取当前事件阶段、验证状态、证据和决策数量", ("incident",)),
     "recent_faults": ToolSpec("recent_faults", "故障记录", "读取近期故障、置信度、状态和详情", ("diagnosis", "current_turbine")),
     "latest_scada": ToolSpec("latest_scada", "SCADA快照", "读取当前风机最新SCADA运行参数", ("dashboard", "diagnosis", "current_turbine")),
     "vibration_summary": ToolSpec("vibration_summary", "振动摘要", "读取当前风机近期振动RMS和主频峰值", ("diagnosis", "current_turbine")),
@@ -174,6 +180,61 @@ async def _overview(db: AsyncSession) -> dict:
         "fault_turbines": fault,
         "active_faults": active_faults,
         "open_work_orders": open_work_orders,
+    }
+
+
+async def _incident_summary(db: AsyncSession, page_context: dict) -> Optional[dict]:
+    incident = None
+    raw_id = page_context.get("incident_id")
+    raw_ref = page_context.get("incident_ref")
+    if raw_id:
+        incident = (
+            await db.execute(select(Incident).where(Incident.id == int(raw_id)))
+        ).scalar_one_or_none()
+    if incident is None and raw_ref:
+        incident = (
+            await db.execute(select(Incident).where(Incident.incident_id == str(raw_ref)))
+        ).scalar_one_or_none()
+    if incident is None:
+        turbine_id = page_context.get("turbine_id")
+        stmt = select(Incident).order_by(Incident.opened_at.desc()).limit(1)
+        if turbine_id:
+            stmt = stmt.where(Incident.turbine_id == int(turbine_id))
+        incident = (await db.execute(stmt)).scalar_one_or_none()
+    if incident is None:
+        return None
+
+    evidence_count = (
+        await db.execute(
+            select(func.count(EvidenceNode.id)).where(EvidenceNode.incident_id == incident.id)
+        )
+    ).scalar() or 0
+    decision_plan_count = (
+        await db.execute(
+            select(func.count(DecisionPlan.id)).where(DecisionPlan.incident_id == incident.id)
+        )
+    ).scalar() or 0
+    trace_count = (
+        await db.execute(
+            select(func.count(AgentTrace.id)).where(AgentTrace.incident_id == incident.id)
+        )
+    ).scalar() or 0
+    return {
+        "id": incident.id,
+        "incident_id": incident.incident_id,
+        "turbine_id": incident.turbine_id,
+        "title": incident.title,
+        "severity": incident.severity,
+        "stage": incident.stage,
+        "status": incident.status,
+        "verification_status": incident.verification_status,
+        "summary": incident.summary,
+        "resolution": incident.resolution,
+        "evidence_count": evidence_count,
+        "decision_plan_count": decision_plan_count,
+        "agent_trace_count": trace_count,
+        "opened_at": _dt(incident.opened_at),
+        "updated_at": _dt(incident.updated_at),
     }
 
 
@@ -432,6 +493,8 @@ def plan_tool_names_rule_based(
             add("vibration_summary")
         if _wants(question, "scada", "功率", "风速", "温度", "转速", "状态"):
             add("latest_scada")
+    if "incident" in selected:
+        add("incident_summary")
     if "prediction" in selected:
         add("rul_summary")
         add("maintenance_plan")
@@ -461,6 +524,7 @@ async def _execute_tool(
     turbine: Optional[Turbine],
     question: str,
     recent_faults_cache: list[dict],
+    page_context: dict,
 ) -> Any:
     if tool_name == "fleet_overview":
         return await _overview(db)
@@ -470,6 +534,8 @@ async def _execute_tool(
         return await _turbine_status_list(db)
     if tool_name == "current_turbine_status":
         return _turbine_status(turbine) if turbine else None
+    if tool_name == "incident_summary":
+        return await _incident_summary(db, page_context)
     if tool_name == "recent_faults":
         return recent_faults_cache or await _recent_faults(db, turbine.id if turbine else None)
     if tool_name == "latest_scada":
@@ -525,6 +591,7 @@ async def build_copilot_context_bundle(
             turbine=turbine,
             question=question,
             recent_faults_cache=recent_faults_cache,
+            page_context=page_context,
         )
         tools.append({
             "name": tool_name,

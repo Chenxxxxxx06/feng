@@ -2,17 +2,19 @@ interface Props {
   data: any;
 }
 
-const STEP_ICONS: Record<string, string> = {
-  init_trace: '🔍',
-  collect_scada: '📡',
-  collect_alarms: '🔔',
-  vibration_diagnosis: '📊',
-  health_diagnosis: '💚',
-  query_rul: '⏳',
-  query_similar_cases: '📚',
-  build_hypotheses: '💡',
-  evaluate_evidence: '⚖️',
-  transition_decision: '🎯',
+const STATUS_LABEL: Record<string, string> = {
+  completed: '已完成',
+  running: '执行中',
+  failed: '已失败',
+  degraded: '降级',
+  pending: '待执行',
+};
+
+const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
+  completed: { bg: 'rgba(16,185,129,0.08)', color: 'var(--accent-green)' },
+  running: { bg: 'rgba(59,130,246,0.10)', color: 'var(--accent-blue)' },
+  failed: { bg: 'rgba(239,68,68,0.08)', color: 'var(--accent-red)' },
+  degraded: { bg: 'rgba(245,158,11,0.08)', color: 'var(--accent-yellow)' },
 };
 
 export default function InvestigationPanel({ data }: Props) {
@@ -21,72 +23,66 @@ export default function InvestigationPanel({ data }: Props) {
   const steps = data.steps || [];
   const completed = steps.filter((s: any) => s.status === 'completed').length;
   const degraded = steps.filter((s: any) => s.degraded).length;
+  const pct = (completed / Math.max(steps.length, 1)) * 100;
+  const barColor = data.status === 'completed'
+    ? 'var(--accent-green)'
+    : data.status === 'failed' ? 'var(--accent-red)' : 'var(--accent-blue)';
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-white">
-          🔍 自主调查进度: {completed}/{steps.length} 步骤
+    <div className="surface-card space-y-3 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="section-title">
+          自主调查进度：<span className="num">{completed}/{steps.length}</span> 步骤
         </h3>
-        <div className="flex gap-2 text-xs">
-          <span className={`px-2 py-0.5 rounded ${
-            data.status === 'completed' ? 'bg-emerald-600/30 text-emerald-300' :
-            data.status === 'failed' ? 'bg-red-600/30 text-red-300' :
-            'bg-blue-600/30 text-blue-300'
-          }`}>
-            {data.status}
+        <div className="flex flex-wrap gap-2">
+          <span className={`badge ${data.status === 'completed' ? 'badge-success' : data.status === 'failed' ? 'badge-danger' : 'badge-info'}`}>
+            {STATUS_LABEL[data.status] || data.status}
           </span>
-          {degraded > 0 && (
-            <span className="px-2 py-0.5 rounded bg-yellow-600/30 text-yellow-300">
-              {degraded} 步骤降级
-            </span>
-          )}
+          {degraded > 0 && <span className="badge badge-warning"><span className="num">{degraded}</span> 步骤降级</span>}
         </div>
       </div>
 
       {/* Progress bar */}
-      <div className="w-full bg-slate-700/50 rounded-full h-2">
-        <div
-          className={`h-2 rounded-full transition-all duration-500 ${
-            data.status === 'completed' ? 'bg-emerald-500' :
-            data.status === 'failed' ? 'bg-red-500' : 'bg-blue-500'
-          }`}
-          style={{ width: `${(completed / Math.max(steps.length, 1)) * 100}%` }}
-        />
+      <div
+        className="h-2 w-full overflow-hidden rounded-full"
+        style={{ background: 'rgba(59,130,246,0.12)' }}
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="自主调查完成度"
+      >
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: barColor }} />
       </div>
 
       {/* Step list */}
-      <div className="space-y-1">
-        {steps.map((step: any) => (
-          <div key={step.step_id}
-            className={`flex items-center gap-3 p-2 rounded text-sm transition-colors ${
-              step.status === 'completed' ? 'bg-emerald-950/10 text-emerald-200' :
-              step.status === 'running' ? 'bg-blue-950/20 text-blue-200' :
-              step.status === 'failed' ? 'bg-red-950/10 text-red-200' :
-              step.status === 'degraded' ? 'bg-yellow-950/10 text-yellow-200' :
-              'text-slate-500'
-            }`}>
-            <span className="text-lg">{STEP_ICONS[step.step_id] || '○'}</span>
-            <span className="flex-1">{step.step_name}</span>
-            <span className="text-xs text-slate-600">
-              {step.status === 'completed' ? '✓' :
-               step.status === 'failed' ? '✗' :
-               step.status === 'degraded' ? '⚠ 降级' :
-               step.status === 'running' ? '⏳' : '○'}
-            </span>
-            {step.output_summary && (
-              <span className="text-xs text-slate-400 truncate max-w-xs hidden lg:block">
-                {step.output_summary}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
+      <ol className="space-y-1">
+        {steps.map((step: any, idx: number) => {
+          const s = STATUS_STYLE[step.status];
+          return (
+            <li
+              key={step.step_id}
+              className="flex items-center gap-3 rounded-md px-2.5 py-1.5 text-[11px] transition-colors"
+              style={{ background: s?.bg, color: s?.color || 'var(--text-muted)' }}
+              title={step.output_summary || step.step_name}
+            >
+              <span className="num w-5 flex-shrink-0 text-right opacity-70" aria-hidden="true">{idx + 1}</span>
+              <span className="flex-1 truncate">{step.step_name}</span>
+              <span className="flex-shrink-0 text-[10px] font-semibold">{STATUS_LABEL[step.status] || step.status}</span>
+              {step.output_summary && (
+                <span className="hidden max-w-xs flex-shrink truncate text-[10px] text-text-muted lg:block">
+                  {step.output_summary}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
 
       {data.trace_id && (
-        <div className="text-xs text-slate-600">
-          Trace: <code>{data.trace_id}</code>
-        </div>
+        <p className="text-[10px] text-text-muted">
+          Trace：<code className="num" title={data.trace_id}>{data.trace_id}</code>
+        </p>
       )}
     </div>
   );

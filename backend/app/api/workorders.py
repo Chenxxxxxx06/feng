@@ -1,7 +1,8 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from smtplib import SMTPRecipientsRefused
+
+from aiosmtplib import SMTPRecipientsRefused
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from app.database import get_db
 from app.models import (
     Fault,
     FaultKnowledgeNode,
+    Incident,
     MaintenanceRecord,
     NotificationConfig,
     NotificationLog,
@@ -60,6 +62,12 @@ WORKORDER_TRANSITIONS: dict[str, set[str]] = {
 }
 # P0-12: Closing requires verification — only these transition paths require verification
 CLOSE_TRANSITIONS: set[tuple[str, str]] = {("completed", "closed")}
+# Fields a client may explicitly clear (send null) on update — nullable in the model
+# and safe to blank. status/priority/title/cost_estimate must never be nulled.
+CLEARABLE_UPDATE_FIELDS: set[str] = {
+    "description", "assignee", "assignee_id", "assignee_email",
+    "fault_type", "due_date", "cost_actual", "downtime_hours",
+}
 
 
 def _model_fields() -> set[str]:
@@ -673,7 +681,8 @@ async def _try_ai_analysis(
                 fault_data,
                 model=user.model_preference,
                 api_key=effective_key,
-                api_provider=user.api_provider or get_settings().DASHSCOPE_API_KEY,
+                api_provider=user.api_provider
+                or ("通义千问 DashScope" if get_settings().DASHSCOPE_API_KEY else None),
                 base_url=user.api_base_url,
             ),
             timeout=20.0,
@@ -749,6 +758,7 @@ async def list_workorders(
     priority: str | None = Query(None),
     turbine_id: int | None = Query(None),
     fault_id: int | None = Query(None),
+    incident_id: int | None = Query(None),
     include_deleted: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
@@ -765,6 +775,8 @@ async def list_workorders(
         q = q.where(WorkOrder.turbine_id == turbine_id)
     if fault_id:
         q = q.where(WorkOrder.fault_id == fault_id)
+    if incident_id:
+        q = q.where(WorkOrder.incident_id == incident_id)
     result = await db.execute(q)
     return [WorkOrderResponse.model_validate(wo) for wo in result.scalars().all()]
 
@@ -812,6 +824,13 @@ async def create_workorder(
         if fault.turbine_id != data.turbine_id:
             raise HTTPException(status_code=400, detail="Work order turbine_id must match fault turbine_id")
 
+    if data.incident_id is not None:
+        incident = await db.get(Incident, data.incident_id)
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if incident.turbine_id != data.turbine_id:
+            raise HTTPException(status_code=400, detail="Work order turbine_id must match incident turbine_id")
+
     if payload.get("assignee") or payload.get("assignee_id"):
         payload.setdefault("status", "assigned")
 
@@ -845,7 +864,13 @@ async def update_workorder(
         raise HTTPException(status_code=404, detail="WorkOrder not found")
 
     before_status = wo.status
-    update_data = data.model_dump(exclude_none=True)
+    # exclude_unset keeps explicit nulls so clients can clear fields;
+    # nulls are only applied to fields that are nullable in the model.
+    update_data = {
+        key: val
+        for key, val in data.model_dump(exclude_unset=True).items()
+        if val is not None or key in CLEARABLE_UPDATE_FIELDS
+    }
     if data.status and data.status not in VALID_STATUS:
         raise HTTPException(status_code=400, detail="Invalid work order status")
 
@@ -904,7 +929,13 @@ async def update_workorder(
             turbine.last_maintenance = now
             # Also set downtime_hours on work order if not already set
             if wo.downtime_hours is None and wo.created_at:
-                wo.downtime_hours = max(0.5, (now - wo.created_at).total_seconds() / 3600)
+                # SQLite returns naive datetimes; normalize to UTC before subtracting
+                created_at = (
+                    wo.created_at
+                    if wo.created_at.tzinfo
+                    else wo.created_at.replace(tzinfo=timezone.utc)
+                )
+                wo.downtime_hours = max(0.5, (now - created_at).total_seconds() / 3600)
 
     await db.commit()
     await db.refresh(wo)
@@ -1060,13 +1091,14 @@ async def send_workorder_email(
         except EmailConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SMTPRecipientsRefused as exc:
-            refused = exc.recipients or {}
+            # aiosmtplib: exc.recipients is a list of SMTPRecipientRefused errors
+            refused = exc.recipients or []
             details = []
-            for email, error in refused.items():
-                code, message = error
+            for error in refused:
+                message = error.message
                 if isinstance(message, bytes):
                     message = message.decode("utf-8", errors="replace")
-                details.append(f"{email}: {code} {message}")
+                details.append(f"{error.recipient}: {error.code} {message}")
             error_message = "Recipient mailbox unavailable or refused: " + "; ".join(details)
             logs.append({"recipient_email": recipient, "status": "failed", "error_message": error_message})
             db.add(

@@ -581,9 +581,6 @@ function compactChatMessages(messages: Array<{ role: string; content: string }>)
 }
 
 function fallbackProviderModels(provider?: AIProviderConfig | null) {
-  const key = provider?.provider?.toLowerCase() || '';
-  if (key === 'qwen' || key === 'dashscope') return ['qwen-plus', 'qwen-turbo', 'qwen3.6-flash'];
-  if (key === 'deepseek') return ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash'];
   return [provider?.default_model].filter(Boolean) as string[];
 }
 
@@ -594,6 +591,7 @@ type AssistantMode = 'chat' | 'agent';
 const DATA_CONTEXT_OPTIONS = [
   { id: 'dashboard', label: '风场监控', hint: '总览 / 区域 / 风机' },
   { id: 'diagnosis', label: '故障诊断', hint: '故障 / 置信度 / 振动' },
+  { id: 'incident', label: '事件指挥', hint: '事件阶段 / 证据 / 决策' },
   { id: 'prediction', label: '预测决策', hint: 'RUL / 维护优先级' },
   { id: 'workorder', label: '维修工单', hint: '状态 / 派工 / 闭环' },
   { id: 'knowledge', label: '知识库', hint: '根因 / 方案 / 备件' },
@@ -657,12 +655,22 @@ async function postCopilotStream(
     buffer = lines.pop() || '';
     for (const line of lines) {
       if (!line.trim()) continue;
-      onEvent(JSON.parse(line) as CopilotStreamEvent);
+      try {
+        onEvent(JSON.parse(line) as CopilotStreamEvent);
+      } catch {
+        // Skip malformed NDJSON lines so one bad line does not break the stream.
+      }
     }
   }
 
   buffer += decoder.decode();
-  if (buffer.trim()) onEvent(JSON.parse(buffer) as CopilotStreamEvent);
+  if (buffer.trim()) {
+    try {
+      onEvent(JSON.parse(buffer) as CopilotStreamEvent);
+    } catch {
+      // Ignore malformed trailing data.
+    }
+  }
 }
 
 export default function CopilotFAB({ initialMessage = '', pageContext }: { initialMessage?: string; pageContext?: PageContext }) {
@@ -707,10 +715,13 @@ function renderMessageContent(text: string, isProgress?: boolean) {
       {lines.map((line, i) => {
         if (!line.trim()) return <br key={i} />;
         const html = line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
           .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
           .replace(/`(.+?)`/g, '<code class="bg-bg-card px-1 rounded text-[10px]">$1</code>');
         if (line.startsWith('> ')) {
-          return <div key={i} className="text-text-muted border-l-2 border-border-default pl-2 text-[11px]" dangerouslySetInnerHTML={{ __html: html.slice(2) }} />;
+          return <div key={i} className="text-text-muted border-l-2 border-border-default pl-2 text-[11px]" dangerouslySetInnerHTML={{ __html: html.replace(/^&gt; /, '') }} />;
         }
         if (/^\d+\.\s/.test(line) || line.startsWith('- ')) {
           return <div key={i} className="flex gap-1"><span className="text-accent-blue">•</span><span dangerouslySetInnerHTML={{ __html: html.replace(/^\d+\.\s|-\s/, '') }} /></div>;
@@ -795,6 +806,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
     setModelDraft(model);
     if (selectedProvider) applySessionModel(selectedProvider, model);
   }, [applySessionModel, modelLocked, selectedProvider]);
+
+  useEffect(() => {
+    if (pageContext?.page_type !== 'incident') return;
+    setSelectedContextIds((current) => {
+      if (current.includes('incident')) return current;
+      const next = [...current, 'incident'];
+      localStorage.setItem(DATA_CONTEXT_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [pageContext?.page_type]);
 
   const toggleDataContext = useCallback((contextId: string) => {
     setSelectedContextIds((current) => {
@@ -1345,8 +1366,20 @@ function renderMessageContent(text: string, isProgress?: boolean) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!loading) handleSend();
+    }
   };
+
+  const isIncidentPage = pageContext?.page_type === 'incident';
+  const quickPrompts = mode === 'agent'
+    ? (isIncidentPage
+      ? ['分析当前异常并给出下一步', '查询当前维护方案', '查看待执行工单']
+      : ['查看故障诊断页面', '查看维护人员工作量', '查看所有工单'])
+    : (isIncidentPage
+      ? ['总结当前事件', '解释当前证据', '评估下一步风险']
+      : ['总结当前状态', '最近故障', '健康趋势分析']);
 
   return (
     <>
@@ -1355,13 +1388,16 @@ function renderMessageContent(text: string, isProgress?: boolean) {
         <button
           ref={fabRef}
           data-copilot-ignore
+          data-tour="copilot"
+          aria-label="打开风调 AI 助手"
+          title="风调 AI 助手（可拖动）"
           onMouseDown={onFabMouseDown}
           onClick={() => { if (!fabHasMoved.current) setOpen(true); }}
           className="fixed z-[850] w-14 h-14 rounded-full bg-accent-blue shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center select-none"
           style={{ left: fabPos.x, top: fabPos.y, boxShadow: '0 0 20px rgba(59,130,246,0.4)' }}
         >
-          <span className="text-lg font-bold">AI</span>
-          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-accent-green border-2 border-bg-primary animate-pulse" />
+          <span className="text-lg font-bold" aria-hidden="true">AI</span>
+          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-accent-green border-2 border-bg-primary animate-pulse" aria-hidden="true" />
         </button>
       )}
 
@@ -1389,7 +1425,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 </p>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="text-text-muted hover:text-text-primary text-lg">✕</button>
+            <button onClick={() => setOpen(false)} aria-label="关闭 AI 助手面板" title="关闭" className="text-text-muted hover:text-text-primary text-lg">✕</button>
           </div>
 
           {/* Mode Toggle — AI对话 / Agent诊断 */}
@@ -1542,7 +1578,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
           {/* Messages */}
           <div ref={chatRef} className="flex-1 overflow-auto p-4 space-y-3 text-xs">
             {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div key={m.id || m._progressId || `msg-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] rounded-lg px-3 py-2 ${
                   m.role === 'user'
                     ? 'bg-accent-blue/20 text-text-primary'
@@ -1630,7 +1666,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   mode === 'agent'
-                    ? '输入任务指令，如：查看故障诊断页面'
+                    ? (isIncidentPage ? '输入任务指令，如：分析当前异常并给出下一步' : '输入任务指令，如：查看故障诊断页面')
                     : '输入问题, 如: 当前风场运行状态如何?'
                 }
                 className="flex-1 rounded-lg border border-accent-blue/25 bg-bg-deep px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent-cyan focus:outline-none focus:ring-2 focus:ring-accent-cyan/15"
@@ -1659,10 +1695,7 @@ function renderMessageContent(text: string, isProgress?: boolean) {
               </button>
             </div>
             <div className="flex gap-2 mt-2">
-                {(mode === 'agent'
-                ? ['查看故障诊断页面', '查看维护人员工作量', '查看所有工单']
-                : ['总结当前状态', '最近故障', '健康趋势分析']
-              ).map((q) => (
+              {quickPrompts.map((q) => (
                 <button
                   key={q}
                   onClick={() => { setInput(q); }}

@@ -473,6 +473,9 @@ def generate_ics(scheduled: list[dict], title: str = "风电运维计划") -> st
         "X-WR-TIMEZONE:Asia/Shanghai",
     ]
 
+    # RFC 5545 requires DTSTAMP on every VEVENT (UTC, basic format).
+    dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
     for item in scheduled:
         if not item.get("scheduled_date"):
             continue
@@ -480,10 +483,12 @@ def generate_ics(scheduled: list[dict], title: str = "风电运维计划") -> st
         sd = item["scheduled_date"]
         slot = item.get("time_slot", "08:00-12:00")
         start_hour = 8 if "08" in slot else 13 if "13" in slot else 17
-        end_hour = start_hour + min(4, item.get("downtime_hours", 4))
+        end_hour = start_hour + max(1, int(min(4, item.get("downtime_hours", 4))))
 
-        dt_start = f"{sd}T{start_hour:02d}:00:00"
-        dt_end = f"{sd}T{end_hour:02d}:00:00"
+        # RFC 5545 basic format: YYYYMMDDTHHMMSS (no separators).
+        day = str(sd).replace("-", "")
+        dt_start = f"{day}T{start_hour:02d}0000"
+        dt_end = f"{day}T{end_hour:02d}0000"
         uid = f"fengdiao-{item['turbine_id']}-{item['component']}-{sd}@phm"
         summary = f"[{'急' if item['priority']=='urgent' else '高' if item['priority']=='high' else '中'}] {item['turbine_name']} {item['component']}: {item['action']}"
         description = (
@@ -499,6 +504,7 @@ def generate_ics(scheduled: list[dict], title: str = "风电运维计划") -> st
         lines.extend([
             "BEGIN:VEVENT",
             f"UID:{uid}",
+            f"DTSTAMP:{dtstamp}",
             f"DTSTART:{dt_start}",
             f"DTEND:{dt_end}",
             f"SUMMARY:{summary}",

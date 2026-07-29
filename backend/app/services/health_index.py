@@ -117,12 +117,18 @@ def _performance_score(scada: list[dict]) -> dict:
     issues = 0
     total = max(len(scada), 1)
 
+    # Detect per-unit normalized power (e.g. CARE dataset: |power| ≤ 1.5 p.u.)
+    # so the low-power threshold scales with rated power instead of absolute kW.
+    power_values = [abs(r.get("power_kw") or 0) for r in scada]
+    is_per_unit = bool(power_values) and max(power_values) <= 1.5
+    low_power_threshold = 0.2 if is_per_unit else 500  # <0.2×rated (p.u.) / <500 kW
+
     for r in scada:
         wind = r.get("wind_speed_ms", 0) or 0
         power = r.get("power_kw", 0) or 0
 
-        # Low power at rated wind (>10 m/s wind but <50% rated power)
-        if wind > 10 and power < 500:
+        # Low power at rated wind (>10 m/s wind but below low-power threshold)
+        if wind > 10 and power < low_power_threshold:
             issues += 2
 
         # High generator temperature

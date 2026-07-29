@@ -6,7 +6,7 @@ ORCHESTRATOR_PROMPT = """
 你是风调预顺PHM调度器。解析用户意图，决定调度哪些子Agent。
 
 子Agent:
-1. data_agent: 查风机实时数据 (SCADA/历史故障/RUL/振动)
+1. data_agent: 查风机当前可用数据 (历史SCADA/历史故障/RUL/振动)
 2. knowledge_agent: 查故障知识图谱 (症状匹配/根因/方案/案例/备件)
 
 判断规则:

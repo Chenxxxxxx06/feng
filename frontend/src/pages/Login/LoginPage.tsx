@@ -37,17 +37,20 @@ export default function LoginPage() {
         backgroundSize: 'cover',
       }}
     >
-      <div className="w-96 p-8 ops-panel shadow-2xl">
+      <div className="w-96 max-w-[calc(100vw-32px)] p-8 ops-panel shadow-2xl">
         <div className="text-center mb-8">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent-blue/20 text-sm font-bold text-accent-cyan shadow-glow-blue">PHM</div>
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent-blue/20 text-sm font-bold text-accent-cyan shadow-glow-blue" aria-hidden="true">PHM</div>
           <h1 className="text-xl font-bold mt-3 tracking-wider gradient-text">风调预顺</h1>
           <p className="text-text-muted text-xs mt-1">PHM预测性运维系统</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
+            <label htmlFor="login-username" className="sr-only">用户名</label>
             <input
+              id="login-username"
               type="text"
+              autoComplete="username"
               placeholder="用户名"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -57,8 +60,11 @@ export default function LoginPage() {
           </div>
           {isRegister && (
             <div>
+              <label htmlFor="login-email" className="sr-only">邮箱</label>
               <input
+                id="login-email"
                 type="email"
+                autoComplete="email"
                 placeholder="邮箱"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -68,8 +74,11 @@ export default function LoginPage() {
             </div>
           )}
           <div>
+            <label htmlFor="login-password" className="sr-only">密码</label>
             <input
+              id="login-password"
               type="password"
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
               placeholder="密码"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -78,13 +87,14 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && <p className="text-accent-red text-xs">{error}</p>}
+          {error && (
+            <p className="text-accent-red text-xs" role="alert">
+              {error}
+            </p>
+          )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="ops-btn ops-btn-primary w-full py-2.5 text-sm disabled:opacity-50"
-          >
+          <button type="submit" disabled={loading} className="ops-btn ops-btn-primary w-full py-2.5 text-sm disabled:opacity-50">
+            {loading && <span className="btn-spinner" aria-hidden="true" />}
             {loading ? '处理中...' : isRegister ? '注册' : '登录'}
           </button>
         </form>
@@ -92,7 +102,8 @@ export default function LoginPage() {
         <p className="text-center mt-4 text-xs text-text-muted">
           {isRegister ? '已有账号？' : '没有账号？'}
           <button
-            onClick={() => setIsRegister(!isRegister)}
+            type="button"
+            onClick={() => { setIsRegister(!isRegister); setError(''); }}
             className="ml-1 text-accent-blue hover:underline"
           >
             {isRegister ? '去登录' : '去注册'}
